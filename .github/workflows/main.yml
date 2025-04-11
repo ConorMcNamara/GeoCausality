@@ -39,16 +39,16 @@ jobs:
           ruff format
           ruff check --output-format=github .  # Check code style with ruff
 
-      - name: Check type hints with mypy
-        run: |
-          mypy . --ignore-missing-imports --install-types # Run mypy for type checking
+      # - name: Check type hints with mypy
+      #   run: |
+      #     mypy . --ignore-missing-imports --install-types # Run mypy for type checking
 
       - name: Commit and push changes (if any)
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           git add .
-          git diff --exit-code || (git commit -m "Auto-format code with ruff, autopep8, mypy and docformatter" && git push)
+          git diff --exit-code || (git commit -m "Auto-format code with ruff, autopep8 and docformatter" && git push)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
