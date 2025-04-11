@@ -1,0 +1,16 @@
+# Sphinx dependencies
+sphinx
+sphinx-book-theme
+sphinxcontrib-bibtex<2.0.0
+sphinx-copybutton
+sphinx-gallery
+
+pandas
+numpy
+matplotlib
+scipy
+scikit-learn
+cvxpy
+screenot
+statsmodels
+git+https://github.com/ConorMcNamara/GeoCausality.git
