@@ -33,33 +33,33 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        data: pandas or polars data frame
+        data : pandas or polars data frame
             Our geo-based time-series data
-        geo_variable: str
+        geo_variable : str
             The name of the variable representing our geo-data
-        test_geos: list, optional
+        test_geos : list, optional
             The geos that were assigned treatment. If not provided, rely on treatment variable
-        control_geos: list, optional
+        control_geos : list, optional
             The geos that were withheld from treatment. If not provided, rely on treatment variable
-        treatment_variable: str, optional
+        treatment_variable : str, optional
             If test and control geos are not provided, the column denoting which is test and control. Assumes that
             1 is coded as "treatment" and 0 is coded as "control"
-        date_variable: str
+        date_variable : str
             The name of the variable representing our dates
-        pre_period: str
+        pre_period : str
             The time period used to train our models. Starts from the first date in our data to pre_period.
-        post_period: str
+        post_period : str
             The time period used to evaluate our performance. Starts from post_period to the last date in our data
-        y_variable: str
+        y_variable : str
             The name of the variable representing the results of our data
-        alpha: float, default=0.1
+        alpha : float, default=0.1
             The alpha level for our experiment
-        msrp: float, default=0.0
+        msrp : float, default=0.0
             The average MSRP of our sale. Used to calculate incremental revenue.
-        spend: float, default=0.0
+        spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
-        lambda_: float, default=0.1
+        lambda_ : float, default=0.1
             Ridge parameter to use
 
         Notes
@@ -272,9 +272,9 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        groupby_x: pandas DataFrame
+        groupby_x : pandas DataFrame
             Contains the average y-variable of our control geos
-        groupby_y: pandas Series
+        groupby_y : pandas Series
             Contains the average cumulative y-variable of our test geos
 
         Returns
@@ -300,9 +300,9 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        groupby_x: pandas DataFrame
+        groupby_x : pandas DataFrame
             Contains the average y-variable of our control geos
-        groupby_y: pandas Series
+        groupby_y : pandas Series
             Contains the average cumulative y-variable of our test geos
 
         Returns
@@ -341,11 +341,11 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        x: numpy array
+        x : numpy array
             Our predictors
-        p: numpy array
+        p : numpy array
             x.T * v * x
-        q: numpy array
+        q : numpy array
             -1.0 * y.T * v * x + (penalty / 2) * diagonal_matrix of our differences
 
         Returns

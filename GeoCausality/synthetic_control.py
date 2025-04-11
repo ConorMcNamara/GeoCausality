@@ -32,30 +32,30 @@ class SyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        data: pandas or polars data frame
+        data : pandas or polars data frame
             Our geo-based time-series data
-        geo_variable: str
+        geo_variable : str
             The name of the variable representing our geo-data
-        test_geos: list, optional
+        test_geos : list, optional
             The geos that were assigned treatment. If not provided, rely on treatment variable
-        control_geos: list, optional
+        control_geos : list, optional
             The geos that were withheld from treatment. If not provided, rely on treatment variable
-        treatment_variable: str, optional
+        treatment_variable : str, optional
             If test and control geos are not provided, the column denoting which is test and control. Assumes that
             1 is coded as "treatment" and 0 is coded as "control"
-        date_variable: str
+        date_variable : str
             The name of the variable representing our dates
-        pre_period: str
+        pre_period : str
             The time period used to train our models. Starts from the first date in our data to pre_period.
-        post_period: str
+        post_period : str
             The time period used to evaluate our performance. Starts from post_period to the last date in our data
-        y_variable: str
+        y_variable : str
             The name of the variable representing the results of our data
-        alpha: float, default=0.1
+        alpha : float, default=0.1
             The alpha level for our experiment
-        msrp: float, default=0.0
+        msrp : float, default=0.0
             The average MSRP of our sale. Used to calculate incremental revenue.
-        spend: float, default=0.0
+        spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
 
@@ -217,11 +217,11 @@ class SyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        w: numpy array
+        w : numpy array
             An array containing the weights applied to our X variables
-        x: numpy array
+        x : numpy array
             A multidimensional array containing the geos in our control group
-        y: numpy array
+        y : numpy array
             An array containing the values we are trying to predict
 
         Returns
@@ -236,11 +236,11 @@ class SyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        w: numpy array
+        w : numpy array
             An array containing the weights applied to our X variables
-        x: numpy array
+        x : numpy array
             A multidimensional array containing the geos in our control group
-        y: numpy array
+        y : numpy array
             An array containing the values we are trying to predict
 
         Returns
@@ -255,9 +255,9 @@ class SyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        y: numpy array
+        y : numpy array
             An array containing the values we are trying to predict
-        x: numpy array
+        x : numpy array
             A multidimensional array containing the geos in our control group
 
         Returns
@@ -386,30 +386,30 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        data: pandas or polars data frame
+        data : pandas or polars data frame
             Our geo-based time-series data
-        geo_variable: str
+        geo_variable : str
             The name of the variable representing our geo-data
-        test_geos: list, optional
+        test_geos : list, optional
             The geos that were assigned treatment. If not provided, rely on treatment variable
-        control_geos: list, optional
+        control_geos : list, optional
             The geos that were withheld from treatment. If not provided, rely on treatment variable
-        treatment_variable: str, optional
+        treatment_variable : str, optional
             If test and control geos are not provided, the column denoting which is test and control. Assumes that
             1 is coded as "treatment" and 0 is coded as "control"
-        date_variable: str
+        date_variable : str
             The name of the variable representing our dates
-        pre_period: str
+        pre_period : str
             The time period used to train our models. Starts from the first date in our data to pre_period.
-        post_period: str
+        post_period : str
             The time period used to evaluate our performance. Starts from post_period to the last date in our data
-        y_variable: str
+        y_variable : str
             The name of the variable representing the results of our data
-        alpha: float, default=0.1
+        alpha : float, default=0.1
             The alpha level for our experiment
-        msrp: float, default=0.0
+        msrp : float, default=0.0
             The average MSRP of our sale. Used to calculate incremental revenue.
-        spend: float, default=0.0
+        spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
 
@@ -562,11 +562,11 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        v: numpy array
+        v : numpy array
             Our V matrix
-        x: numpy array
+        x : numpy array
             Our predictors
-        y: numpy array
+        y : numpy array
             What we're trying to predict
 
         Returns
@@ -595,11 +595,11 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        x: numpy array
+        x : numpy array
             Our predictors
-        p: numpy array
+        p : numpy array
             x.T * v * x
-        q: numpy array
+        q : numpy array
             y.T * v * x
 
         Returns
@@ -619,13 +619,13 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        groupby_x: pandas DataFrame
+        groupby_x : pandas DataFrame
             Contains the average y-variable of our control geos
-        groupby_y: pandas Series
+        groupby_y : pandas Series
             Contains the average cumulative y-variable of our test geos
-        daily_x: pandas DataFrame
+        daily_x : pandas DataFrame
             Contains the daily y-variable of our control geos
-        daily_y: pandas Series
+        daily_y : pandas Series
             Contains the daily cumulative y-variable of our test geos
 
         Returns
@@ -685,15 +685,15 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        x: numpy array
+        x : numpy array
             Our initial guess for the V matrix
-        groupby_x: numpy array
+        groupby_x : numpy array
             Contains the average y-variable of our control geos
-        groupby_y: numpy array
+        groupby_y : numpy array
             Contains the average y-variable of our test geos
-        daily_x: numpy array
+        daily_x : numpy array
             Contains the daily y-variable of our control geos
-        daily_y: numpy array
+        daily_y : numpy array
             Contains the daily cumulative y-variable of our test geos
 
         Returns
@@ -711,13 +711,13 @@ class SyntheticControlV(EconometricEstimator):
 
         Parameters
         ----------
-        W: numpy array
+        W : numpy array
             Vector of the control weights
-        x: numpy array
+        x : numpy array
             Matrix of the time series of the outcome variable with each
             column corresponding to a control unit and the rows are the time
             steps.
-        y: numpy array
+        y : numpy array
             Column vector giving the outcome variable values over time for the
             treated unit
 

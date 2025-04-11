@@ -33,33 +33,33 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        data: pandas or polars data frame
+        data : pandas or polars data frame
             Our geo-based time-series data
-        geo_variable: str
+        geo_variable : str
             The name of the variable representing our geo-data
-        test_geos: list, optional
+        test_geos : list, optional
             The geos that were assigned treatment. If not provided, rely on treatment variable
-        control_geos: list, optional
+        control_geos : list, optional
             The geos that were withheld from treatment. If not provided, rely on treatment variable
-        treatment_variable: str, optional
+        treatment_variable : str, optional
             If test and control geos are not provided, the column denoting which is test and control. Assumes that
             1 is coded as "treatment" and 0 is coded as "control"
-        date_variable: str
+        date_variable : str
             The name of the variable representing our dates
-        pre_period: str
+        pre_period : str
             The time period used to train our models. Starts from the first date in our data to pre_period.
-        post_period: str
+        post_period : str
             The time period used to evaluate our performance. Starts from post_period to the last date in our data
-        y_variable: str
+        y_variable : str
             The name of the variable representing the results of our data
-        alpha: float, default=0.1
+        alpha : float, default=0.1
             The alpha level for our experiment
-        msrp: float, default=0.0
+        msrp : float, default=0.0
             The average MSRP of our sale. Used to calculate incremental revenue.
-        spend: float, default=0.0
+        spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
-        lambda_: float, default=0.1
+        lambda_ : float, default=0.1
             Ridge parameter to use. If not specified, then it is calculated through cross-validation
 
         Notes
@@ -314,11 +314,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        V_matrix: numpy array
+        V_matrix : numpy array
             Our V matrix
-        x: numpy array
+        x : numpy array
             Our predictors
-        y: numpy array
+        y : numpy array
             What we're trying to predict
 
         Returns
@@ -352,13 +352,13 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        a: numpy array
+        a : numpy array
             Our y values
-        b: numpy array
+        b : numpy array
             Our x values
-        w: numpy array
+        w : numpy array
             Weights matrix
-        lambda_: numpy array
+        lambda_ : numpy array
             Our penalty term
 
         Returns
@@ -418,11 +418,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        X: pandas DataFrame
+        X : pandas DataFrame
             A dataframe containing the values of our training data
-        lambda_min_ratio: float, default=1e-08
+        lambda_min_ratio : float, default=1e-08
             The scaling factor
-        n_lambda: int, default=20
+        n_lambda : int, default=20
             The number of lambdas we wish to return
 
         Returns
