@@ -743,7 +743,7 @@ class SyntheticControlV(EconometricEstimator):
                 f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
                 f"or `roas`"
             )
-        ci_alpha = self._get_ci_print()
+        # ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict = {
                 "Variant": [np.sum(self.results["test"][self.y_variable])],
