@@ -14,7 +14,7 @@ class FixedEffects(EconometricEstimator):
 
     def __init__(
         self,
-        data: Union[pl.DataFrame, pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,

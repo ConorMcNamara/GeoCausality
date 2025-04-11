@@ -3,6 +3,7 @@ from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 import statsmodels.api as sm
 from plotly.subplots import make_subplots
@@ -15,7 +16,7 @@ from GeoCausality._base import MLEstimator
 class GeoX(MLEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,

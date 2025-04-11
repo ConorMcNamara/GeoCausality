@@ -3,6 +3,7 @@ from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize, Bounds, LinearConstraint
@@ -15,7 +16,7 @@ class SyntheticControl(EconometricEstimator):
 
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,
@@ -180,7 +181,7 @@ class SyntheticControl(EconometricEstimator):
             "Variant": [np.sum(self.results["test"])],
             "Baseline": [np.sum(self.results["counterfactual"])],
         }
-        ci_alpha = self._get_ci_print()
+        # ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Incremental"]

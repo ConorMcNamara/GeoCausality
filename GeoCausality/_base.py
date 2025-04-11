@@ -11,7 +11,7 @@ class Estimator(abc.ABC):
 
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,
@@ -126,7 +126,7 @@ class EconometricEstimator(Estimator, ABC):
 
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,
@@ -210,7 +210,7 @@ class MLEstimator(Estimator, abc.ABC):
 
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,

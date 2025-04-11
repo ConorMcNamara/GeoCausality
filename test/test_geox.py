@@ -68,7 +68,7 @@ class TestGeoX:
         with pytest.raises(
             ValueError,
             match="Cannot measure blarg. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-            f"or `roas`",
+            "or `roas`",
         ):
             geo_x.summarize(lift="blarg")
 

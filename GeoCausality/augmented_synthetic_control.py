@@ -3,6 +3,7 @@ from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize, Bounds, LinearConstraint
@@ -15,7 +16,7 @@ from GeoCausality.utils import HoldoutSplitter
 class AugmentedSyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame],
+        data: Union[pd.DataFrame, pl.DataFrame],
         geo_variable: str = None,
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,
@@ -221,7 +222,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
                 f"or `roas`"
             )
-        ci_alpha = self._get_ci_print()
+        # ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict = {
                 "Variant": [np.sum(self.results["test"][self.y_variable])],
@@ -400,8 +401,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
             Y_t.index = X_t.index
             w = self._get_weights(V_matrix=V, x=X_t.to_numpy(), y=Y_t.to_numpy())
             this_res = list()
-            for l in lambdas:
-                ridge_weights = self._get_ridge_weights(a=Y_t, b=X_t, w=w, lambda_=l)
+            for lambda_ in lambdas:
+                ridge_weights = self._get_ridge_weights(a=Y_t, b=X_t, w=w, lambda_=lambda_)
                 W_aug = w + ridge_weights
                 err = (Y_v - X_v @ W_aug).pow(2).sum()
                 this_res.append(err.item())
