@@ -1,0 +1,10 @@
+numpy
+pandas
+tabulate
+statsmodels
+linearmodels
+scikit-learn
+scipy
+plotly
+pytest
+black
