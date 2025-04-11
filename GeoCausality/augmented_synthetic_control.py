@@ -7,7 +7,7 @@ import polars as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize, Bounds, LinearConstraint
-from tabulate import tabulate
+from tabulate import tabulate # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 from GeoCausality.utils import HoldoutSplitter
@@ -17,14 +17,14 @@ class AugmentedSyntheticControl(EconometricEstimator):
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
-        geo_variable: str = None,
+        geo_variable: str = "geo",
         test_geos: Optional[list[str]] = None,
         control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = None,
+        treatment_variable: Optional[str] = "is_treatment",
         date_variable: str = "date",
-        pre_period: str = None,
-        post_period: str = None,
-        y_variable: str = None,
+        pre_period: str = "2021-01-01",
+        post_period: str = "2021-01-02",
+        y_variable: str = "y",
         alpha: float = 0.1,
         msrp: float = 0.0,
         spend: float = 0.0,
