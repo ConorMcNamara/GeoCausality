@@ -60,6 +60,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install flake8 pytest
           if exist requirements.txt (pip install -r requirements.txt) # windows version
+        shell: pwsh # Added shell: pwsh
 
       - name: Lint with flake8
         run: |
