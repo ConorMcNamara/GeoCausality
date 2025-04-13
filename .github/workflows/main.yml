@@ -166,17 +166,18 @@ jobs:
           pip install docstring-generator  # Install the docstring generator tool
         shell: pwsh
 
-      - name: Add docstring-generator to PATH
+      - name: Find docstring-generator executable
+        id: find-exe
         run: |
           $sitePackages = & { pip show docstring-generator } | Select-String "Location:" | ForEach-Object {$_.Line.Split(":")[1].Trim()}
-          echo "Adding '$sitePackages' to PATH"
-          echo "::add-path::$sitePackages"
+          $exePath = Join-Path $sitePackages "docstring_generator.py" # Or possibly just "docstring_generator" depending on the package structure
+          echo "::set-output name=executable::$exePath"
         shell: pwsh
 
       - name: Generate NumPy docstrings
         run: |
           # Example usage:  This will modify files in place.  Adjust arguments as needed.
-          docstring-generator -s numpy -w -p ./**/*.py
+          python ${{ steps.find-exe.outputs.executable }} -s numpy -w -p ./**/*.py
         shell: pwsh
 
       - name: Commit changes (if any)
