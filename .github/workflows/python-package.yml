@@ -79,12 +79,6 @@ jobs:
           pytest
         shell: pwsh # Added shell: pwsh
 
-      - name: Generate NumPy docstrings
-        run: |
-          # Example usage:  This will modify files in place.  Adjust arguments as needed.
-          docstring-generator -s numpy -w -p ./**/*.py
-        shell: pwsh
-
       - name: Commit changes (if any)
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
