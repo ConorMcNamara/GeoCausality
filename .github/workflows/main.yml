@@ -10,7 +10,10 @@ on:
 
 jobs:
   formatting:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -53,7 +56,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   generate-docstrings:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
     needs: formatting  # Ensures this job runs after the formatting job
 
     steps:
