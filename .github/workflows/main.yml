@@ -121,7 +121,7 @@ jobs:
 
       - name: Auto-Fix and Check Python Formatting
         run: |
-          find . -name "*.py" -print0 | xargs -0 -n 1 autopep8 --in-place --aggressive --max-line-length 120
+          autopep8 --max-line-length 120 **/*.py
         continue-on-error: true
         shell: pwsh
 
@@ -166,10 +166,11 @@ jobs:
           pip install docstring-generator  # Install the docstring generator tool
         shell: pwsh
 
-      - name: Add to PATH
+      - name: Add docstring-generator to PATH
         run: |
-          $sitePackages = pip show docstring-generator | Select-String "Location:" | ForEach-Object {$_.Line.Split(":")[1].Trim()};
-          $env:PATH = "$env:PATH;$sitePackages"
+          $sitePackages = & { pip show docstring-generator } | Select-String "Location:" | ForEach-Object {$_.Line.Split(":")[1].Trim()}
+          echo "Adding '$sitePackages' to PATH"
+          echo "::add-path::$sitePackages"
         shell: pwsh
 
       - name: Generate NumPy docstrings
