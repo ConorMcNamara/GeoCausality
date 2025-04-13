@@ -9,10 +9,10 @@ on:
       - main  # Trigger on pull requests targeting the 'main' branch
 
 jobs:
-  formatting:
+  formatting_linux:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        os: [ ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -55,12 +55,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  generate-docstrings:
+  generate-docstrings_linux:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
     runs-on: ${{ matrix.os }}
-    needs: formatting  # Ensures this job runs after the formatting job
+    needs: formatting_linux  # Ensures this job runs after the formatting job
 
     steps:
       - name: Checkout code
@@ -92,3 +92,75 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  formatting_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'  # Specify Python version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff autopep8 docformatter  # Install formatting tools
+
+      - name: Check Python Formatting
+        run: |
+          autopep8 --check --max-line-length 120 **\*.py
+          ruff check --format=github .
+
+      - name: Auto-Fix and Check Python Formatting
+        run: |
+          autopep8 --in-place --aggressive --max-line-length 120 **\*.py
+          ruff format .
+          ruff check --format=github .
+        continue-on-error: true
+
+      - name: Auto-format docstrings
+        run: |
+          Get-ChildItem -Path . -Filter "*.py" -Recurse | ForEach-Object {
+            docformatter --in-place --wrap-summaries 120 --wrap-descriptions 120 $_.FullName
+          }
+        shell: pwsh # Use PowerShell
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git diff --staged --exit-code && echo "No changes to commit" || (git commit -am "Fix: Auto-format code" && git push)
+        if: ${{ github.event_name != 'pull_request' }}
+
+  generate-docstrings_windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install docstring-generator  # Install the docstring generator tool
+
+      - name: Generate NumPy docstrings
+        run: |
+          # Example usage:  This will modify files in place.  Adjust arguments as needed.
+          docstring-generator -s numpy -w -p ./**/*.py
+        shell: pwsh
+
+      - name: Commit changes (if any)
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git diff --staged --exit-code && echo "No changes to commit" || (git commit -am "Feat: Generate NumPy docstrings" && git push)
+        if: ${{ github.event_name != 'pull_request' }}
