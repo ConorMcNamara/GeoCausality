@@ -38,6 +38,7 @@ jobs:
     - name: Test with pytest
       run: |
         pytest
+
   build_windows:
     strategy:
       fail-fast: false
@@ -78,11 +79,4 @@ jobs:
         run: |
           pytest
         shell: pwsh # Added shell: pwsh
-
-      - name: Commit changes (if any)
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git diff --staged --exit-code && echo "No changes to commit" || (git commit -am "Feat: Generate NumPy docstrings" && git push)
-        if: ${{ github.event_name != 'pull_request' }}
 
