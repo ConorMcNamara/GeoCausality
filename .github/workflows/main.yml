@@ -9,10 +9,10 @@ on:
       - main  # Trigger on pull requests targeting the 'main' branch
 
 jobs:
-  formatting_linux:
+  formatting:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest]
+        os: [ ubuntu-latest]
         python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
     runs-on: ${{ matrix.os }}
 
@@ -59,10 +59,10 @@ jobs:
   generate-docstrings_linux:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest]
         python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
     runs-on: ${{ matrix.os }}
-    needs: formatting_linux  # Ensures this job runs after the formatting job
+    needs: formatting  # Ensures this job runs after the formatting job
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -93,96 +93,3 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  formatting_windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}  # Specify Python version
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff autopep8 docformatter  # Install formatting tools
-        shell: pwsh
-
-      - name: Check Python Formatting
-        run: |
-          ruff check . --output-format=github
-        shell: pwsh
-
-      - name: Auto-Fix and Check Python Formatting
-        run: |
-          autopep8 --max-line-length 120 **/*.py
-        continue-on-error: true
-        shell: pwsh
-
-      - name: Check code style with ruff
-        run: |
-          ruff format .
-          ruff check . --output-format=github
-
-      - name: Auto-format docstrings
-        run: |
-          Get-ChildItem -Path . -Filter "*.py" -Recurse | ForEach-Object {
-            docformatter --in-place --wrap-summaries 120 --wrap-descriptions 120 $_.FullName
-          }
-        shell: pwsh # Use PowerShell
-
-      - name: Commit changes
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git diff --staged --exit-code && echo "No changes to commit" || (git commit -am "Fix: Auto-format code" && git push)
-        if: ${{ github.event_name != 'pull_request' }}
-
-  generate-docstrings_windows:
-    runs-on: windows-latest
-    needs: formatting_windows  # Ensures this job runs after the formatting job
-    strategy:
-      matrix:
-        python-version: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}  # Specify Python version
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install docstring-generator  # Install the docstring generator tool
-        shell: pwsh
-
-      - name: Find docstring-generator executable
-        id: find-exe
-        run: |
-          $sitePackages = & { pip show docstring-generator } | Select-String "Location:" | ForEach-Object {$_.Line.Split(":")[1].Trim()}
-          $exePath = Join-Path $sitePackages "docstring_generator.py" # Or possibly just "docstring_generator" depending on the package structure
-          echo "::set-output name=executable::$exePath"
-        shell: pwsh
-
-      - name: Generate NumPy docstrings
-        run: |
-          # Example usage:  This will modify files in place.  Adjust arguments as needed.
-          python ${{ steps.find-exe.outputs.executable }} -s numpy -w -p ./**/*.py
-        shell: pwsh
-
-      - name: Commit changes (if any)
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git diff --staged --exit-code && echo "No changes to commit" || (git commit -am "Feat: Generate NumPy docstrings" && git push)
-        if: ${{ github.event_name != 'pull_request' }}
