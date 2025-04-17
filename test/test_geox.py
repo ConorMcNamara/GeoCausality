@@ -5,7 +5,6 @@ from GeoCausality import geox
 
 
 class TestGeoX:
-
     @staticmethod
     def test_geox_results() -> None:
         data_path = "https://raw.githubusercontent.com/juanitorduz/website_projects/master/data/zipcodes_data.csv"
@@ -40,12 +39,8 @@ class TestGeoX:
             estimate,
             abs=1e-6,
         )
-        assert results["cumulative_incrementality_ci_upper"] == pytest.approx(
-            ci_upper, abs=1e-6
-        )
-        assert results["cumulative_incrementality_ci_lower"] == pytest.approx(
-            ci_lower, abs=1e-6
-        )
+        assert results["cumulative_incrementality_ci_upper"] == pytest.approx(ci_upper, abs=1e-6)
+        assert results["cumulative_incrementality_ci_lower"] == pytest.approx(ci_lower, abs=1e-6)
         assert results["p_value"] == pytest.approx(p_value, abs=1e-10)
 
     @staticmethod

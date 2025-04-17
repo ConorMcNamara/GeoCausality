@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import statsmodels.api as sm
 from plotly.subplots import make_subplots
 from scipy.stats import t as t_dist
-from tabulate import tabulate # type: ignore
+from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import MLEstimator
 
@@ -87,9 +87,7 @@ class GeoX(MLEstimator):
         intercept_train = sm.add_constant(self.pre_control)
         self.model = sm.OLS(self.pre_test.values, intercept_train.values).fit()
         self.intercept_test = sm.add_constant(self.post_control.values)
-        model_summary = self.model.get_prediction(self.intercept_test).summary_frame(
-            alpha=self.alpha
-        )
+        model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
         self.post_test["counterfactual"] = model_summary["mean"]
         self.results = {
             "date": self.test_dates,
@@ -98,23 +96,14 @@ class GeoX(MLEstimator):
             "counterfactual": self.post_test["counterfactual"],
             "counterfactual_ci_lower": model_summary["obs_ci_lower"],
             "counterfactual_ci_upper": model_summary["obs_ci_upper"],
-            "incrementality": self.post_test["orders"]
-            - self.post_test["counterfactual"],
-            "incrementality_ci_lower": self.post_test["orders"]
-            - model_summary["obs_ci_upper"],
-            "incrementality_ci_upper": self.post_test["orders"]
-            - model_summary["obs_ci_lower"],
+            "incrementality": self.post_test["orders"] - self.post_test["counterfactual"],
+            "incrementality_ci_lower": self.post_test["orders"] - model_summary["obs_ci_upper"],
+            "incrementality_ci_upper": self.post_test["orders"] - model_summary["obs_ci_lower"],
         }
-        self.results["cumulative_incrementality"] = self.results[
-            "incrementality"
-        ].cumsum()
+        self.results["cumulative_incrementality"] = self.results["incrementality"].cumsum()
         ci_dict = self._get_cumulative_cis(rescale)
-        self.results["cumulative_incrementality_ci_lower"] = ci_dict[
-            "cumulative_ci_lower"
-        ]
-        self.results["cumulative_incrementality_ci_upper"] = ci_dict[
-            "cumulative_ci_upper"
-        ]
+        self.results["cumulative_incrementality_ci_lower"] = ci_dict["cumulative_ci_lower"]
+        self.results["cumulative_incrementality_ci_upper"] = ci_dict["cumulative_ci_upper"]
         self.results["p_value"] = ci_dict["p_value"]
         return self
 
@@ -140,9 +129,7 @@ class GeoX(MLEstimator):
         if lift in ["incremental", "absolute"]:
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [
-                f"""{ceil(self.results["cumulative_incrementality"].iloc[-1]):,}"""
-            ]
+            table_dict["Lift"] = [f"""{ceil(self.results["cumulative_incrementality"].iloc[-1]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""{ceil(self.results["cumulative_incrementality_ci_lower"][-1]):,}"""
             ]
@@ -153,26 +140,39 @@ class GeoX(MLEstimator):
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Relative"]
             table_dict["Lift"] = [
-                f"""{round(
-                    float(self.results["cumulative_incrementality"].iloc[-1]) * 100
-                    / np.sum(self.results["counterfactual"]), 2)}%"""
+                f"""{
+                    round(
+                        float(self.results["cumulative_incrementality"].iloc[-1])
+                        * 100
+                        / np.sum(self.results["counterfactual"]),
+                        2,
+                    )
+                }%"""
             ]
             table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{round(
-                     self.results["cumulative_incrementality_ci_lower"][-1] * 100
-                    / np.sum(self.results["counterfactual"]), 2)}%"""
+                f"""{
+                    round(
+                        self.results["cumulative_incrementality_ci_lower"][-1]
+                        * 100
+                        / np.sum(self.results["counterfactual"]),
+                        2,
+                    )
+                }%"""
             ]
             table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{round(
-                    self.results["cumulative_incrementality_ci_upper"][-1] * 100
-                    / np.sum(self.results["counterfactual"]), 2)}%"""
+                f"""{
+                    round(
+                        self.results["cumulative_incrementality_ci_upper"][-1]
+                        * 100
+                        / np.sum(self.results["counterfactual"]),
+                        2,
+                    )
+                }%"""
             ]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [
-                f"""${round(self.results["cumulative_incrementality"].iloc[-1] * self.msrp, 2):,}"""
-            ]
+            table_dict["Lift"] = [f"""${round(self.results["cumulative_incrementality"].iloc[-1] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["cumulative_incrementality_ci_lower"][-1] * self.msrp, 2):,}"""
             ]
@@ -223,19 +223,13 @@ class GeoX(MLEstimator):
         var_params = []
         for t in range(test_len):
             # Sum of parameter variance terms from eqn 5 of Kerman 2017.
-            var_t = (
-                cumulative_control_t.iloc[t,].values
-                @ param_covariance
-                @ cumulative_control_t.iloc[t,].values.T
-            )
+            var_t = cumulative_control_t.iloc[t,].values @ param_covariance @ cumulative_control_t.iloc[t,].values.T
             var_params.append(var_t)
         var_params = np.array(var_params).reshape(test_len, 1)
         var_from_params = var_params * pow(one_to_t, 2)
         sigma_square = self.model.scale
         var_from_observations = one_to_t * sigma_square
-        delta_mean = (
-            rescale * np.array(self.results["cumulative_incrementality"]).flatten()
-        )
+        delta_mean = rescale * np.array(self.results["cumulative_incrementality"]).flatten()
         delta_var = var_from_params + var_from_observations
         delta_scale = rescale * np.sqrt(delta_var).flatten()
         delta_df = self.model.df_resid
@@ -274,9 +268,7 @@ class GeoX(MLEstimator):
         Our three plots determining the results
         """
         self.dates = sorted(self.data[self.date_variable].unique())
-        marketing_start = [
-            date for date in self.dates if date >= pd.to_datetime(self.post_period)
-        ]
+        marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         control_data = pd.concat([self.pre_control, self.post_control])
         counterfactual = self.model.predict(sm.add_constant(control_data))
         total_fig = make_subplots(
@@ -292,9 +284,7 @@ class GeoX(MLEstimator):
             [
                 go.Scatter(
                     x=self.dates,
-                    y=np.concatenate(
-                        [self.pre_test["orders"], self.post_test["orders"]]
-                    ),
+                    y=np.concatenate([self.pre_test["orders"], self.post_test["orders"]]),
                     marker={"color": "blue"},
                     mode="lines",
                     name="Actual",
@@ -328,10 +318,7 @@ class GeoX(MLEstimator):
                 ),
             ]
         )
-        residuals = (
-            np.concatenate([self.pre_test["orders"], self.post_test["orders"]])
-            - counterfactual
-        )
+        residuals = np.concatenate([self.pre_test["orders"], self.post_test["orders"]]) - counterfactual
         middle_fig = go.Figure(
             [
                 go.Scatter(

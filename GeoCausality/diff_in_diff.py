@@ -5,13 +5,12 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import statsmodels.formula.api as smf
-from tabulate import tabulate # type: ignore
+from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 
 
 class DiffinDiff(EconometricEstimator):
-
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
@@ -94,8 +93,7 @@ class DiffinDiff(EconometricEstimator):
         )
         self.n_dates = len(
             self.groupby_data.loc[
-                (self.groupby_data["is_treatment"] == 1)
-                & (self.groupby_data["treatment_period"] == 1)
+                (self.groupby_data["is_treatment"] == 1) & (self.groupby_data["treatment_period"] == 1)
             ]
         )
         return self
@@ -114,15 +112,9 @@ class DiffinDiff(EconometricEstimator):
             lift_ci_upper=cis[1],
         )
         self.results["incrementality"] = self.results["lift"] * self.n_dates
-        self.results["incrementality_ci_lower"] = (
-            self.results["lift_ci_lower"] * self.n_dates
-        )
-        self.results["incrementality_ci_upper"] = (
-            self.results["lift_ci_upper"] * self.n_dates
-        )
-        self.results["p_value"] = float(
-            self.model.pvalues[f"{self.treatment_variable}:treatment_period"]
-        )
+        self.results["incrementality_ci_lower"] = self.results["lift_ci_lower"] * self.n_dates
+        self.results["incrementality_ci_upper"] = self.results["lift_ci_upper"] * self.n_dates
+        self.results["p_value"] = float(self.model.pvalues[f"{self.treatment_variable}:treatment_period"])
         return self
 
     def summarize(self, lift: str) -> None:
@@ -140,9 +132,7 @@ class DiffinDiff(EconometricEstimator):
                 f"or `roas`"
             )
         table_dict = {
-            "Variant": [
-                self.results["control"] * self.n_dates + self.results["incrementality"]
-            ],
+            "Variant": [self.results["control"] * self.n_dates + self.results["incrementality"]],
             "Baseline": [self.results["control"] * self.n_dates],
         }
         ci_alpha = self._get_ci_print()
@@ -150,46 +140,34 @@ class DiffinDiff(EconometricEstimator):
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Incremental"]
             table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{ceil(self.results["incrementality_ci_lower"]):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{ceil(self.results["incrementality_ci_upper"]):,}"""
-            ]
+            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
+            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
         elif lift == "absolute":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Absolute"]
             table_dict["Lift"] = [f"""{ceil(self.results["lift"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{ceil(self.results["lift_ci_lower"]):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{ceil(self.results["lift_ci_upper"]):,}"""
-            ]
+            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["lift_ci_lower"]):,}"""]
+            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["lift_ci_upper"]):,}"""]
         elif lift == "relative":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Relative"]
             table_dict["Lift"] = [
-                f"""{round(
-                    self.results["incrementality"] * 100
-                    / (self.results["control"] * self.n_dates), 2)}%"""
+                f"""{round(self.results["incrementality"] * 100 / (self.results["control"] * self.n_dates), 2)}%"""
             ]
             table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{round(
-                    self.results["incrementality_ci_lower"] * 100
-                    / (self.results["control"] * self.n_dates), 2)}%"""
+                f"""{
+                    round(self.results["incrementality_ci_lower"] * 100 / (self.results["control"] * self.n_dates), 2)
+                }%"""
             ]
             table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{round(
-                    self.results["incrementality_ci_upper"] * 100
-                    / (self.results["control"] * self.n_dates), 2)}%"""
+                f"""{
+                    round(self.results["incrementality_ci_upper"] * 100 / (self.results["control"] * self.n_dates), 2)
+                }%"""
             ]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [
-                f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""
-            ]
+            table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
             ]

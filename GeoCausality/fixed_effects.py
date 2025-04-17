@@ -5,13 +5,12 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from linearmodels.panel import PanelOLS
-from tabulate import tabulate # type: ignore
+from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 
 
 class FixedEffects(EconometricEstimator):
-
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
@@ -81,24 +80,12 @@ class FixedEffects(EconometricEstimator):
 
     def pre_process(self) -> "FixedEffects":
         super().pre_process()
-        self.data["campaign_treatment"] = (
-            self.data["treatment_period"] * self.data[self.treatment_variable]
-        )
+        self.data["campaign_treatment"] = self.data["treatment_period"] * self.data[self.treatment_variable]
         self.n_dates = int(
-            self.data.loc[
-                self.data["campaign_treatment"] == 1, "campaign_treatment"
-            ].sum()
-            / len(
-                self.data.loc[
-                    self.data["campaign_treatment"] == 1, f"{self.geo_variable}"
-                ].unique()
-            )
+            self.data.loc[self.data["campaign_treatment"] == 1, "campaign_treatment"].sum()
+            / len(self.data.loc[self.data["campaign_treatment"] == 1, f"{self.geo_variable}"].unique())
         )
-        self.n_geos = len(
-            self.data.loc[
-                self.data["campaign_treatment"] == 1, f"{self.geo_variable}"
-            ].unique()
-        )
+        self.n_geos = len(self.data.loc[self.data["campaign_treatment"] == 1, f"{self.geo_variable}"].unique())
         return self
 
     def generate(self) -> "FixedEffects":
@@ -106,9 +93,7 @@ class FixedEffects(EconometricEstimator):
             f"{self.y_variable} ~ campaign_treatment + EntityEffects + TimeEffects",
             data=self.data.set_index([self.geo_variable, self.date_variable]),
         )
-        self.model = model.fit(
-            cov_type="clustered", cluster_entity=True, cluster_time=True
-        )
+        self.model = model.fit(cov_type="clustered", cluster_entity=True, cluster_time=True)
         cis = self.model.conf_int(1 - self.alpha)
         self.results = {
             "test": float(self.model.params.iloc[0]),
@@ -116,15 +101,9 @@ class FixedEffects(EconometricEstimator):
             "lift": float(self.model.params.iloc[0]),
             "lift_ci_lower": float(cis["lower"].iloc[0]),
             "lift_ci_upper": float(cis["upper"].iloc[0]),
-            "incrementality": float(
-                self.model.params.iloc[0] * self.n_dates * self.n_geos
-            ),
-            "incrementality_ci_lower": float(
-                cis["lower"].iloc[0] * self.n_dates * self.n_geos
-            ),
-            "incrementality_ci_upper": float(
-                cis["upper"].iloc[0] * self.n_dates * self.n_geos
-            ),
+            "incrementality": float(self.model.params.iloc[0] * self.n_dates * self.n_geos),
+            "incrementality_ci_lower": float(cis["lower"].iloc[0] * self.n_dates * self.n_geos),
+            "incrementality_ci_upper": float(cis["upper"].iloc[0] * self.n_dates * self.n_geos),
             "p_value": float(self.model.pvalues.iloc[0]),
         }
         return self
@@ -139,8 +118,7 @@ class FixedEffects(EconometricEstimator):
             "roas",
         ]:
             raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
+                f"Cannot measure {lift}. Choose one of `absolute`,  `incremental`, `cost-per`, `revenue` or `roas`"
             )
         table_dict = {}
         ci_alpha = self._get_ci_print()
@@ -148,28 +126,18 @@ class FixedEffects(EconometricEstimator):
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Incremental"]
             table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{ceil(self.results["incrementality_ci_lower"]):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{ceil(self.results["incrementality_ci_upper"]):,}"""
-            ]
+            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
+            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
         elif lift == "absolute":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Absolute"]
             table_dict["Lift"] = [f"""{ceil(self.results["lift"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{ceil(self.results["lift_ci_lower"]):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{ceil(self.results["lift_ci_upper"]):,}"""
-            ]
+            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["lift_ci_lower"]):,}"""]
+            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["lift_ci_upper"]):,}"""]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [
-                f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""
-            ]
+            table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
             ]

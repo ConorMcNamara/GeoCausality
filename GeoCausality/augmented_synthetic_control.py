@@ -7,7 +7,7 @@ import polars as pl
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.optimize import minimize, Bounds, LinearConstraint
-from tabulate import tabulate # type: ignore
+from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 from GeoCausality.utils import HoldoutSplitter
@@ -93,8 +93,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self.dates = sorted(self.data[self.date_variable].unique())
         x_sum = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 0)
-                & (self.data["treatment_period"] == 0),
+                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
                 [self.y_variable, self.geo_variable, self.date_variable],
             ]
             .groupby([self.geo_variable])[self.y_variable]
@@ -106,29 +105,22 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self.groupby_x = groupby_x.drop([self.geo_variable], axis=0)
         y_sum = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 1)
-                & (self.data["treatment_period"] == 0),
+                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
                 [self.y_variable, self.date_variable],
             ]
             .groupby([self.date_variable])[self.y_variable]
             .sum()
             .reset_index()
         )
-        self.groupby_y = pd.Series(
-            y_sum[self.y_variable].mean(), name=-1, index=[self.y_variable]
-        )
+        self.groupby_y = pd.Series(y_sum[self.y_variable].mean(), name=-1, index=[self.y_variable])
         day_x = self.data.loc[
-            (self.data[self.treatment_variable] == 0)
-            & (self.data["treatment_period"] == 0),
+            (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
             [self.y_variable, self.geo_variable, self.date_variable],
         ]
-        self.daily_x = day_x.pivot(index=self.date_variable, columns=self.geo_variable)[
-            [self.y_variable]
-        ]
+        self.daily_x = day_x.pivot(index=self.date_variable, columns=self.geo_variable)[[self.y_variable]]
         daily_y = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 1)
-                & (self.data["treatment_period"] == 0),
+                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
                 [self.y_variable, self.date_variable],
             ]
             .groupby([self.date_variable])[self.y_variable]
@@ -143,8 +135,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self.model = self._create_model()
         self.actual_pre = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 1)
-                & (self.data["treatment_period"] == 0),
+                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
                 [self.y_variable, self.date_variable],
             ]
             .groupby([self.date_variable])[self.y_variable]
@@ -153,8 +144,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         )
         self.actual_post = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 1)
-                & (self.data["treatment_period"] == 1),
+                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 1),
                 [self.y_variable, self.date_variable],
             ]
             .groupby([self.date_variable])[self.y_variable]
@@ -163,8 +153,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         )
         control_pre = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 0)
-                & (self.data["treatment_period"] == 0),
+                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
                 [self.y_variable, self.date_variable, self.geo_variable],
             ]
             .groupby([self.date_variable, self.geo_variable])[self.y_variable]
@@ -173,37 +162,29 @@ class AugmentedSyntheticControl(EconometricEstimator):
         )
         control_post = (
             self.data.loc[
-                (self.data[self.treatment_variable] == 0)
-                & (self.data["treatment_period"] == 1),
+                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 1),
                 [self.y_variable, self.date_variable, self.geo_variable],
             ]
             .groupby([self.date_variable, self.geo_variable])[self.y_variable]
             .sum()
             .reset_index()
         )
-        control_pre_pivot = control_pre.pivot(
-            index=self.geo_variable, columns=self.date_variable
-        )[[self.y_variable]].T
-        control_post_pivot = control_post.pivot(
-            index=self.geo_variable, columns=self.date_variable
-        )[[self.y_variable]].T
+        control_pre_pivot = control_pre.pivot(index=self.geo_variable, columns=self.date_variable)[[self.y_variable]].T
+        control_post_pivot = control_post.pivot(index=self.geo_variable, columns=self.date_variable)[
+            [self.y_variable]
+        ].T
         prediction_pre = control_pre_pivot @ self.model
         prediction_post = control_post_pivot @ self.model
         self.prediction_post = (
-            prediction_post.reset_index()
-            .drop(["level_0"], axis=1)
-            .rename({0: self.y_variable}, axis=1)
+            prediction_post.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
         )
         self.prediction_pre = (
-            prediction_pre.reset_index()
-            .drop(["level_0"], axis=1)
-            .rename({0: self.y_variable}, axis=1)
+            prediction_pre.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
         )
         self.results = {
             "test": self.actual_post,
             "counterfactual": self.prediction_post,
-            "lift": self.actual_post[self.y_variable]
-            - self.prediction_post[self.y_variable],
+            "lift": self.actual_post[self.y_variable] - self.prediction_post[self.y_variable],
         }
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
         return self
@@ -238,41 +219,32 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 "Metric": [self.y_variable],
                 "Lift Type": ["Relative"],
                 "Lift": [
-                    f"""{round(
-                        float(self.results["incrementality"]) * 100
-                        / (np.sum(self.results["counterfactual"][self.y_variable])), 2)}%"""
+                    f"""{
+                        round(
+                            float(self.results["incrementality"])
+                            * 100
+                            / (np.sum(self.results["counterfactual"][self.y_variable])),
+                            2,
+                        )
+                    }%"""
                 ],
             }
         elif lift == "revenue":
             table_dict = {
-                "Variant": [
-                    f"""${round(np.sum(self.results["test"][self.y_variable]) * self.msrp, 2):,}"""
-                ],
+                "Variant": [f"""${round(np.sum(self.results["test"][self.y_variable]) * self.msrp, 2):,}"""],
                 "Baseline": [
-                    f"""${
-                    round(
-                        (np.sum(self.results["counterfactual"][self.y_variable])
-                         )
-                        * self.msrp, 2):,}"""
+                    f"""${round((np.sum(self.results["counterfactual"][self.y_variable])) * self.msrp, 2):,}"""
                 ],
                 "Metric": ["Revenue"],
                 "Lift Type ": ["Incremental"],
-                "Lift": [
-                    f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""
-                ],
+                "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
             }
         else:
             roas_lift, _, _ = self._get_roas()
             table_dict = {
-                "Variant": [
-                    f"""${round(self.spend / np.sum(self.results["test"][self.y_variable]), 2)}"""
-                ],
+                "Variant": [f"""${round(self.spend / np.sum(self.results["test"][self.y_variable]), 2)}"""],
                 "Baseline": [
-                    f"""${
-                    round(self.spend
-                          / (
-                              np.sum(self.results["counterfactual"][self.y_variable])
-                          ), 2)}"""
+                    f"""${round(self.spend / (np.sum(self.results["counterfactual"][self.y_variable])), 2)}"""
                 ],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
@@ -286,17 +258,13 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return roas_lift, 1, 2
 
     def _create_model(self) -> np.array:
-        daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal = (
-            self._normalize()
-        )
+        daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal = self._normalize()
         daily_x_demean.columns = groupby_x_normal.columns
         x_stacked = pd.concat([daily_x_demean, groupby_x_normal], axis=0)
         y_stacked = pd.concat([daily_y_demean, groupby_y_normal], axis=0)
         if self.lambda_ is None:
             lambdas = self._generate_lambdas(self.daily_x)
-            lambdas, errors_means, errors_se = self._cross_validate(
-                self.daily_x, self.daily_y, lambdas
-            )
+            lambdas, errors_means, errors_se = self._cross_validate(self.daily_x, self.daily_y, lambdas)
             self.lambda_ = lambdas[errors_means.argmin()].item()
         n_r, _ = self.daily_x.shape
         V_mat = np.diag(np.full(n_r, 1 / n_r))
@@ -305,9 +273,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
             x=self.daily_x.to_numpy(),
             y=self.daily_y.to_numpy(),
         )
-        W_ridge = self._get_ridge_weights(
-            y_stacked.to_numpy(), x_stacked.to_numpy(), W, self.lambda_
-        )
+        W_ridge = self._get_ridge_weights(y_stacked.to_numpy(), x_stacked.to_numpy(), W, self.lambda_)
         return W + W_ridge
 
     def _get_weights(self, V_matrix: np.array, x: np.array, y: np.array) -> np.array:
@@ -346,9 +312,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _get_ridge_weights(
-        a: np.array, b: np.array, w: np.array, lambda_: np.array
-    ) -> np.array:
+    def _get_ridge_weights(a: np.array, b: np.array, w: np.array, lambda_: np.array) -> np.array:
         """Calculate the ridge adjustment to the weights.
 
         Parameters
@@ -388,9 +352,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         groupby_y_normal = groupby_y_demean.divide(groupby_x_std, axis=0) * daily_x_std
         return daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal
 
-    def _cross_validate(
-        self, X: np.array, Y: np.array, lambdas: np.ndarray, holdout_len: int = 1
-    ) -> tuple:
+    def _cross_validate(self, X: np.array, Y: np.array, lambdas: np.ndarray, holdout_len: int = 1) -> tuple:
         """Method that calculates the mean error and standard error to the mean
         error using a cross-validation procedure for the given ridge parameter
         values.
@@ -412,9 +374,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return lambdas, means, ses
 
     @staticmethod
-    def _generate_lambdas(
-        X: pd.DataFrame, lambda_min_ratio: float = 1e-08, n_lambda: int = 20
-    ) -> np.array:
+    def _generate_lambdas(X: pd.DataFrame, lambda_min_ratio: float = 1e-08, n_lambda: int = 20) -> np.array:
         """Generate a suitable set of lambdas to run the cross-validation procedure on.
 
         Parameters
@@ -502,12 +462,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - (
-            np.array(self.prediction_post[self.y_variable])
-        )
-        marketing_start = [
-            date for date in self.dates if date >= pd.to_datetime(self.post_period)
-        ]
+        cum_resids = np.array(self.actual_post[self.y_variable]) - (np.array(self.prediction_post[self.y_variable]))
+        marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [
                 go.Scatter(

@@ -8,7 +8,6 @@ import polars as pl
 
 
 class Estimator(abc.ABC):
-
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
@@ -123,7 +122,6 @@ class Estimator(abc.ABC):
 
 
 class EconometricEstimator(Estimator, ABC):
-
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
@@ -188,13 +186,9 @@ class EconometricEstimator(Estimator, ABC):
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
-            self.data[self.treatment_variable] = int(
-                self.data[self.geo_variable].isin(self.test_geos)
-            )
+            self.data[self.treatment_variable] = int(self.data[self.geo_variable].isin(self.test_geos))
         elif self.control_geos is not None:
-            self.data[self.treatment_variable] = 1 - int(
-                self.data[self.geo_variable].isin(self.control_geos)
-            )
+            self.data[self.treatment_variable] = 1 - int(self.data[self.geo_variable].isin(self.control_geos))
         else:
             pass
         self.data["treatment_period"] = np.where(
@@ -207,7 +201,6 @@ class EconometricEstimator(Estimator, ABC):
 
 
 class MLEstimator(Estimator, abc.ABC):
-
     def __init__(
         self,
         data: Union[pd.DataFrame, pl.DataFrame],
@@ -280,40 +273,24 @@ class MLEstimator(Estimator, abc.ABC):
 
     def pre_process(self) -> "MLEstimator":
         pre_control = self.data[
-            (self.data[self.date_variable] <= self.pre_period)
-            & (self.data[self.treatment_variable] == 0)
+            (self.data[self.date_variable] <= self.pre_period) & (self.data[self.treatment_variable] == 0)
         ]
-        self.pre_control = (
-            pre_control.groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
-        )
+        self.pre_control = pre_control.groupby([self.date_variable])[self.y_variable].sum().reset_index()
         self.pre_control.drop([self.date_variable], axis=1, inplace=True)
         pre_test = self.data[
-            (self.data[self.date_variable] <= self.pre_period)
-            & (self.data[self.treatment_variable] == 1)
+            (self.data[self.date_variable] <= self.pre_period) & (self.data[self.treatment_variable] == 1)
         ]
-        self.pre_test = (
-            pre_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        )
+        self.pre_test = pre_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
         self.pre_test.drop([self.date_variable], axis=1, inplace=True)
         post_control = self.data[
-            (self.data[self.date_variable] >= self.post_period)
-            & (self.data[self.treatment_variable] == 0)
+            (self.data[self.date_variable] >= self.post_period) & (self.data[self.treatment_variable] == 0)
         ]
-        self.post_control = (
-            post_control.groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
-        )
+        self.post_control = post_control.groupby([self.date_variable])[self.y_variable].sum().reset_index()
         self.test_dates = self.post_control[self.date_variable]
         self.post_control.drop([self.date_variable], axis=1, inplace=True)
         post_test = self.data[
-            (self.data[self.date_variable] >= self.post_period)
-            & (self.data[self.treatment_variable] == 1)
+            (self.data[self.date_variable] >= self.post_period) & (self.data[self.treatment_variable] == 1)
         ]
-        self.post_test = (
-            post_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        )
+        self.post_test = post_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
         self.post_test.drop([self.date_variable], axis=1, inplace=True)
         return self
