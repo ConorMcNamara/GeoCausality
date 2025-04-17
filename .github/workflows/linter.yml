@@ -1,0 +1,64 @@
+name: Formatting and Docstring Generation
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to the 'main' branch
+      - master
+  pull_request:
+    branches:
+      - main  # Trigger on pull requests targeting the 'main' branch
+      - master
+
+jobs:
+  formatting:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest]
+        python-version: [ "3.12" ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}  # Adjust the version as needed
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff autopep8 mypy pydocstringformatter # Install required tools
+
+      - name: Check code style with ruff
+        run: |
+          ruff format .
+          ruff check --output-format=github .  # Check code style with ruff
+
+      - name: Auto-format code with autopep8
+        run: |
+          autopep8 --in-place --aggressive --max-line-length 120 **/*.py  # Fix formatting issues with autopep8
+
+      - name: Generate docstrings with numpydoc style
+        run: |
+          find . -name "*.py" ! -path "./docs/auto_examples/*" -exec pydocstringformatter -w --style numpydoc --numpydoc-section-order --numpydoc-name-type-spacing --numpydoc-section-spacing --numpydoc-section-hyphen-length --no-final-period {} +
+
+      # - name: Check type hints with mypy
+      #   run: |
+      #     mypy . --ignore-missing-imports --install-types # Run mypy for type checking
+
+      - name: Commit and push changes (if any)
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "Auto-format code with ruff, autopep8 and pydocstringformatter"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
