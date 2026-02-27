@@ -1,12 +1,10 @@
 from math import ceil
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotly.graph_objects as go
+import polars as pl
 from plotly.subplots import make_subplots
-
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -15,11 +13,11 @@ from GeoCausality._base import EconometricEstimator
 class RobustSyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -28,10 +26,10 @@ class RobustSyntheticControl(EconometricEstimator):
         msrp: float = 0.0,
         spend: float = 0.0,
         lambda_: float = 0.1,
-        threshold: Optional[float] = None,
-        sv_count: Optional[int] = None,
+        threshold: float | None = None,
+        sv_count: int | None = None,
     ) -> None:
-        """A class to run Penalized Synthetic Control for our geo-test.
+        """A class to run Robust Synthetic Control for our geo-test.
 
         Parameters
         ----------
@@ -178,7 +176,7 @@ class RobustSyntheticControl(EconometricEstimator):
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
         return self
 
-    def _create_model(self) -> np.array:
+    def _create_model(self) -> np.ndarray:
         """Generates the weights used to predict our counterfactual
 
         Returns
@@ -261,12 +259,12 @@ class RobustSyntheticControl(EconometricEstimator):
             }
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
-    def _svd(self, groupby_x_transposed: np.array) -> np.array:
+    def _svd(self, groupby_x_transposed: np.ndarray) -> np.ndarray:
         """Performs singular value decomposition of our groupby_x_transposed matrix
 
         Parameters
@@ -357,7 +355,7 @@ class RobustSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - (np.array(self.prediction_post[self.y_variable]))
+        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [

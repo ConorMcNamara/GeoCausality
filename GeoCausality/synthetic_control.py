@@ -1,12 +1,11 @@
 from math import ceil
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotly.graph_objects as go
+import polars as pl
 from plotly.subplots import make_subplots
-from scipy.optimize import minimize, Bounds, LinearConstraint
+from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -15,11 +14,11 @@ from GeoCausality._base import EconometricEstimator
 class SyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -188,13 +187,13 @@ class SyntheticControl(EconometricEstimator):
             table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
     @staticmethod
-    def loss_square(w: np.array, x: np.array, y: np.array) -> np.array:
+    def loss_square(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Loss function being the sum of squared distances
 
         Parameters
@@ -213,7 +212,7 @@ class SyntheticControl(EconometricEstimator):
         return (y - x @ w).T @ (y - x @ w)
 
     @staticmethod
-    def loss_root(w: np.array, x: np.array, y: np.array) -> np.array:
+    def loss_root(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Loss function being the root of the sum of squared distances
 
         Parameters
@@ -231,7 +230,7 @@ class SyntheticControl(EconometricEstimator):
         """
         return np.sqrt((y - x @ w).T @ (y - x @ w))
 
-    def _create_model(self, y: np.array, x: np.array) -> np.array:
+    def _create_model(self, y: np.ndarray, x: np.ndarray) -> np.ndarray:
         """Creates our OLS model for synthetic control, with the constraint that our weights must
         add up to 1.
 
@@ -317,7 +316,7 @@ class SyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post) - np.array(self.prediction_post)
+        cum_resids = np.ndarray(self.actual_post) - np.ndarray(self.prediction_post)
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [
@@ -348,11 +347,11 @@ class SyntheticControl(EconometricEstimator):
 class SyntheticControlV(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -517,7 +516,7 @@ class SyntheticControlV(EconometricEstimator):
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
         return self
 
-    def _create_model(self, v: np.array, x: np.array, y: np.array) -> np.array:
+    def _create_model(self, v: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Creates our synthetic control using v, x and y
 
         Parameters
@@ -550,7 +549,7 @@ class SyntheticControlV(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _loss_w(x: np.array, p: np.array, q: np.array) -> np.array:
+    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
         """Calculates the loss function for our model weights matrix
 
         Parameters
@@ -625,12 +624,12 @@ class SyntheticControlV(EconometricEstimator):
 
     def _loss_v(
         self,
-        x: np.array,
-        groupby_x: np.array,
-        groupby_y: np.array,
-        daily_x: np.array,
-        daily_y: np.array,
-    ) -> np.array:
+        x: np.ndarray,
+        groupby_x: np.ndarray,
+        groupby_y: np.ndarray,
+        daily_x: np.ndarray,
+        daily_y: np.ndarray,
+    ) -> float:
         """Generates the weights and loss of our V matrix
 
         Parameters
@@ -656,7 +655,7 @@ class SyntheticControlV(EconometricEstimator):
         return loss_V
 
     @staticmethod
-    def calc_loss_v(W: np.array, x: np.array, y: np.array) -> float:
+    def calc_loss_v(W: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Calculates the V loss.
 
         Parameters
@@ -741,7 +740,7 @@ class SyntheticControlV(EconometricEstimator):
             }
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -809,7 +808,7 @@ class SyntheticControlV(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - (np.array(self.prediction_post[self.y_variable]))
+        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [

@@ -1,5 +1,4 @@
 from math import ceil
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
@@ -13,11 +12,11 @@ from GeoCausality._base import EconometricEstimator
 class DiffinDiff(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -184,7 +183,7 @@ class DiffinDiff(EconometricEstimator):
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["incrementality_ci_upper"])

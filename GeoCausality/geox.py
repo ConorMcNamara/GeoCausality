@@ -1,10 +1,9 @@
 from math import ceil
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotly.graph_objects as go
+import polars as pl
 import statsmodels.api as sm
 from plotly.subplots import make_subplots
 from scipy.stats import t as t_dist
@@ -16,11 +15,11 @@ from GeoCausality._base import MLEstimator
 class GeoX(MLEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -189,7 +188,7 @@ class GeoX(MLEstimator):
         table_dict["p_value"] = [self.results["p_value"][-1]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["cumulative_incrementality"].iloc[-1])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
@@ -208,7 +207,7 @@ class GeoX(MLEstimator):
 
         Returns
         -------
-        Our shifted t-distribution, as explained in Section 9.1 of https : //static.googleusercontent.com/media/research.google.com/en//pubs/archive/45950.pdf
+        Our shifted t-distribution, as explained in Section 9.1 of https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/45950.pdf
 
         Notes
         -----
@@ -235,7 +234,7 @@ class GeoX(MLEstimator):
         delta_df = self.model.df_resid
         return t_dist(delta_df, loc=delta_mean, scale=delta_scale)
 
-    def _get_cumulative_cis(self, rescale: float = 1.0) -> dict:
+    def _get_cumulative_cis(self, rescale: float = 1.0) -> dict[str, np.ndarray]:
         """From our shifted T-distribution, calculates the confidence intervals and p-values
 
         Parameters

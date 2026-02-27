@@ -15,7 +15,9 @@ build:
 sphinx:
   configuration: docs/conf.py
 
-# Install dependencies listed in docs/requirements.txt
+# Install the package (runtime deps) then Sphinx build deps
 python:
   install:
+    - method: pip
+      path: .
     - requirements: docs/requirements.txt

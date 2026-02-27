@@ -1,6 +1,5 @@
 import abc
 from abc import ABC
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,11 +9,11 @@ import polars as pl
 class Estimator(abc.ABC):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -111,7 +110,7 @@ class Estimator(abc.ABC):
         return f"{percent}%"
 
     @abc.abstractmethod
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         """Returns our Return on Ad Spend (ROAS) and CIs
 
         Returns
@@ -124,11 +123,11 @@ class Estimator(abc.ABC):
 class EconometricEstimator(Estimator, ABC):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -203,11 +202,11 @@ class EconometricEstimator(Estimator, ABC):
 class MLEstimator(Estimator, abc.ABC):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",

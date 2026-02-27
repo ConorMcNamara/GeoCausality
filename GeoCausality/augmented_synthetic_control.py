@@ -1,12 +1,11 @@
 from math import ceil
-from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotly.graph_objects as go
+import polars as pl
 from plotly.subplots import make_subplots
-from scipy.optimize import minimize, Bounds, LinearConstraint
+from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -16,11 +15,11 @@ from GeoCausality.utils import HoldoutSplitter
 class AugmentedSyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: Union[pd.DataFrame, pl.DataFrame],
+        data: pd.DataFrame | pl.DataFrame,
         geo_variable: str = "geo",
-        test_geos: Optional[list[str]] = None,
-        control_geos: Optional[list[str]] = None,
-        treatment_variable: Optional[str] = "is_treatment",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
         date_variable: str = "date",
         pre_period: str = "2021-01-01",
         post_period: str = "2021-01-02",
@@ -252,12 +251,12 @@ class AugmentedSyntheticControl(EconometricEstimator):
             }
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def _get_roas(self) -> tuple:
+    def _get_roas(self) -> tuple[float, float, float]:
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
-    def _create_model(self) -> np.array:
+    def _create_model(self) -> np.ndarray:
         daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal = self._normalize()
         daily_x_demean.columns = groupby_x_normal.columns
         x_stacked = pd.concat([daily_x_demean, groupby_x_normal], axis=0)
@@ -276,7 +275,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         W_ridge = self._get_ridge_weights(y_stacked.to_numpy(), x_stacked.to_numpy(), W, self.lambda_)
         return W + W_ridge
 
-    def _get_weights(self, V_matrix: np.array, x: np.array, y: np.array) -> np.array:
+    def _get_weights(self, V_matrix: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Creates our synthetic control using v, x and y
 
         Parameters
@@ -312,7 +311,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _get_ridge_weights(a: np.array, b: np.array, w: np.array, lambda_: np.array) -> np.array:
+    def _get_ridge_weights(a: np.ndarray, b: np.ndarray, w: np.ndarray, lambda_: np.ndarray) -> np.ndarray:
         """Calculate the ridge adjustment to the weights.
 
         Parameters
@@ -336,7 +335,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
     def _normalize(
         self,
-    ) -> tuple:
+    ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
         """Normalise the data before the weight calculation."""
         groupby_x_demean = self.groupby_x.subtract(self.groupby_x.mean(axis=1), axis=0)
         groupby_y_demean = self.groupby_y.subtract(self.groupby_y.mean(), axis=0)
@@ -352,7 +351,9 @@ class AugmentedSyntheticControl(EconometricEstimator):
         groupby_y_normal = groupby_y_demean.divide(groupby_x_std, axis=0) * daily_x_std
         return daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal
 
-    def _cross_validate(self, X: np.array, Y: np.array, lambdas: np.ndarray, holdout_len: int = 1) -> tuple:
+    def _cross_validate(
+        self, X: np.ndarray, Y: np.ndarray, lambdas: np.ndarray, holdout_len: int = 1
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Method that calculates the mean error and standard error to the mean
         error using a cross-validation procedure for the given ridge parameter
         values.
@@ -369,12 +370,12 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 err = (Y_v - X_v @ W_aug).pow(2).sum()
                 this_res.append(err.item())
             res.append(this_res)
-        means = np.array(res).mean(axis=0)
-        ses = np.array(res).std(axis=0) / np.sqrt(len(lambdas))
+        means = np.ndarray(res).mean(axis=0)
+        ses = np.ndarray(res).std(axis=0) / np.sqrt(len(lambdas))
         return lambdas, means, ses
 
     @staticmethod
-    def _generate_lambdas(X: pd.DataFrame, lambda_min_ratio: float = 1e-08, n_lambda: int = 20) -> np.array:
+    def _generate_lambdas(X: pd.DataFrame, lambda_min_ratio: float = 1e-08, n_lambda: int = 20) -> np.ndarray:
         """Generate a suitable set of lambdas to run the cross-validation procedure on.
 
         Parameters
@@ -393,10 +394,10 @@ class AugmentedSyntheticControl(EconometricEstimator):
         _, s, _ = np.linalg.svd(X.T)
         lambda_max = np.power(s[0].item(), 2)
         scaler = np.power(lambda_min_ratio, (1 / n_lambda))
-        return lambda_max * (np.power(scaler, np.array(range(n_lambda))))
+        return lambda_max * (np.power(scaler, np.ndarray(range(n_lambda))))
 
     @staticmethod
-    def _loss_function(x: np.array, p: np.array, q: np.array):
+    def _loss_function(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
         return 0.5 * x.T @ p @ x - q.T @ x
 
     def plot(self) -> None:
@@ -462,7 +463,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - (np.array(self.prediction_post[self.y_variable]))
+        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [
