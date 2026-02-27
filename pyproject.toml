@@ -18,9 +18,7 @@ dependencies = [
     "plotly (>=6.0.0,<7.0.0)",
     "scipy (>=1.15.0,<2.0.0)"
 ]
-licenses = [
-    {text = "MIT", file = "LICENSE"}
-]
+license = {text = "MIT"}
 keywords = ["causal inference", "geo-experiments", "geocausality"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -40,9 +38,6 @@ dev = [
     "pytest (>=8.3.5,<9.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)"
 ]
-
-[project.urls]
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
