@@ -1,4 +1,5 @@
 from math import ceil
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -79,12 +80,12 @@ class PenalizedSyntheticControl(EconometricEstimator):
             msrp,
             spend,
         )
-        self.V = None
-        self.dates = None
-        self.prediction_pre = None
-        self.prediction_post = None
-        self.actual_pre = None
-        self.actual_post = None
+        self.V: np.ndarray | None = None
+        self.dates: list[Any] | None = None
+        self.prediction_pre: pd.DataFrame | None = None
+        self.prediction_post: pd.DataFrame | None = None
+        self.actual_pre: pd.DataFrame | None = None
+        self.actual_post: pd.DataFrame | None = None
         self.lambda_ = lambda_
 
     def pre_process(self) -> "PenalizedSyntheticControl":
@@ -173,6 +174,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -236,6 +238,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -260,12 +263,10 @@ class PenalizedSyntheticControl(EconometricEstimator):
             X_scaled.drop(columns=groupby_y.name),
             X_scaled[groupby_y.name],
         )
-        groupby_x_scaled, groupby_y_scaled = (
-            groupby_x_scaled.to_numpy(),
-            groupby_y_scaled.to_numpy(),
-        )
-        self.V = np.identity(groupby_x_scaled.shape[0])
-        self.model = self._create_model(groupby_x_scaled, groupby_y_scaled)
+        groupby_x_arr: np.ndarray = groupby_x_scaled.to_numpy()
+        groupby_y_arr: np.ndarray = groupby_y_scaled.to_numpy()
+        self.V = np.identity(groupby_x_arr.shape[0])
+        self.model = self._create_model(groupby_x_arr, groupby_y_arr)
         return self
 
     def _create_model(self, groupby_x: np.ndarray, groupby_y: np.ndarray) -> np.ndarray:
@@ -282,6 +283,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
         -------
         An array containing the weights of our model
         """
+        assert self.V is not None
+        assert self.dates is not None
         n_r, n_c = groupby_x.shape
         diff = np.subtract(groupby_x, groupby_y.reshape(-1, 1))
         r = np.diag(diff.T @ self.V @ diff)
@@ -334,6 +337,11 @@ class PenalizedSyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.actual_pre is not None
+        assert self.actual_post is not None
+        assert self.prediction_pre is not None
+        assert self.prediction_post is not None
+        assert self.dates is not None
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -390,7 +398,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
+        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [

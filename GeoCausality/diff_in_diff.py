@@ -74,8 +74,8 @@ class DiffinDiff(EconometricEstimator):
             msrp,
             spend,
         )
-        self.groupby_data = None
-        self.n_dates = None
+        self.groupby_data: pd.DataFrame | None = None
+        self.n_dates: int | None = None
 
     def pre_process(self) -> "DiffinDiff":
         super().pre_process()
@@ -117,6 +117,8 @@ class DiffinDiff(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
+        assert self.n_dates is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -184,6 +186,7 @@ class DiffinDiff(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["incrementality_ci_upper"])

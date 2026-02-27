@@ -74,8 +74,8 @@ class FixedEffects(EconometricEstimator):
             msrp,
             spend,
         )
-        self.n_dates = None
-        self.n_geos = None
+        self.n_dates: int | None = None
+        self.n_geos: int | None = None
 
     def pre_process(self) -> "FixedEffects":
         super().pre_process()
@@ -108,6 +108,7 @@ class FixedEffects(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -154,6 +155,7 @@ class FixedEffects(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["incrementality_ci_upper"])

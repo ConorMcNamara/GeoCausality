@@ -1,4 +1,5 @@
 from math import ceil
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -80,11 +81,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
             msrp,
             spend,
         )
-        self.groupby_x = None
-        self.groupby_y = None
-        self.daily_x = None
-        self.daily_y = None
-        self.dates = None
+        self.groupby_x: pd.DataFrame | None = None
+        self.groupby_y: pd.Series | None = None
+        self.daily_x: pd.DataFrame | None = None
+        self.daily_y: pd.Series | None = None
+        self.dates: list[Any] | None = None
         self.lambda_ = lambda_
 
     def pre_process(self) -> "AugmentedSyntheticControl":
@@ -189,6 +190,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -252,11 +254,14 @@ class AugmentedSyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
     def _create_model(self) -> np.ndarray:
+        assert self.daily_x is not None
+        assert self.daily_y is not None
         daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal = self._normalize()
         daily_x_demean.columns = groupby_x_normal.columns
         x_stacked = pd.concat([daily_x_demean, groupby_x_normal], axis=0)
@@ -311,7 +316,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _get_ridge_weights(a: np.ndarray, b: np.ndarray, w: np.ndarray, lambda_: np.ndarray) -> np.ndarray:
+    def _get_ridge_weights(a: np.ndarray, b: np.ndarray, w: np.ndarray, lambda_: float | np.ndarray) -> np.ndarray:
         """Calculate the ridge adjustment to the weights.
 
         Parameters
@@ -337,6 +342,10 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self,
     ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
         """Normalise the data before the weight calculation."""
+        assert self.groupby_x is not None
+        assert self.groupby_y is not None
+        assert self.daily_x is not None
+        assert self.daily_y is not None
         groupby_x_demean = self.groupby_x.subtract(self.groupby_x.mean(axis=1), axis=0)
         groupby_y_demean = self.groupby_y.subtract(self.groupby_y.mean(), axis=0)
 
@@ -352,7 +361,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal
 
     def _cross_validate(
-        self, X: np.ndarray, Y: np.ndarray, lambdas: np.ndarray, holdout_len: int = 1
+        self, X: pd.DataFrame, Y: pd.Series, lambdas: np.ndarray, holdout_len: int = 1
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Method that calculates the mean error and standard error to the mean
         error using a cross-validation procedure for the given ridge parameter
@@ -370,8 +379,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 err = (Y_v - X_v @ W_aug).pow(2).sum()
                 this_res.append(err.item())
             res.append(this_res)
-        means = np.ndarray(res).mean(axis=0)
-        ses = np.ndarray(res).std(axis=0) / np.sqrt(len(lambdas))
+        means = np.array(res).mean(axis=0)
+        ses = np.array(res).std(axis=0) / np.sqrt(len(lambdas))
         return lambdas, means, ses
 
     @staticmethod
@@ -407,6 +416,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.actual_pre is not None
+        assert self.actual_post is not None
+        assert self.prediction_pre is not None
+        assert self.prediction_post is not None
+        assert self.dates is not None
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -463,7 +477,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
+        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [

@@ -1,4 +1,5 @@
 from math import ceil
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -76,13 +77,13 @@ class SyntheticControl(EconometricEstimator):
             msrp,
             spend,
         )
-        self.synthetic_test_df = None
-        self.synthetic_control_df = None
-        self.actual_pre = None
-        self.actual_post = None
-        self.prediction_pre = None
-        self.prediction_post = None
-        self.dates = None
+        self.synthetic_test_df: pd.DataFrame | None = None
+        self.synthetic_control_df: pd.DataFrame | None = None
+        self.actual_pre: pd.Series | None = None
+        self.actual_post: pd.Series | None = None
+        self.prediction_pre: pd.Series | None = None
+        self.prediction_post: pd.Series | None = None
+        self.dates: list[Any] | None = None
 
     def pre_process(self) -> "SyntheticControl":
         super().pre_process()
@@ -132,6 +133,8 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "SyntheticControl":
+        assert self.synthetic_control_df is not None
+        assert self.synthetic_test_df is not None
         train_x = self.synthetic_control_df.drop([self.date_variable, self.y_variable], axis=1)
         self.actual_pre = self.synthetic_control_df[self.y_variable]
         test_x = self.synthetic_test_df.drop([self.date_variable, self.y_variable], axis=1)
@@ -148,6 +151,7 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -188,6 +192,7 @@ class SyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -230,7 +235,7 @@ class SyntheticControl(EconometricEstimator):
         """
         return np.sqrt((y - x @ w).T @ (y - x @ w))
 
-    def _create_model(self, y: np.ndarray, x: np.ndarray) -> np.ndarray:
+    def _create_model(self, y: Any, x: Any) -> np.ndarray:
         """Creates our OLS model for synthetic control, with the constraint that our weights must
         add up to 1.
 
@@ -275,6 +280,11 @@ class SyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.actual_pre is not None
+        assert self.actual_post is not None
+        assert self.prediction_pre is not None
+        assert self.prediction_post is not None
+        assert self.dates is not None
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -316,7 +326,7 @@ class SyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.ndarray(self.actual_post) - np.ndarray(self.prediction_post)
+        cum_resids = np.array(self.actual_post) - np.array(self.prediction_post)
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [
@@ -409,12 +419,12 @@ class SyntheticControlV(EconometricEstimator):
             msrp,
             spend,
         )
-        self.V = None
-        self.dates = None
-        self.prediction_pre = None
-        self.prediction_post = None
-        self.actual_pre = None
-        self.actual_post = None
+        self.V: np.ndarray | None = None
+        self.dates: list[Any] | None = None
+        self.prediction_pre: pd.DataFrame | None = None
+        self.prediction_post: pd.DataFrame | None = None
+        self.actual_pre: pd.DataFrame | None = None
+        self.actual_post: pd.DataFrame | None = None
 
     def pre_process(self) -> "SyntheticControlV":
         super().pre_process()
@@ -572,7 +582,7 @@ class SyntheticControlV(EconometricEstimator):
         groupby_x: pd.DataFrame,
         groupby_y: pd.Series,
         daily_x: pd.DataFrame,
-        daily_y: pd.Series,
+        daily_y: pd.DataFrame,
     ) -> "SyntheticControlV":
         """Finds the V matrix so that we can create our model
 
@@ -584,7 +594,7 @@ class SyntheticControlV(EconometricEstimator):
             Contains the average cumulative y-variable of our test geos
         daily_x : pandas DataFrame
             Contains the daily y-variable of our control geos
-        daily_y : pandas Series
+        daily_y : pandas DataFrame
             Contains the daily cumulative y-variable of our test geos
 
         Returns
@@ -597,16 +607,15 @@ class SyntheticControlV(EconometricEstimator):
             X_scaled.drop(columns=groupby_y.name),
             X_scaled[groupby_y.name],
         )
-        groupby_x_scaled, groupby_y_scaled = (
-            groupby_x_scaled.to_numpy(),
-            groupby_y_scaled.to_numpy(),
-        )
-        daily_x, daily_y = daily_x.to_numpy(), daily_y.values
-        n_r, _ = groupby_x_scaled.shape
-        groupby_arr = np.hstack([groupby_x_scaled, groupby_y_scaled.reshape(-1, 1)])
+        groupby_x_arr: np.ndarray = groupby_x_scaled.to_numpy()
+        groupby_y_arr: np.ndarray = groupby_y_scaled.to_numpy()
+        daily_x_arr: np.ndarray = daily_x.to_numpy()
+        daily_y_arr: np.ndarray = daily_y.values
+        n_r, _ = groupby_x_arr.shape
+        groupby_arr = np.hstack([groupby_x_arr, groupby_y_arr.reshape(-1, 1)])
         groupby_arr = np.hstack([np.full((groupby_arr.shape[1], 1), 1), groupby_arr.T])
 
-        daily_arr = np.hstack([daily_x, daily_y.reshape(-1, 1)])
+        daily_arr = np.hstack([daily_x_arr, daily_y_arr.reshape(-1, 1)])
 
         try:
             beta = (np.linalg.inv(groupby_arr.T @ groupby_arr) @ groupby_arr.T @ daily_arr.T)[1:,]
@@ -614,12 +623,12 @@ class SyntheticControlV(EconometricEstimator):
             raise ValueError("Could not invert X^T.X. There is most likely collinearity in your data.")
         x0 = np.diag(beta @ beta.T)
         res = minimize(
-            fun=lambda x: self._loss_v(x, groupby_x_scaled, groupby_y_scaled, daily_x, daily_y.reshape(-1)),
+            fun=lambda x: self._loss_v(x, groupby_x_arr, groupby_y_arr, daily_x_arr, daily_y_arr.reshape(-1)),
             x0=x0,
             method="SLSQP",
         )
         self.V = np.diag(np.abs(res["x"])) / np.sum(np.abs(res["x"]))
-        self.model = self._create_model(v=self.V, y=groupby_y_scaled, x=groupby_x_scaled)
+        self.model = self._create_model(v=self.V, y=groupby_y_arr, x=groupby_x_arr)
         return self
 
     def _loss_v(
@@ -678,6 +687,7 @@ class SyntheticControlV(EconometricEstimator):
         return loss_V
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -741,6 +751,7 @@ class SyntheticControlV(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -752,6 +763,11 @@ class SyntheticControlV(EconometricEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.actual_pre is not None
+        assert self.actual_post is not None
+        assert self.prediction_pre is not None
+        assert self.prediction_post is not None
+        assert self.dates is not None
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -808,7 +824,7 @@ class SyntheticControlV(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
+        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [

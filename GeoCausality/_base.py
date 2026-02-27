@@ -1,5 +1,6 @@
 import abc
 from abc import ABC
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -68,7 +69,7 @@ class Estimator(abc.ABC):
         self.alpha = alpha
         self.msrp = msrp
         self.spend = spend
-        self.results = None
+        self.results: dict[str, Any] | None = None
 
     @abc.abstractmethod
     def pre_process(self) -> "Estimator":
@@ -181,13 +182,13 @@ class EconometricEstimator(Estimator, ABC):
             msrp,
             spend,
         )
-        self.model = None
+        self.model: Any = None
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
-            self.data[self.treatment_variable] = int(self.data[self.geo_variable].isin(self.test_geos))
+            self.data[self.treatment_variable] = self.data[self.geo_variable].isin(self.test_geos).astype(int)
         elif self.control_geos is not None:
-            self.data[self.treatment_variable] = 1 - int(self.data[self.geo_variable].isin(self.control_geos))
+            self.data[self.treatment_variable] = 1 - self.data[self.geo_variable].isin(self.control_geos).astype(int)
         else:
             pass
         self.data["treatment_period"] = np.where(
@@ -261,14 +262,12 @@ class MLEstimator(Estimator, abc.ABC):
             spend,
         )
 
-        self.pre_control, self.post_control, self.pre_test, self.post_test = (
-            None,
-            None,
-            None,
-            None,
-        )
-        self.model = None
-        self.test_dates = None
+        self.pre_control: pd.DataFrame | None = None
+        self.post_control: pd.DataFrame | None = None
+        self.pre_test: pd.DataFrame | None = None
+        self.post_test: pd.DataFrame | None = None
+        self.model: Any = None
+        self.test_dates: pd.Series | None = None
 
     def pre_process(self) -> "MLEstimator":
         pre_control = self.data[

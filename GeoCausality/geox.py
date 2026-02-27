@@ -1,4 +1,5 @@
 from math import ceil
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -77,12 +78,16 @@ class GeoX(MLEstimator):
             msrp,
             spend,
         )
-        self.intercept_test = None
-        self.prediction_pre = None
-        self.prediction_post = None
-        self.dates = None
+        self.intercept_test: Any = None
+        self.prediction_pre: pd.DataFrame | None = None
+        self.prediction_post: pd.DataFrame | None = None
+        self.dates: list[Any] | None = None
 
     def generate(self, rescale: float = 1.0) -> "GeoX":
+        assert self.pre_control is not None
+        assert self.pre_test is not None
+        assert self.post_control is not None
+        assert self.post_test is not None
         intercept_train = sm.add_constant(self.pre_control)
         self.model = sm.OLS(self.pre_test.values, intercept_train.values).fit()
         self.intercept_test = sm.add_constant(self.post_control.values)
@@ -107,6 +112,7 @@ class GeoX(MLEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -189,6 +195,7 @@ class GeoX(MLEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["cumulative_incrementality"].iloc[-1])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
@@ -213,18 +220,20 @@ class GeoX(MLEstimator):
         -----
         Taken from https://github.com/google/matched_markets/blob/master/matched_markets/methodology/tbr.py
         """
+        assert self.post_control is not None
+        assert self.results is not None
         test_len = len(self.post_control)
         one_to_t = np.arange(1, test_len + 1)
         one_to_t.shape = (test_len, 1)
         control_matrix = sm.add_constant(self.results["control"])
         cumulative_control_t = control_matrix.cumsum() / one_to_t
         param_covariance = np.array(self.model.cov_params())
-        var_params = []
+        var_params_list: list[Any] = []
         for t in range(test_len):
             # Sum of parameter variance terms from eqn 5 of Kerman 2017.
             var_t = cumulative_control_t.iloc[t,].values @ param_covariance @ cumulative_control_t.iloc[t,].values.T
-            var_params.append(var_t)
-        var_params = np.array(var_params).reshape(test_len, 1)
+            var_params_list.append(var_t)
+        var_params = np.array(var_params_list).reshape(test_len, 1)
         var_from_params = var_params * pow(one_to_t, 2)
         sigma_square = self.model.scale
         var_from_observations = one_to_t * sigma_square
@@ -247,6 +256,7 @@ class GeoX(MLEstimator):
         ci_dict : dict
             A dictionary containing our confidence intervals as well as p-values.
         """
+        assert self.post_control is not None
         delta = self._cumulative_distribution(rescale=rescale)
         test_len = len(self.post_control)
         ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
@@ -266,6 +276,11 @@ class GeoX(MLEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.pre_control is not None
+        assert self.pre_test is not None
+        assert self.post_control is not None
+        assert self.post_test is not None
+        assert self.results is not None
         self.dates = sorted(self.data[self.date_variable].unique())
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         control_data = pd.concat([self.pre_control, self.post_control])

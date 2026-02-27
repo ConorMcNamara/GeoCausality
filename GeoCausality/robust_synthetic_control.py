@@ -1,4 +1,5 @@
 from math import ceil
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -85,18 +86,18 @@ class RobustSyntheticControl(EconometricEstimator):
             msrp,
             spend,
         )
-        self.dates = None
-        self.prediction_pre = None
-        self.prediction_post = None
-        self.actual_pre = None
-        self.actual_post = None
+        self.dates: list[Any] | None = None
+        self.prediction_pre: pd.DataFrame | None = None
+        self.prediction_post: pd.DataFrame | None = None
+        self.actual_pre: pd.DataFrame | None = None
+        self.actual_post: pd.DataFrame | None = None
         self.lambda_ = lambda_
         if (threshold is None) and (sv_count is None):
             raise ValueError("At least one of `threshold` or `sv_count` cannot be None")
         self.threshold = threshold
         self.sv_count = sv_count
-        self.daily_x = None
-        self.daily_y = None
+        self.daily_x: pd.DataFrame | None = None
+        self.daily_y: pd.DataFrame | None = None
 
     def pre_process(self) -> "RobustSyntheticControl":
         super().pre_process()
@@ -183,6 +184,8 @@ class RobustSyntheticControl(EconometricEstimator):
         -------
         The weights matrix used to create our model
         """
+        assert self.daily_x is not None
+        assert self.daily_y is not None
         daily_x_transposed = self.daily_x.T.values
         M_hat = self._svd(daily_x_transposed).T
         time_end = pd.to_datetime(self.post_period)
@@ -197,6 +200,7 @@ class RobustSyntheticControl(EconometricEstimator):
         return W
 
     def summarize(self, lift: str) -> None:
+        assert self.results is not None
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -260,6 +264,7 @@ class RobustSyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
+        assert self.results is not None
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -284,6 +289,7 @@ class RobustSyntheticControl(EconometricEstimator):
             while s[idx] > self.threshold and idx < s_shape:
                 idx += 1
         else:
+            assert self.sv_count is not None
             idx = self.sv_count
         s_res = np.zeros_like(groupby_x_transposed)
         s_res[:idx, :idx] = np.diag(s[:idx])
@@ -299,6 +305,11 @@ class RobustSyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
+        assert self.actual_pre is not None
+        assert self.actual_post is not None
+        assert self.prediction_pre is not None
+        assert self.prediction_post is not None
+        assert self.dates is not None
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -355,7 +366,7 @@ class RobustSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.ndarray(self.actual_post[self.y_variable]) - (np.ndarray(self.prediction_post[self.y_variable]))
+        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         bottom_fig = go.Figure(
             [
