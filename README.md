@@ -1,6 +1,5 @@
 # GeoCausality
 
-[![CI](https://github.com/ConorMcNamara/GeoCausality/actions/workflows/python-package.yml/badge.svg)](https://github.com/ConorMcNamara/GeoCausality/actions/workflows/python-package.yml)
 [![Lint](https://github.com/ConorMcNamara/GeoCausality/actions/workflows/ci.yml/badge.svg)](https://github.com/ConorMcNamara/GeoCausality/actions/workflows/ci.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%20%7C%203.14-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
