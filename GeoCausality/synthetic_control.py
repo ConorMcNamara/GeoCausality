@@ -133,8 +133,10 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "SyntheticControl":
-        assert self.synthetic_control_df is not None
-        assert self.synthetic_test_df is not None
+        if self.synthetic_control_df is None:
+            raise ValueError("synthetic_control_df must not be None")
+        if self.synthetic_test_df is None:
+            raise ValueError("synthetic_test_df must not be None")
         train_x = self.synthetic_control_df.drop([self.date_variable, self.y_variable], axis=1)
         self.actual_pre = self.synthetic_control_df[self.y_variable]
         test_x = self.synthetic_test_df.drop([self.date_variable, self.y_variable], axis=1)
@@ -151,7 +153,8 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -192,7 +195,8 @@ class SyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -280,11 +284,16 @@ class SyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
-        assert self.actual_pre is not None
-        assert self.actual_post is not None
-        assert self.prediction_pre is not None
-        assert self.prediction_post is not None
-        assert self.dates is not None
+        if self.actual_pre is None:
+            raise ValueError("actual_pre must not be None")
+        if self.actual_post is None:
+            raise ValueError("actual_post must not be None")
+        if self.prediction_pre is None:
+            raise ValueError("prediction_pre must not be None")
+        if self.prediction_post is None:
+            raise ValueError("prediction_post must not be None")
+        if self.dates is None:
+            raise ValueError("dates must not be None")
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -687,7 +696,8 @@ class SyntheticControlV(EconometricEstimator):
         return loss_V
 
     def summarize(self, lift: str) -> None:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -751,7 +761,8 @@ class SyntheticControlV(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
@@ -763,11 +774,16 @@ class SyntheticControlV(EconometricEstimator):
         -------
         Our three plots determining the results
         """
-        assert self.actual_pre is not None
-        assert self.actual_post is not None
-        assert self.prediction_pre is not None
-        assert self.prediction_post is not None
-        assert self.dates is not None
+        if self.actual_pre is None:
+            raise ValueError("actual_pre must not be None")
+        if self.actual_post is None:
+            raise ValueError("actual_post must not be None")
+        if self.prediction_pre is None:
+            raise ValueError("prediction_pre must not be None")
+        if self.prediction_post is None:
+            raise ValueError("prediction_post must not be None")
+        if self.dates is None:
+            raise ValueError("dates must not be None")
         total_fig = make_subplots(
             rows=3,
             cols=1,

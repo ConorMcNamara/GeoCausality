@@ -190,7 +190,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -254,14 +255,17 @@ class AugmentedSyntheticControl(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
     def _create_model(self) -> np.ndarray:
-        assert self.daily_x is not None
-        assert self.daily_y is not None
+        if self.daily_x is None:
+            raise ValueError("daily_x must not be None")
+        if self.daily_y is None:
+            raise ValueError("daily_y must not be None")
         daily_x_demean, daily_y_demean, groupby_x_normal, groupby_y_normal = self._normalize()
         daily_x_demean.columns = groupby_x_normal.columns
         x_stacked = pd.concat([daily_x_demean, groupby_x_normal], axis=0)
@@ -342,10 +346,14 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self,
     ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
         """Normalise the data before the weight calculation."""
-        assert self.groupby_x is not None
-        assert self.groupby_y is not None
-        assert self.daily_x is not None
-        assert self.daily_y is not None
+        if self.groupby_x is None:
+            raise ValueError("groupby_x must not be None")
+        if self.groupby_y is None:
+            raise ValueError("groupby_y must not be None")
+        if self.daily_x is None:
+            raise ValueError("daily_x must not be None")
+        if self.daily_y is None:
+            raise ValueError("daily_y must not be None")
         groupby_x_demean = self.groupby_x.subtract(self.groupby_x.mean(axis=1), axis=0)
         groupby_y_demean = self.groupby_y.subtract(self.groupby_y.mean(), axis=0)
 
@@ -416,11 +424,16 @@ class AugmentedSyntheticControl(EconometricEstimator):
         -------
         Our three plots determining the results
         """
-        assert self.actual_pre is not None
-        assert self.actual_post is not None
-        assert self.prediction_pre is not None
-        assert self.prediction_post is not None
-        assert self.dates is not None
+        if self.actual_pre is None:
+            raise ValueError("actual_pre must not be None")
+        if self.actual_post is None:
+            raise ValueError("actual_post must not be None")
+        if self.prediction_pre is None:
+            raise ValueError("prediction_pre must not be None")
+        if self.prediction_post is None:
+            raise ValueError("prediction_post must not be None")
+        if self.dates is None:
+            raise ValueError("dates must not be None")
         total_fig = make_subplots(
             rows=3,
             cols=1,

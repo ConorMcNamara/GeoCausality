@@ -84,10 +84,14 @@ class GeoX(MLEstimator):
         self.dates: list[Any] | None = None
 
     def generate(self, rescale: float = 1.0) -> "GeoX":
-        assert self.pre_control is not None
-        assert self.pre_test is not None
-        assert self.post_control is not None
-        assert self.post_test is not None
+        if self.pre_control is None:
+            raise ValueError("pre_control must not be None")
+        if self.pre_test is None:
+            raise ValueError("pre_test must not be None")
+        if self.post_control is None:
+            raise ValueError("post_control must not be None")
+        if self.post_test is None:
+            raise ValueError("post_test must not be None")
         intercept_train = sm.add_constant(self.pre_control)
         self.model = sm.OLS(self.pre_test.values, intercept_train.values).fit()
         self.intercept_test = sm.add_constant(self.post_control.values)
@@ -112,7 +116,8 @@ class GeoX(MLEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -195,7 +200,8 @@ class GeoX(MLEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = ceil(self.results["cumulative_incrementality"].iloc[-1])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
@@ -220,8 +226,10 @@ class GeoX(MLEstimator):
         -----
         Taken from https://github.com/google/matched_markets/blob/master/matched_markets/methodology/tbr.py
         """
-        assert self.post_control is not None
-        assert self.results is not None
+        if self.post_control is None:
+            raise ValueError("post_control must not be None")
+        if self.results is None:
+            raise ValueError("results must not be None")
         test_len = len(self.post_control)
         one_to_t = np.arange(1, test_len + 1)
         one_to_t.shape = (test_len, 1)
@@ -256,7 +264,8 @@ class GeoX(MLEstimator):
         ci_dict : dict
             A dictionary containing our confidence intervals as well as p-values.
         """
-        assert self.post_control is not None
+        if self.post_control is None:
+            raise ValueError("post_control must not be None")
         delta = self._cumulative_distribution(rescale=rescale)
         test_len = len(self.post_control)
         ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
@@ -276,11 +285,16 @@ class GeoX(MLEstimator):
         -------
         Our three plots determining the results
         """
-        assert self.pre_control is not None
-        assert self.pre_test is not None
-        assert self.post_control is not None
-        assert self.post_test is not None
-        assert self.results is not None
+        if self.pre_control is None:
+            raise ValueError("pre_control must not be None")
+        if self.pre_test is None:
+            raise ValueError("pre_test must not be None")
+        if self.post_control is None:
+            raise ValueError("post_control must not be None")
+        if self.post_test is None:
+            raise ValueError("post_test must not be None")
+        if self.results is None:
+            raise ValueError("results must not be None")
         self.dates = sorted(self.data[self.date_variable].unique())
         marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
         control_data = pd.concat([self.pre_control, self.post_control])

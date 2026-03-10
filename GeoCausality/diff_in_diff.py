@@ -117,8 +117,10 @@ class DiffinDiff(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
-        assert self.results is not None
-        assert self.n_dates is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
+        if self.n_dates is None:
+            raise ValueError("n_dates must not be None")
         lift = lift.casefold()
         if lift not in [
             "absolute",
@@ -186,7 +188,8 @@ class DiffinDiff(EconometricEstimator):
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
-        assert self.results is not None
+        if self.results is None:
+            raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["incrementality_ci_upper"])
