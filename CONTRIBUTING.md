@@ -41,10 +41,10 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-This installs GeoCausality in editable mode along with `pytest` and `black`. The CI tools `ruff` and `mypy` are also needed:
+This installs GeoCausality in editable mode along with `pytest` and `black`. The CI tools `ruff` and `zuban` are also needed:
 
 ```bash
-pip install ruff mypy
+pip install ruff zuban
 ```
 
 Or use the Makefile shortcut:
@@ -62,7 +62,7 @@ The recommended cycle for any change is:
 ```bash
 make format   # auto-format with ruff
 make lint     # check for lint errors
-make type-check  # run mypy
+make type-check  # run zuban
 make test     # run the test suite
 ```
 
@@ -105,7 +105,7 @@ Tests live in `test/`. When adding a new estimator or feature, add a correspondi
 make type-check
 ```
 
-This runs `mypy GeoCausality/ --ignore-missing-imports`. All new code should be fully annotated. Use modern union syntax (`X | Y`, `list[str]`, `dict[str, int]`) — not the legacy `typing` aliases.
+This runs `zuban check GeoCausality/`. All new code should be fully annotated. Use modern union syntax (`X | Y`, `list[str]`, `dict[str, int]`) — not the legacy `typing` aliases.
 
 ---
 

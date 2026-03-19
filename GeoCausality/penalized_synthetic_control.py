@@ -1,10 +1,12 @@
+from datetime import date as date_cls
 from math import ceil
 from typing import Any
 
+import narwhals as nw
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
+from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
@@ -15,7 +17,7 @@ from GeoCausality._base import EconometricEstimator
 class PenalizedSyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -82,93 +84,107 @@ class PenalizedSyntheticControl(EconometricEstimator):
         )
         self.V: np.ndarray | None = None
         self.dates: list[Any] | None = None
-        self.prediction_pre: pd.DataFrame | None = None
-        self.prediction_post: pd.DataFrame | None = None
-        self.actual_pre: pd.DataFrame | None = None
-        self.actual_post: pd.DataFrame | None = None
+        self.prediction_pre: nw.DataFrame | None = None
+        self.prediction_post: nw.DataFrame | None = None
+        self.actual_pre: nw.DataFrame | None = None
+        self.actual_post: nw.DataFrame | None = None
         self.lambda_ = lambda_
 
     def pre_process(self) -> "PenalizedSyntheticControl":
         super().pre_process()
-        self.dates = sorted(self.data[self.date_variable].unique())
+        self.dates = sorted(self.data[self.date_variable].unique().to_list())
+        assert self.treatment_variable is not None
         x_sum = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.geo_variable, self.date_variable],
-            ]
-            .groupby([self.geo_variable])[self.y_variable]
-            .mean()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.geo_variable, self.date_variable])
+            .group_by(self.geo_variable)
+            .agg(nw.col(self.y_variable).mean())
+            .sort(self.geo_variable)
         )
-        groupby_x = x_sum.T
-        groupby_x.columns = x_sum[self.geo_variable]
-        groupby_x = groupby_x.drop([self.geo_variable], axis=0)
+        # Build groupby_x as a numpy row-vector: shape (1, n_geos)
+        # columns are geo names, single row is the mean y value
+        groupby_x_arr = x_sum[self.y_variable].to_numpy().reshape(1, -1)
+        groupby_x_cols = x_sum[self.geo_variable].to_list()
+
         y_sum = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
         )
-        groupby_y = pd.Series(y_sum[self.y_variable].mean(), name=-1, index=[self.y_variable])
-        self._create_v(groupby_x, groupby_y)
+        groupby_y_scalar = float(y_sum[self.y_variable].to_numpy().mean())
+        self._create_v(groupby_x_arr, groupby_x_cols, groupby_y_scalar)
         return self
 
     def generate(self) -> "PenalizedSyntheticControl":
+        assert self.treatment_variable is not None
         self.actual_pre = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
         )
         self.actual_post = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 1),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
         )
         control_pre = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.date_variable, self.geo_variable],
-            ]
-            .groupby([self.date_variable, self.geo_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.date_variable, self.geo_variable])
+            .group_by([self.date_variable, self.geo_variable])
+            .agg(nw.col(self.y_variable).sum())
+            .sort([self.date_variable, self.geo_variable])
         )
         control_post = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 1),
-                [self.y_variable, self.date_variable, self.geo_variable],
-            ]
-            .groupby([self.date_variable, self.geo_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
+            .select([self.y_variable, self.date_variable, self.geo_variable])
+            .group_by([self.date_variable, self.geo_variable])
+            .agg(nw.col(self.y_variable).sum())
+            .sort([self.date_variable, self.geo_variable])
         )
-        control_pre_pivot = control_pre.pivot(index=self.geo_variable, columns=self.date_variable)[[self.y_variable]].T
-        control_post_pivot = control_post.pivot(index=self.geo_variable, columns=self.date_variable)[
-            [self.y_variable]
-        ].T
-        prediction_pre = control_pre_pivot @ self.model
-        prediction_post = control_post_pivot @ self.model
-        self.prediction_post = (
-            prediction_post.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
+        # Pivot: rows=dates, cols=geos — equivalent to the transposed pandas pivot
+        control_pre_pivot = nw.from_native(
+            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
         )
-        self.prediction_pre = (
-            prediction_pre.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
+        control_post_pivot = nw.from_native(
+            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
+        )
+        # Drop the index column before matrix multiply; keep only geo columns
+        control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
+        control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
+
+        prediction_pre_arr = control_pre_mat @ self.model
+        prediction_post_arr = control_post_mat @ self.model
+
+        self.prediction_pre = nw.from_native(
+            pl.DataFrame(
+                {
+                    self.date_variable: control_pre_pivot[self.date_variable].to_native(),
+                    self.y_variable: prediction_pre_arr.flatten(),
+                }
+            ),
+            eager_only=True,
+        )
+        self.prediction_post = nw.from_native(
+            pl.DataFrame(
+                {
+                    self.date_variable: control_post_pivot[self.date_variable].to_native(),
+                    self.y_variable: prediction_post_arr.flatten(),
+                }
+            ),
+            eager_only=True,
         )
         self.results = {
             "test": self.actual_post,
             "counterfactual": self.prediction_post,
-            "lift": self.actual_post[self.y_variable] - self.prediction_post[self.y_variable],
+            "lift": self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy(),
         }
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
         return self
@@ -192,16 +208,16 @@ class PenalizedSyntheticControl(EconometricEstimator):
         # ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict = {
-                "Variant": [np.sum(self.results["test"][self.y_variable])],
-                "Baseline": [np.sum(self.results["counterfactual"][self.y_variable])],
+                "Variant": [self.results["test"][self.y_variable].sum()],
+                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
                 "Metric": [self.y_variable],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
             }
         elif lift == "relative":
             table_dict = {
-                "Variant": [np.sum(self.results["test"][self.y_variable])],
-                "Baseline": [np.sum(self.results["counterfactual"][self.y_variable])],
+                "Variant": [self.results["test"][self.y_variable].sum()],
+                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
                 "Metric": [self.y_variable],
                 "Lift Type": ["Relative"],
                 "Lift": [
@@ -209,7 +225,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
                         round(
                             float(self.results["incrementality"])
                             * 100
-                            / (np.sum(self.results["counterfactual"][self.y_variable])),
+                            / (self.results["counterfactual"][self.y_variable].sum()),
                             2,
                         )
                     }%"""
@@ -217,10 +233,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
             }
         elif lift == "revenue":
             table_dict = {
-                "Variant": [f"""${round(np.sum(self.results["test"][self.y_variable]) * self.msrp, 2):,}"""],
-                "Baseline": [
-                    f"""${round((np.sum(self.results["counterfactual"][self.y_variable])) * self.msrp, 2):,}"""
-                ],
+                "Variant": [f"""${round(self.results["test"][self.y_variable].sum() * self.msrp, 2):,}"""],
+                "Baseline": [f"""${round((self.results["counterfactual"][self.y_variable].sum()) * self.msrp, 2):,}"""],
                 "Metric": ["Revenue"],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
@@ -228,10 +242,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
         else:
             roas_lift, _, _ = self._get_roas()
             table_dict = {
-                "Variant": [f"""${round(self.spend / np.sum(self.results["test"][self.y_variable]), 2)}"""],
-                "Baseline": [
-                    f"""${round(self.spend / (np.sum(self.results["counterfactual"][self.y_variable])), 2)}"""
-                ],
+                "Variant": [f"""${round(self.spend / self.results["test"][self.y_variable].sum(), 2)}"""],
+                "Baseline": [f"""${round(self.spend / (self.results["counterfactual"][self.y_variable].sum()), 2)}"""],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
                 "Lift": [f"${round(roas_lift, 2)}"],
@@ -245,30 +257,39 @@ class PenalizedSyntheticControl(EconometricEstimator):
         roas_lift = self.spend / lift if lift > 0 else np.inf
         return roas_lift, 1, 2
 
-    def _create_v(self, groupby_x: pd.DataFrame, groupby_y: pd.Series) -> "PenalizedSyntheticControl":
+    def _create_v(
+        self,
+        groupby_x_arr: np.ndarray,
+        groupby_x_cols: list[str],
+        groupby_y_scalar: float,
+    ) -> "PenalizedSyntheticControl":
         """Creates the V matrix used for calculating the weights of our model
 
         Parameters
         ----------
-        groupby_x : pandas DataFrame
-            Contains the average y-variable of our control geos
-        groupby_y : pandas Series
+        groupby_x_arr : numpy array
+            Contains the average y-variable of our control geos (shape: 1 x n_geos)
+        groupby_x_cols : list of str
+            Column names (geo names) for groupby_x
+        groupby_y_scalar : float
             Contains the average cumulative y-variable of our test geos
 
         Returns
         -------
         Itself, but with the weights model created
         """
-        X = pd.concat([groupby_x, groupby_y], axis=1)
-        X_scaled = X.divide(X.std(axis=1), axis=0)
-        groupby_x_scaled, groupby_y_scaled = (
-            X_scaled.drop(columns=groupby_y.name),
-            X_scaled[groupby_y.name],
-        )
-        groupby_x_arr: np.ndarray = groupby_x_scaled.to_numpy()
-        groupby_y_arr: np.ndarray = groupby_y_scaled.to_numpy()
-        self.V = np.identity(groupby_x_arr.shape[0])
-        self.model = self._create_model(groupby_x_arr, groupby_y_arr)
+        # Stack control averages (1 x n_geos) and test mean (scalar) into one matrix
+        # for scaling: shape (1, n_geos+1)
+        X_full = np.hstack([groupby_x_arr, [[groupby_y_scalar]]])  # (1, n_geos+1)
+        std_vals = X_full.std(axis=1, keepdims=True)
+        std_vals = np.where(std_vals == 0, 1.0, std_vals)
+        X_scaled = X_full / std_vals
+
+        groupby_x_scaled = X_scaled[:, :-1]  # (1, n_geos)
+        groupby_y_scaled = X_scaled[:, -1:]  # (1, 1)
+
+        self.V = np.identity(groupby_x_scaled.shape[0])
+        self.model = self._create_model(groupby_x_scaled, groupby_y_scaled.flatten())
         return self
 
     def _create_model(self, groupby_x: np.ndarray, groupby_y: np.ndarray) -> np.ndarray:
@@ -316,7 +337,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
+    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
         """Calculates the loss function for our model weights matrix
 
         Parameters
@@ -366,8 +387,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
                     x=self.dates,
                     y=np.concatenate(
                         [
-                            self.actual_pre[self.y_variable],
-                            self.actual_post[self.y_variable],
+                            self.actual_pre[self.y_variable].to_numpy(),
+                            self.actual_post[self.y_variable].to_numpy(),
                         ]
                     ),
                     marker={"color": "blue"},
@@ -378,8 +399,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
                     x=self.dates,
                     y=np.concatenate(
                         [
-                            self.prediction_pre[self.y_variable],
-                            self.prediction_post[self.y_variable],
+                            self.prediction_pre[self.y_variable].to_numpy(),
+                            self.prediction_post[self.y_variable].to_numpy(),
                         ]
                     ),
                     marker={"color": "red"},
@@ -389,11 +410,11 @@ class PenalizedSyntheticControl(EconometricEstimator):
             ]
         )
         residuals = np.concatenate(
-            [self.actual_pre[self.y_variable], self.actual_post[self.y_variable]]
+            [self.actual_pre[self.y_variable].to_numpy(), self.actual_post[self.y_variable].to_numpy()]
         ) - np.concatenate(
             [
-                self.prediction_pre[self.y_variable],
-                self.prediction_post[self.y_variable],
+                self.prediction_pre[self.y_variable].to_numpy(),
+                self.prediction_post[self.y_variable].to_numpy(),
             ]
         )
         middle_fig = go.Figure(
@@ -407,8 +428,9 @@ class PenalizedSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
-        marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
+        cum_resids = self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy()
+        post_period_date = date_cls.fromisoformat(self.post_period)
+        marketing_start = [d for d in self.dates if d >= post_period_date]
         bottom_fig = go.Figure(
             [
                 go.Scatter(
@@ -422,8 +444,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
         )
         figures = [top_fig, middle_fig, bottom_fig]
         for i, figure in enumerate(figures):
-            for trace in range(len(figure["data"])):
-                total_fig.add_trace(figure["data"][trace], row=i + 1, col=1)
+            for trace_data in figure.data:
+                total_fig.add_trace(trace_data, row=i + 1, col=1)
                 total_fig.add_vline(
                     x=self.post_period,
                     line_width=1,

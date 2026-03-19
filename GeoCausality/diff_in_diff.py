@@ -1,9 +1,9 @@
 from math import ceil
 
+import narwhals as nw
 import numpy as np
-import pandas as pd
-import polars as pl
 import statsmodels.formula.api as smf
+from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -12,7 +12,7 @@ from GeoCausality._base import EconometricEstimator
 class DiffinDiff(EconometricEstimator):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -74,42 +74,39 @@ class DiffinDiff(EconometricEstimator):
             msrp,
             spend,
         )
-        self.groupby_data: pd.DataFrame | None = None
+        self.groupby_data: nw.DataFrame | None = None
         self.n_dates: int | None = None
 
     def pre_process(self) -> "DiffinDiff":
         super().pre_process()
+        assert self.treatment_variable is not None, "treatment_variable must not be None"
         self.groupby_data = (
-            self.data.groupby(
-                [
-                    f"{self.treatment_variable}",
-                    "treatment_period",
-                    f"{self.date_variable}",
-                ]
+            self.data.group_by(
+                [self.treatment_variable, "treatment_period", self.date_variable],
             )
-            .agg({f"{self.y_variable}": "sum"})
-            .reset_index()
+            .agg(nw.col(self.y_variable).sum())
+            .sort([self.treatment_variable, "treatment_period", self.date_variable])
         )
-        self.n_dates = len(
-            self.groupby_data.loc[
-                (self.groupby_data["is_treatment"] == 1) & (self.groupby_data["treatment_period"] == 1)
-            ]
-        )
+        self.n_dates = self.groupby_data.filter(
+            (nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1)
+        ).shape[0]
         return self
 
     def generate(self) -> "DiffinDiff":
+        assert self.groupby_data is not None, "groupby_data must not be None"
         self.model = smf.ols(
             f"{self.y_variable} ~ {self.treatment_variable} * treatment_period",
-            data=self.groupby_data,
+            data=self.groupby_data.to_pandas(),
         ).fit()
         cis = self.model.conf_int(alpha=self.alpha, cols=None).iloc[-1]
         self.results = dict(
             test=float(self.model.params["treatment_period"]),
             control=float(self.model.params["Intercept"]),
-            lift=self.model.params[f"{self.treatment_variable}:treatment_period"],
-            lift_ci_lower=cis[0],
-            lift_ci_upper=cis[1],
+            lift=float(self.model.params[f"{self.treatment_variable}:treatment_period"]),
+            lift_ci_lower=float(cis[0]),
+            lift_ci_upper=float(cis[1]),
         )
+        assert self.n_dates is not None
         self.results["incrementality"] = self.results["lift"] * self.n_dates
         self.results["incrementality_ci_lower"] = self.results["lift_ci_lower"] * self.n_dates
         self.results["incrementality_ci_upper"] = self.results["lift_ci_upper"] * self.n_dates

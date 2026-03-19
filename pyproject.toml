@@ -34,7 +34,6 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "black (>=25.1.0,<26.0.0)",
     "pytest (>=8.3.5,<9.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)"
 ]
@@ -71,16 +70,5 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 
-[tool.black]
-line-length = 120
-indent-width = 4
-
-[tool.black.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
-
-[tool.mypy]
+[tool.zuban]
 ignore_missing_imports = true
-no_incremental = true

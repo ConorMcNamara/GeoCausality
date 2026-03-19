@@ -1,10 +1,12 @@
+from datetime import date as date_cls
 from math import ceil
 from typing import Any
 
+import narwhals as nw
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
+from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 from tabulate import tabulate  # type: ignore
 
@@ -14,7 +16,7 @@ from GeoCausality._base import EconometricEstimator
 class RobustSyntheticControl(EconometricEstimator):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -87,94 +89,110 @@ class RobustSyntheticControl(EconometricEstimator):
             spend,
         )
         self.dates: list[Any] | None = None
-        self.prediction_pre: pd.DataFrame | None = None
-        self.prediction_post: pd.DataFrame | None = None
-        self.actual_pre: pd.DataFrame | None = None
-        self.actual_post: pd.DataFrame | None = None
+        self.prediction_pre: nw.DataFrame | None = None
+        self.prediction_post: nw.DataFrame | None = None
+        self.actual_pre: nw.DataFrame | None = None
+        self.actual_post: nw.DataFrame | None = None
         self.lambda_ = lambda_
         if (threshold is None) and (sv_count is None):
             raise ValueError("At least one of `threshold` or `sv_count` cannot be None")
         self.threshold = threshold
         self.sv_count = sv_count
-        self.daily_x: pd.DataFrame | None = None
-        self.daily_y: pd.DataFrame | None = None
+        self.daily_x: nw.DataFrame | None = None
+        self.daily_y: nw.DataFrame | None = None
 
     def pre_process(self) -> "RobustSyntheticControl":
         super().pre_process()
-        self.dates = sorted(self.data[self.date_variable].unique())
-        day_x = self.data.loc[
-            (self.data[self.treatment_variable] == 0),
-            [self.y_variable, self.geo_variable, self.date_variable],
-        ]
-        self.daily_x = day_x.pivot(index=self.date_variable, columns=self.geo_variable)[[self.y_variable]]
-        daily_y = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+        self.dates = sorted(self.data[self.date_variable].unique().to_list())
+        assert self.treatment_variable is not None
+        day_x = self.data.filter(nw.col(self.treatment_variable) == 0).select(
+            [self.y_variable, self.geo_variable, self.date_variable]
         )
-        self.daily_y = daily_y.set_index(self.date_variable)
+        # Pivot: rows=dates, cols=geos
+        self.daily_x = nw.from_native(
+            day_x.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
+        )
+        daily_y = (
+            self.data.filter(nw.col(self.treatment_variable) == 1)
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
+        )
+        self.daily_y = daily_y
         return self
 
     def generate(self) -> "RobustSyntheticControl":
         self.model = self._create_model()
+        assert self.treatment_variable is not None
         self.actual_pre = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
         )
         self.actual_post = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 1) & (self.data["treatment_period"] == 1),
-                [self.y_variable, self.date_variable],
-            ]
-            .groupby([self.date_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
         )
         control_pre = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 0),
-                [self.y_variable, self.date_variable, self.geo_variable],
-            ]
-            .groupby([self.date_variable, self.geo_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
+            .select([self.y_variable, self.date_variable, self.geo_variable])
+            .group_by([self.date_variable, self.geo_variable])
+            .agg(nw.col(self.y_variable).sum())
+            .sort([self.date_variable, self.geo_variable])
         )
         control_post = (
-            self.data.loc[
-                (self.data[self.treatment_variable] == 0) & (self.data["treatment_period"] == 1),
-                [self.y_variable, self.date_variable, self.geo_variable],
-            ]
-            .groupby([self.date_variable, self.geo_variable])[self.y_variable]
-            .sum()
-            .reset_index()
+            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
+            .select([self.y_variable, self.date_variable, self.geo_variable])
+            .group_by([self.date_variable, self.geo_variable])
+            .agg(nw.col(self.y_variable).sum())
+            .sort([self.date_variable, self.geo_variable])
         )
-        control_pre_pivot = control_pre.pivot(index=self.geo_variable, columns=self.date_variable)[[self.y_variable]].T
-        control_post_pivot = control_post.pivot(index=self.geo_variable, columns=self.date_variable)[
-            [self.y_variable]
-        ].T
-        prediction_pre = control_pre_pivot @ self.model
-        prediction_post = control_post_pivot @ self.model
-        self.prediction_post = (
-            prediction_post.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
+        # Pivot: rows=dates, cols=geos
+        control_pre_pivot = nw.from_native(
+            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
         )
-        self.prediction_pre = (
-            prediction_pre.reset_index().drop(["level_0"], axis=1).rename({0: self.y_variable}, axis=1)
+        control_post_pivot = nw.from_native(
+            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
+        )
+        control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
+        control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
+
+        prediction_pre_arr = control_pre_mat @ self.model
+        prediction_post_arr = control_post_mat @ self.model
+
+        self.prediction_pre = nw.from_native(
+            pl.DataFrame(
+                {
+                    self.date_variable: control_pre_pivot[self.date_variable].to_native(),
+                    self.y_variable: prediction_pre_arr.flatten(),
+                }
+            ),
+            eager_only=True,
+        )
+        self.prediction_post = nw.from_native(
+            pl.DataFrame(
+                {
+                    self.date_variable: control_post_pivot[self.date_variable].to_native(),
+                    self.y_variable: prediction_post_arr.flatten(),
+                }
+            ),
+            eager_only=True,
         )
         self.results = {
             "test": self.actual_post,
             "counterfactual": self.prediction_post,
-            "lift": self.actual_post[self.y_variable] - self.prediction_post[self.y_variable],
+            "lift": self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy(),
         }
-        self.results["incrementality"] = float(np.sum(self.results["lift"]))
+        self.results["incrementality"] = float(np.sum(self.results["lift"].to_numpy()))
         return self
 
     def _create_model(self) -> np.ndarray:
@@ -188,12 +206,15 @@ class RobustSyntheticControl(EconometricEstimator):
             raise ValueError("daily_x must not be None")
         if self.daily_y is None:
             raise ValueError("daily_y must not be None")
-        daily_x_transposed = self.daily_x.T.values
+        # daily_x pivot has date column first; drop it to get geo columns only
+        daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
+        daily_x_transposed = daily_x_mat.T
         M_hat = self._svd(daily_x_transposed).T
-        time_end = pd.to_datetime(self.post_period)
-        end_idx = self.daily_x.index.to_list().index(time_end)
+        post_period_date = date_cls.fromisoformat(self.post_period)
+        date_list = self.daily_x[self.date_variable].to_list()
+        end_idx = date_list.index(post_period_date)
         M_hat_neg = M_hat[:end_idx, :]
-        Y1_neg = self.daily_y.to_numpy()[:end_idx]
+        Y1_neg = self.daily_y[self.y_variable].to_numpy()[:end_idx]
 
         W = np.matmul(
             np.linalg.inv(M_hat_neg.T @ M_hat_neg + self.lambda_ * np.identity(M_hat_neg.shape[1])),
@@ -220,16 +241,16 @@ class RobustSyntheticControl(EconometricEstimator):
         # ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict = {
-                "Variant": [np.sum(self.results["test"][self.y_variable])],
-                "Baseline": [np.sum(self.results["counterfactual"][self.y_variable])],
+                "Variant": [self.results["test"][self.y_variable].sum()],
+                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
                 "Metric": [self.y_variable],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
             }
         elif lift == "relative":
             table_dict = {
-                "Variant": [np.sum(self.results["test"][self.y_variable])],
-                "Baseline": [np.sum(self.results["counterfactual"][self.y_variable])],
+                "Variant": [self.results["test"][self.y_variable].sum()],
+                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
                 "Metric": [self.y_variable],
                 "Lift Type": ["Relative"],
                 "Lift": [
@@ -237,7 +258,7 @@ class RobustSyntheticControl(EconometricEstimator):
                         round(
                             float(self.results["incrementality"])
                             * 100
-                            / (np.sum(self.results["counterfactual"][self.y_variable])),
+                            / (self.results["counterfactual"][self.y_variable].sum()),
                             2,
                         )
                     }%"""
@@ -245,10 +266,8 @@ class RobustSyntheticControl(EconometricEstimator):
             }
         elif lift == "revenue":
             table_dict = {
-                "Variant": [f"""${round(np.sum(self.results["test"][self.y_variable]) * self.msrp, 2):,}"""],
-                "Baseline": [
-                    f"""${round((np.sum(self.results["counterfactual"][self.y_variable])) * self.msrp, 2):,}"""
-                ],
+                "Variant": [f"""${round(self.results["test"][self.y_variable].sum() * self.msrp, 2):,}"""],
+                "Baseline": [f"""${round((self.results["counterfactual"][self.y_variable].sum()) * self.msrp, 2):,}"""],
                 "Metric": ["Revenue"],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
@@ -256,10 +275,8 @@ class RobustSyntheticControl(EconometricEstimator):
         else:
             roas_lift, _, _ = self._get_roas()
             table_dict = {
-                "Variant": [f"""${round(self.spend / np.sum(self.results["test"][self.y_variable]), 2)}"""],
-                "Baseline": [
-                    f"""${round(self.spend / (np.sum(self.results["counterfactual"][self.y_variable])), 2)}"""
-                ],
+                "Variant": [f"""${round(self.spend / self.results["test"][self.y_variable].sum(), 2)}"""],
+                "Baseline": [f"""${round(self.spend / (self.results["counterfactual"][self.y_variable].sum()), 2)}"""],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
                 "Lift": [f"${round(roas_lift, 2)}"],
@@ -335,8 +352,8 @@ class RobustSyntheticControl(EconometricEstimator):
                     x=self.dates,
                     y=np.concatenate(
                         [
-                            self.actual_pre[self.y_variable],
-                            self.actual_post[self.y_variable],
+                            self.actual_pre[self.y_variable].to_numpy(),
+                            self.actual_post[self.y_variable].to_numpy(),
                         ]
                     ),
                     marker={"color": "blue"},
@@ -347,8 +364,8 @@ class RobustSyntheticControl(EconometricEstimator):
                     x=self.dates,
                     y=np.concatenate(
                         [
-                            self.prediction_pre[self.y_variable],
-                            self.prediction_post[self.y_variable],
+                            self.prediction_pre[self.y_variable].to_numpy(),
+                            self.prediction_post[self.y_variable].to_numpy(),
                         ]
                     ),
                     marker={"color": "red"},
@@ -358,11 +375,11 @@ class RobustSyntheticControl(EconometricEstimator):
             ]
         )
         residuals = np.concatenate(
-            [self.actual_pre[self.y_variable], self.actual_post[self.y_variable]]
+            [self.actual_pre[self.y_variable].to_numpy(), self.actual_post[self.y_variable].to_numpy()]
         ) - np.concatenate(
             [
-                self.prediction_pre[self.y_variable],
-                self.prediction_post[self.y_variable],
+                self.prediction_pre[self.y_variable].to_numpy(),
+                self.prediction_post[self.y_variable].to_numpy(),
             ]
         )
         middle_fig = go.Figure(
@@ -376,8 +393,9 @@ class RobustSyntheticControl(EconometricEstimator):
                 )
             ]
         )
-        cum_resids = np.array(self.actual_post[self.y_variable]) - np.array(self.prediction_post[self.y_variable])
-        marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
+        cum_resids = self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy()
+        post_period_date = date_cls.fromisoformat(self.post_period)
+        marketing_start = [d for d in self.dates if d >= post_period_date]
         bottom_fig = go.Figure(
             [
                 go.Scatter(
@@ -391,8 +409,8 @@ class RobustSyntheticControl(EconometricEstimator):
         )
         figures = [top_fig, middle_fig, bottom_fig]
         for i, figure in enumerate(figures):
-            for trace in range(len(figure["data"])):
-                total_fig.add_trace(figure["data"][trace], row=i + 1, col=1)
+            for trace_data in figure.data:
+                total_fig.add_trace(trace_data, row=i + 1, col=1)
                 total_fig.add_vline(
                     x=self.post_period,
                     line_width=1,

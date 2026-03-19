@@ -2,15 +2,14 @@ import abc
 from abc import ABC
 from typing import Any
 
-import numpy as np
-import pandas as pd
-import polars as pl
+import narwhals as nw
+from narwhals.typing import IntoDataFrame
 
 
 class Estimator(abc.ABC):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -54,7 +53,7 @@ class Estimator(abc.ABC):
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
         """
-        self.data = data.copy()
+        self.data: nw.DataFrame = nw.from_native(data, eager_only=True)
         self.test_geos = test_geos
         self.control_geos = control_geos
         self.pre_period = pre_period
@@ -124,7 +123,7 @@ class Estimator(abc.ABC):
 class EconometricEstimator(Estimator, ABC):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -186,15 +185,24 @@ class EconometricEstimator(Estimator, ABC):
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
-            self.data[self.treatment_variable] = self.data[self.geo_variable].isin(self.test_geos).astype(int)
+            if self.treatment_variable is not None:
+                self.data: nw.DataFrame = self.data.with_columns(
+                    nw.col(self.geo_variable).is_in(self.test_geos).cast(nw.Int64).alias(self.treatment_variable)
+                )
         elif self.control_geos is not None:
-            self.data[self.treatment_variable] = 1 - self.data[self.geo_variable].isin(self.control_geos).astype(int)
+            if self.treatment_variable is not None:
+                self.data: nw.DataFrame = self.data.with_columns(
+                    (1 - nw.col(self.geo_variable).is_in(self.control_geos).cast(nw.Int64)).alias(
+                        self.treatment_variable
+                    )
+                )
         else:
             pass
-        self.data["treatment_period"] = np.where(
-            self.data[self.date_variable] <= self.pre_period,
-            0,
-            np.where(self.data[self.date_variable] >= self.post_period, 1, 0),
+        self.data: nw.DataFrame = self.data.with_columns(
+            nw.when(nw.col(self.date_variable) <= self.pre_period)
+            .then(0)
+            .otherwise(nw.when(nw.col(self.date_variable) >= self.post_period).then(1).otherwise(0))
+            .alias("treatment_period")
         )
 
         return self
@@ -203,7 +211,7 @@ class EconometricEstimator(Estimator, ABC):
 class MLEstimator(Estimator, abc.ABC):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -262,33 +270,46 @@ class MLEstimator(Estimator, abc.ABC):
             spend,
         )
 
-        self.pre_control: pd.DataFrame | None = None
-        self.post_control: pd.DataFrame | None = None
-        self.pre_test: pd.DataFrame | None = None
-        self.post_test: pd.DataFrame | None = None
+        self.pre_control: nw.DataFrame | None = None
+        self.post_control: nw.DataFrame | None = None
+        self.pre_test: nw.DataFrame | None = None
+        self.post_test: nw.DataFrame | None = None
         self.model: Any = None
-        self.test_dates: pd.Series | None = None
+        self.test_dates: nw.Series | None = None
 
     def pre_process(self) -> "MLEstimator":
-        pre_control = self.data[
-            (self.data[self.date_variable] <= self.pre_period) & (self.data[self.treatment_variable] == 0)
-        ]
-        self.pre_control = pre_control.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        self.pre_control.drop([self.date_variable], axis=1, inplace=True)
-        pre_test = self.data[
-            (self.data[self.date_variable] <= self.pre_period) & (self.data[self.treatment_variable] == 1)
-        ]
-        self.pre_test = pre_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        self.pre_test.drop([self.date_variable], axis=1, inplace=True)
-        post_control = self.data[
-            (self.data[self.date_variable] >= self.post_period) & (self.data[self.treatment_variable] == 0)
-        ]
-        self.post_control = post_control.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        self.test_dates = self.post_control[self.date_variable]
-        self.post_control.drop([self.date_variable], axis=1, inplace=True)
-        post_test = self.data[
-            (self.data[self.date_variable] >= self.post_period) & (self.data[self.treatment_variable] == 1)
-        ]
-        self.post_test = post_test.groupby([self.date_variable])[self.y_variable].sum().reset_index()
-        self.post_test.drop([self.date_variable], axis=1, inplace=True)
+        if self.treatment_variable is not None:
+            pre_control = self.data.filter(
+                (nw.col(self.date_variable) <= self.pre_period) & (nw.col(self.treatment_variable) == 0)
+            )
+            self.pre_control = (
+                pre_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
+            )
+            self.pre_control = self.pre_control.drop(self.date_variable)
+
+            pre_test = self.data.filter(
+                (nw.col(self.date_variable) <= self.pre_period) & (nw.col(self.treatment_variable) == 1)
+            )
+            self.pre_test = (
+                pre_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
+            )
+            self.pre_test = self.pre_test.drop(self.date_variable)
+
+            post_control = self.data.filter(
+                (nw.col(self.date_variable) >= self.post_period) & (nw.col(self.treatment_variable) == 0)
+            )
+            self.post_control = (
+                post_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
+            )
+            self.test_dates = self.post_control[self.date_variable]
+            self.post_control = self.post_control.drop(self.date_variable)
+
+            post_test = self.data.filter(
+                (nw.col(self.date_variable) >= self.post_period) & (nw.col(self.treatment_variable) == 1)
+            )
+            self.post_test = (
+                post_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
+            )
+            self.post_test = self.post_test.drop(self.date_variable)
+
         return self

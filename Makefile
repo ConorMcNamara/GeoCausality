@@ -16,10 +16,10 @@ help:
 	@echo ""
 	@echo "Development"
 	@echo "  install       Install runtime dependencies"
-	@echo "  install-dev   Install runtime + dev dependencies (pytest, ruff, mypy)"
+	@echo "  install-dev   Install runtime + dev dependencies (pytest, ruff, zuban)"
 	@echo "  format        Auto-format code with ruff"
 	@echo "  lint          Check code style with ruff"
-	@echo "  type-check    Run mypy static type checker"
+	@echo "  type-check    Run zuban static type checker"
 	@echo "  check         Run lint + type-check (mirrors CI)"
 	@echo "  test          Run the test suite with pytest + coverage summary"
 	@echo "  coverage      Run tests and open an HTML coverage report"
@@ -37,7 +37,7 @@ install:
 .PHONY: install-dev
 install-dev:
 	$(PYTHON) -m pip install -e ".[dev]"
-	$(PYTHON) -m pip install ruff mypy pydocstringformatter
+	$(PYTHON) -m pip install ruff zuban pydocstringformatter
 
 # ── code quality ─────────────────────────────────────────────────────────────
 .PHONY: format
@@ -51,7 +51,7 @@ lint:
 
 .PHONY: type-check
 type-check:
-	mypy $(SRC) --ignore-missing-imports
+	zuban check $(SRC)
 
 .PHONY: check
 check: lint type-check
@@ -73,7 +73,7 @@ clean:
 	rm -rf dist build *.egg-info
 	rm -rf htmlcov .coverage coverage.xml
 	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .mypy_cache -exec rm -rf {} +
+	find . -type d -name .zuban_cache -exec rm -rf {} +
 	find . -type d -name .pytest_cache -exec rm -rf {} +
 	find . -type d -name .ruff_cache  -exec rm -rf {} +
 	find . -name "*.pyc" -delete

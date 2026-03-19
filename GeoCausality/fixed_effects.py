@@ -1,9 +1,9 @@
 from math import ceil
 
+import narwhals as nw
 import numpy as np
-import pandas as pd
-import polars as pl
 from linearmodels.panel import PanelOLS
+from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -12,7 +12,7 @@ from GeoCausality._base import EconometricEstimator
 class FixedEffects(EconometricEstimator):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -79,18 +79,25 @@ class FixedEffects(EconometricEstimator):
 
     def pre_process(self) -> "FixedEffects":
         super().pre_process()
-        self.data["campaign_treatment"] = self.data["treatment_period"] * self.data[self.treatment_variable]
-        self.n_dates = int(
-            self.data.loc[self.data["campaign_treatment"] == 1, "campaign_treatment"].sum()
-            / len(self.data.loc[self.data["campaign_treatment"] == 1, f"{self.geo_variable}"].unique())
+        assert self.treatment_variable is not None, "treatment_variable must not be None"
+        self.data: nw.DataFrame = self.data.with_columns(
+            (nw.col("treatment_period") * nw.col(self.treatment_variable)).alias("campaign_treatment")
         )
-        self.n_geos = len(self.data.loc[self.data["campaign_treatment"] == 1, f"{self.geo_variable}"].unique())
+        campaign_sum = (
+            self.data.filter(nw.col("campaign_treatment") == 1).select(nw.col("campaign_treatment").sum()).item()
+        )
+        n_unique_geos = (
+            self.data.filter(nw.col("campaign_treatment") == 1).select(nw.col(self.geo_variable).n_unique()).item()
+        )
+        self.n_dates = int(campaign_sum / n_unique_geos)
+        self.n_geos = n_unique_geos
         return self
 
     def generate(self) -> "FixedEffects":
+        data_pd = self.data.to_pandas().set_index([self.geo_variable, self.date_variable])
         model = PanelOLS.from_formula(
             f"{self.y_variable} ~ campaign_treatment + EntityEffects + TimeEffects",
-            data=self.data.set_index([self.geo_variable, self.date_variable]),
+            data=data_pd,
         )
         self.model = model.fit(cov_type="clustered", cluster_entity=True, cluster_time=True)
         cis = self.model.conf_int(1 - self.alpha)

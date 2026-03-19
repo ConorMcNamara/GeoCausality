@@ -1,11 +1,12 @@
 from math import ceil
 from typing import Any
 
+import narwhals as nw
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 import statsmodels.api as sm
+from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
@@ -16,7 +17,7 @@ from GeoCausality._base import MLEstimator
 class GeoX(MLEstimator):
     def __init__(
         self,
-        data: pd.DataFrame | pl.DataFrame,
+        data: IntoDataFrame,
         geo_variable: str = "geo",
         test_geos: list[str] | None = None,
         control_geos: list[str] | None = None,
@@ -79,8 +80,8 @@ class GeoX(MLEstimator):
             spend,
         )
         self.intercept_test: Any = None
-        self.prediction_pre: pd.DataFrame | None = None
-        self.prediction_post: pd.DataFrame | None = None
+        self.prediction_pre: nw.DataFrame | None = None
+        self.prediction_post: nw.DataFrame | None = None
         self.dates: list[Any] | None = None
 
     def generate(self, rescale: float = 1.0) -> "GeoX":
@@ -92,23 +93,30 @@ class GeoX(MLEstimator):
             raise ValueError("post_control must not be None")
         if self.post_test is None:
             raise ValueError("post_test must not be None")
-        intercept_train = sm.add_constant(self.pre_control)
-        self.model = sm.OLS(self.pre_test.values, intercept_train.values).fit()
-        self.intercept_test = sm.add_constant(self.post_control.values)
+        pre_control_np = self.pre_control[self.y_variable].to_numpy()
+        intercept_train = sm.add_constant(pre_control_np)
+        self.model = sm.OLS(self.pre_test[self.y_variable].to_numpy().flatten(), intercept_train).fit()
+        self.intercept_test = sm.add_constant(self.post_control[self.y_variable].to_numpy())
         model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
-        self.post_test["counterfactual"] = model_summary["mean"]
+        # Add counterfactual column via native polars to avoid narwhals Series construction complexity
+        post_test_native = self.post_test.to_native()
+        post_test_native = post_test_native.with_columns(pl.Series("counterfactual", model_summary["mean"]))
+        self.post_test = nw.from_native(post_test_native, eager_only=True)
+        incrementality = self.post_test[self.y_variable].to_numpy() - self.post_test["counterfactual"].to_numpy()
+        ci_lower_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_upper"].values
+        ci_upper_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_lower"].values
         self.results = {
             "date": self.test_dates,
-            "test": self.post_test["orders"],
-            "control": self.post_control["orders"],
+            "test": self.post_test[self.y_variable],
+            "control": self.post_control[self.y_variable],
             "counterfactual": self.post_test["counterfactual"],
             "counterfactual_ci_lower": model_summary["obs_ci_lower"],
             "counterfactual_ci_upper": model_summary["obs_ci_upper"],
-            "incrementality": self.post_test["orders"] - self.post_test["counterfactual"],
-            "incrementality_ci_lower": self.post_test["orders"] - model_summary["obs_ci_upper"],
-            "incrementality_ci_upper": self.post_test["orders"] - model_summary["obs_ci_lower"],
+            "incrementality": incrementality,
+            "incrementality_ci_lower": ci_lower_series,
+            "incrementality_ci_upper": ci_upper_series,
         }
-        self.results["cumulative_incrementality"] = self.results["incrementality"].cumsum()
+        self.results["cumulative_incrementality"] = np.cumsum(self.results["incrementality"])
         ci_dict = self._get_cumulative_cis(rescale)
         self.results["cumulative_incrementality_ci_lower"] = ci_dict["cumulative_ci_lower"]
         self.results["cumulative_incrementality_ci_upper"] = ci_dict["cumulative_ci_upper"]
@@ -139,7 +147,7 @@ class GeoX(MLEstimator):
         if lift in ["incremental", "absolute"]:
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [f"""{ceil(self.results["cumulative_incrementality"].iloc[-1]):,}"""]
+            table_dict["Lift"] = [f"""{ceil(self.results["cumulative_incrementality"][-1]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""{ceil(self.results["cumulative_incrementality_ci_lower"][-1]):,}"""
             ]
@@ -152,7 +160,7 @@ class GeoX(MLEstimator):
             table_dict["Lift"] = [
                 f"""{
                     round(
-                        float(self.results["cumulative_incrementality"].iloc[-1])
+                        float(self.results["cumulative_incrementality"][-1])
                         * 100
                         / np.sum(self.results["counterfactual"]),
                         2,
@@ -182,7 +190,7 @@ class GeoX(MLEstimator):
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [f"""${round(self.results["cumulative_incrementality"].iloc[-1] * self.msrp, 2):,}"""]
+            table_dict["Lift"] = [f"""${round(self.results["cumulative_incrementality"][-1] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["cumulative_incrementality_ci_lower"][-1] * self.msrp, 2):,}"""
             ]
@@ -202,7 +210,7 @@ class GeoX(MLEstimator):
     def _get_roas(self) -> tuple[float, float, float]:
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = ceil(self.results["cumulative_incrementality"].iloc[-1])
+        lift = ceil(self.results["cumulative_incrementality"][-1])
         roas_lift = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
         roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
@@ -210,7 +218,7 @@ class GeoX(MLEstimator):
         roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
         return roas_lift, roas_ci_lower, roas_ci_upper
 
-    def _cumulative_distribution(self, rescale: float = 1.0) -> "t_dist":
+    def _cumulative_distribution(self, rescale: float = 1.0) -> Any:
         """Calculates the shifted distribution of our cumulative data
 
         Parameters
@@ -232,14 +240,15 @@ class GeoX(MLEstimator):
             raise ValueError("results must not be None")
         test_len = len(self.post_control)
         one_to_t = np.arange(1, test_len + 1)
-        one_to_t.shape = (test_len, 1)
-        control_matrix = sm.add_constant(self.results["control"])
-        cumulative_control_t = control_matrix.cumsum() / one_to_t
+        one_to_t = one_to_t.reshape(test_len, 1)
+        control_arr = np.array(self.results["control"])
+        control_matrix = sm.add_constant(control_arr)
+        cumulative_control_t = np.cumsum(control_matrix, axis=0) / one_to_t
         param_covariance = np.array(self.model.cov_params())
         var_params_list: list[Any] = []
         for t in range(test_len):
             # Sum of parameter variance terms from eqn 5 of Kerman 2017.
-            var_t = cumulative_control_t.iloc[t,].values @ param_covariance @ cumulative_control_t.iloc[t,].values.T
+            var_t = cumulative_control_t[t] @ param_covariance @ cumulative_control_t[t].T
             var_params_list.append(var_t)
         var_params = np.array(var_params_list).reshape(test_len, 1)
         var_from_params = var_params * pow(one_to_t, 2)
@@ -295,10 +304,10 @@ class GeoX(MLEstimator):
             raise ValueError("post_test must not be None")
         if self.results is None:
             raise ValueError("results must not be None")
-        self.dates = sorted(self.data[self.date_variable].unique())
-        marketing_start = [date for date in self.dates if date >= pd.to_datetime(self.post_period)]
-        control_data = pd.concat([self.pre_control, self.post_control])
-        counterfactual = self.model.predict(sm.add_constant(control_data))
+        self.dates = sorted(self.data[self.date_variable].unique().to_list())
+        marketing_start = [date for date in self.dates if date >= self.post_period]
+        control_data = nw.concat([self.pre_control, self.post_control])
+        counterfactual = self.model.predict(sm.add_constant(control_data[self.y_variable].to_numpy()))
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -312,7 +321,9 @@ class GeoX(MLEstimator):
             [
                 go.Scatter(
                     x=self.dates,
-                    y=np.concatenate([self.pre_test["orders"], self.post_test["orders"]]),
+                    y=np.concatenate(
+                        [self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()]
+                    ),
                     marker={"color": "blue"},
                     mode="lines",
                     name="Actual",
@@ -346,7 +357,10 @@ class GeoX(MLEstimator):
                 ),
             ]
         )
-        residuals = np.concatenate([self.pre_test["orders"], self.post_test["orders"]]) - counterfactual
+        residuals = (
+            np.concatenate([self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()])
+            - counterfactual
+        )
         middle_fig = go.Figure(
             [
                 go.Scatter(
@@ -412,8 +426,8 @@ class GeoX(MLEstimator):
         )
         figures = [top_fig, middle_fig, bottom_fig]
         for i, figure in enumerate(figures):
-            for trace in range(len(figure["data"])):
-                total_fig.add_trace(figure["data"][trace], row=i + 1, col=1)
+            for trace_data in figure.data:
+                total_fig.add_trace(trace_data, row=i + 1, col=1)
                 total_fig.add_vline(
                     x=self.post_period,
                     line_width=1,
