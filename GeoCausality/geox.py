@@ -4,7 +4,6 @@ from typing import Any
 import narwhals as nw
 import numpy as np
 import plotly.graph_objects as go
-import polars as pl
 import statsmodels.api as sm
 from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
@@ -98,10 +97,10 @@ class GeoX(MLEstimator):
         self.model = sm.OLS(self.pre_test[self.y_variable].to_numpy().flatten(), intercept_train).fit()
         self.intercept_test = sm.add_constant(self.post_control[self.y_variable].to_numpy())
         model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
-        # Add counterfactual column via native polars to avoid narwhals Series construction complexity
-        post_test_native = self.post_test.to_native()
-        post_test_native = post_test_native.with_columns(pl.Series("counterfactual", model_summary["mean"]))
-        self.post_test = nw.from_native(post_test_native, eager_only=True)
+        # Add counterfactual column via pandas (we're at a statsmodels boundary already)
+        post_test_pd = self.post_test.to_pandas()
+        post_test_pd = post_test_pd.assign(counterfactual=model_summary["mean"].values)
+        self.post_test = nw.from_native(post_test_pd, eager_only=True)
         incrementality = self.post_test[self.y_variable].to_numpy() - self.post_test["counterfactual"].to_numpy()
         ci_lower_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_upper"].values
         ci_upper_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_lower"].values
