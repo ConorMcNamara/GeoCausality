@@ -30,6 +30,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         msrp: float = 0.0,
         spend: float = 0.0,
         lambda_: float | None = None,
+        conformal_q: float = 1.0,
     ) -> None:
         """A class to run Augmented Synthetic Control for our geo-test.
 
@@ -63,6 +64,9 @@ class AugmentedSyntheticControl(EconometricEstimator):
              or cost-per-acquisition.
         lambda_ : float, default=0.1
             Ridge parameter to use. If not specified, then it is calculated through cross-validation
+        conformal_q : float, default=1.0
+            The exponent of the moving-block test statistic used for conformal
+            inference (p-values and confidence intervals).
 
         Notes
         -----
@@ -93,6 +97,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self.prediction_post: nw.DataFrame | None = None
         self.actual_pre: nw.DataFrame | None = None
         self.actual_post: nw.DataFrame | None = None
+        self.conformal_q = conformal_q
 
     def pre_process(self) -> "AugmentedSyntheticControl":
         super().pre_process()
@@ -206,6 +211,15 @@ class AugmentedSyntheticControl(EconometricEstimator):
             "lift": self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy(),
         }
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
+        self.results.update(
+            self._conformal_inference(
+                self.actual_pre[self.y_variable].to_numpy(),
+                self.prediction_pre[self.y_variable].to_numpy(),
+                self.actual_post[self.y_variable].to_numpy(),
+                self.prediction_post[self.y_variable].to_numpy(),
+                q=self.conformal_q,
+            )
+        )
         return self
 
     def summarize(self, lift: str) -> None:
@@ -224,49 +238,50 @@ class AugmentedSyntheticControl(EconometricEstimator):
                 f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
                 f"or `roas`"
             )
-        # ci_alpha = self._get_ci_print()
+        ci_alpha = self._get_ci_print()
+        baseline = self.results["counterfactual"][self.y_variable].sum()
         if lift in ["incremental", "absolute"]:
             table_dict = {
                 "Variant": [self.results["test"][self.y_variable].sum()],
-                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
+                "Baseline": [baseline],
                 "Metric": [self.y_variable],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
+                f"{ci_alpha} Lower CI": [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""],
+                f"{ci_alpha} Upper CI": [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""],
             }
         elif lift == "relative":
             table_dict = {
                 "Variant": [self.results["test"][self.y_variable].sum()],
-                "Baseline": [self.results["counterfactual"][self.y_variable].sum()],
+                "Baseline": [baseline],
                 "Metric": [self.y_variable],
                 "Lift Type": ["Relative"],
-                "Lift": [
-                    f"""{
-                        round(
-                            float(self.results["incrementality"])
-                            * 100
-                            / (self.results["counterfactual"][self.y_variable].sum()),
-                            2,
-                        )
-                    }%"""
-                ],
+                "Lift": [f"""{round(float(self.results["incrementality"]) * 100 / baseline, 2)}%"""],
+                f"{ci_alpha} Lower CI": [f"""{round(self.results["incrementality_ci_lower"] * 100 / baseline, 2)}%"""],
+                f"{ci_alpha} Upper CI": [f"""{round(self.results["incrementality_ci_upper"] * 100 / baseline, 2)}%"""],
             }
         elif lift == "revenue":
             table_dict = {
                 "Variant": [f"""${round(self.results["test"][self.y_variable].sum() * self.msrp, 2):,}"""],
-                "Baseline": [f"""${round((self.results["counterfactual"][self.y_variable].sum()) * self.msrp, 2):,}"""],
+                "Baseline": [f"""${round(baseline * self.msrp, 2):,}"""],
                 "Metric": ["Revenue"],
                 "Lift Type ": ["Incremental"],
                 "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
+                f"{ci_alpha} Lower CI": [f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""],
+                f"{ci_alpha} Upper CI": [f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""],
             }
         else:
-            roas_lift, _, _ = self._get_roas()
+            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
             table_dict = {
                 "Variant": [f"""${round(self.spend / self.results["test"][self.y_variable].sum(), 2)}"""],
-                "Baseline": [f"""${round(self.spend / (self.results["counterfactual"][self.y_variable].sum()), 2)}"""],
+                "Baseline": [f"""${round(self.spend / baseline, 2)}"""],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
                 "Lift": [f"${round(roas_lift, 2)}"],
+                f"{ci_alpha} Lower CI": [f"${round(roas_ci_lower, 2)}"],
+                f"{ci_alpha} Upper CI": [f"${round(roas_ci_upper, 2)}"],
             }
+        table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
     def _get_roas(self) -> tuple[float, float, float]:
@@ -274,7 +289,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
             raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
         roas_lift = self.spend / lift if lift > 0 else np.inf
-        return roas_lift, 1, 2
+        ci_upper = ceil(self.results["incrementality_ci_upper"])
+        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
+        ci_lower = ceil(self.results["incrementality_ci_lower"])
+        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        return roas_lift, roas_ci_lower, roas_ci_upper
 
     def _create_model(self) -> np.ndarray:
         if self.daily_x is None:
@@ -442,7 +461,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         _, s, _ = np.linalg.svd(X.T)
         lambda_max = np.power(s[0].item(), 2)
         scaler = np.power(lambda_min_ratio, (1 / n_lambda))
-        return lambda_max * (np.power(scaler, np.ndarray(range(n_lambda))))
+        return lambda_max * (np.power(scaler, np.arange(n_lambda)))
 
     @staticmethod
     def _loss_function(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
