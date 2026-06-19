@@ -97,6 +97,12 @@ make test
 
 Tests live in `test/`. When adding a new estimator or feature, add a corresponding test in `test/test_<module>.py`. The existing `test/test_geox.py` shows the expected pattern.
 
+### Test data
+
+Tests must run **offline and deterministically** — do not download datasets over the network at test time. Any dataset a test depends on is vendored under `test/data/`, gzipped to keep the repo lean (pandas reads `.csv.gz` transparently via `pd.read_csv(...)`). For example, `test/test_geox.py` reads `test/data/zipcodes_data.csv.gz` rather than fetching it from a URL; keep the source URL as a comment for provenance.
+
+When you need a new fixture dataset, prefer generating it synthetically in the test (e.g. with a seeded `numpy` generator for reproducibility); only vendor a real dataset when the test asserts against externally-computed reference values.
+
 ---
 
 ## Type Checking
