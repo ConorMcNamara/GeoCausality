@@ -1,15 +1,27 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from GeoCausality import geox
 
+# The zipcodes dataset is vendored (gzipped) under test/data so the suite runs
+# offline and deterministically rather than downloading it over the network at
+# runtime. Source:
+# https://raw.githubusercontent.com/juanitorduz/website_projects/master/data/zipcodes_data.csv
+DATA_PATH = Path(__file__).parent / "data" / "zipcodes_data.csv.gz"
+
+
+@pytest.fixture(scope="module")
+def data_df() -> pd.DataFrame:
+    df = pd.read_csv(DATA_PATH, parse_dates=["date"])
+    df["is_test"] = df["variant"] == "treatment"
+    return df
+
 
 class TestGeoX:
     @staticmethod
-    def test_geox_results() -> None:
-        data_path = "https://raw.githubusercontent.com/juanitorduz/website_projects/master/data/zipcodes_data.csv"
-        data_df = pd.read_csv(data_path, parse_dates=["date"])
-        data_df["is_test"] = data_df["variant"] == "treatment"
+    def test_geox_results(data_df: pd.DataFrame) -> None:
         geo_x = geox.GeoX(
             data_df,
             geo_variable="zipcode",
@@ -44,10 +56,7 @@ class TestGeoX:
         assert results["p_value"] == pytest.approx(p_value, abs=1e-10)
 
     @staticmethod
-    def test_geox_wrongInputs() -> None:
-        data_path = "https://raw.githubusercontent.com/juanitorduz/website_projects/master/data/zipcodes_data.csv"
-        data_df = pd.read_csv(data_path, parse_dates=["date"])
-        data_df["is_test"] = data_df["variant"] == "treatment"
+    def test_geox_wrongInputs(data_df: pd.DataFrame) -> None:
         geo_x = geox.GeoX(
             data_df,
             geo_variable="zipcode",
