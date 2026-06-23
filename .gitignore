@@ -1,6 +1,12 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,r,virtualenv,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,r,virtualenv,visualstudiocode
 
+### Project ###
+# macOS Finder metadata
+.DS_Store
+# JetBrains IDE settings
+.idea/
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/

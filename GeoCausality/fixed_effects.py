@@ -1,3 +1,5 @@
+"""Fixed-effects panel model for geo-experiment causal inference."""
+
 from math import ceil
 
 import narwhals as nw
@@ -10,6 +12,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class FixedEffects(EconometricEstimator):
+    """Run a two-way fixed-effects panel model for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -25,7 +29,7 @@ class FixedEffects(EconometricEstimator):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """A class to run our FixedEffects Model for geo-tests.
+        """Initialize the fixed-effects estimator.
 
         Parameters
         ----------
@@ -78,6 +82,13 @@ class FixedEffects(EconometricEstimator):
         self.n_geos: int | None = None
 
     def pre_process(self) -> "FixedEffects":
+        """Add the campaign-treatment interaction column and count treated dates and geos.
+
+        Returns
+        -------
+        FixedEffects
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         assert self.treatment_variable is not None, "treatment_variable must not be None"
         self.data: nw.DataFrame = self.data.with_columns(
@@ -94,6 +105,13 @@ class FixedEffects(EconometricEstimator):
         return self
 
     def generate(self) -> "FixedEffects":
+        """Fit the two-way fixed-effects model and store the lift estimates.
+
+        Returns
+        -------
+        FixedEffects
+            Itself, so it can be chained with summarize().
+        """
         data_pd = self.data.to_pandas().set_index([self.geo_variable, self.date_variable])
         model = PanelOLS.from_formula(
             f"{self.y_variable} ~ campaign_treatment + EntityEffects + TimeEffects",
@@ -115,6 +133,14 @@ class FixedEffects(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the estimated campaign lift.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"incremental"``,
+            ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("self.results must not be None")
         lift = lift.casefold()

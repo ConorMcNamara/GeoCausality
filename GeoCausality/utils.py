@@ -1,14 +1,18 @@
+"""Utility helpers for cross-validating synthetic-control time series."""
+
 import pandas as pd
 
 
 class HoldoutSplitter:
-    """Iterator that prepares the time series for cross-validation by
-    progressively removing blocks of length `holdout_len`.
+    """Prepare the time series for cross-validation as an iterator.
+
+    Progressively removes blocks of length ``holdout_len`` on each iteration.
     """
 
     def __init__(self, df: pd.DataFrame, ser: pd.Series, holdout_len: int = 1):
-        """Iterator that prepares the time series for cross-validation by
-        progressively removing blocks of length `holdout_len`.
+        """Initialize the splitter, validating the inputs.
+
+        Progressively removes blocks of length ``holdout_len`` on each iteration.
 
         Parameters
         ----------
@@ -40,10 +44,12 @@ class HoldoutSplitter:
         self.idx = 0
 
     def __iter__(self):
+        """Reset the iteration index and return the iterator itself."""
         self.idx = 0
         return self
 
     def __next__(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+        """Return the next train/holdout split of the dataframe and series."""
         if (self.idx + self.holdout_len) > self.df.shape[0]:
             raise StopIteration
         holdout = slice(self.idx, self.idx + self.holdout_len)

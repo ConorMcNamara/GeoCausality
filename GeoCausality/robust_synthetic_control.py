@@ -1,3 +1,5 @@
+"""Robust Synthetic Control method for geo-experiment causal inference."""
+
 from datetime import date as date_cls
 from math import ceil
 from typing import Any
@@ -14,6 +16,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class RobustSyntheticControl(EconometricEstimator):
+    """Run robust synthetic control for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -33,7 +37,7 @@ class RobustSyntheticControl(EconometricEstimator):
         sv_count: int | None = None,
         conformal_q: float = 1.0,
     ) -> None:
-        """A class to run Robust Synthetic Control for our geo-test.
+        """Initialize the robust synthetic control estimator.
 
         Parameters
         ----------
@@ -107,6 +111,13 @@ class RobustSyntheticControl(EconometricEstimator):
         self.daily_y: nw.DataFrame | None = None
 
     def pre_process(self) -> "RobustSyntheticControl":
+        """Pivot the control geos into a daily outcome matrix and aggregate the test series.
+
+        Returns
+        -------
+        RobustSyntheticControl
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         assert self.treatment_variable is not None
@@ -129,6 +140,13 @@ class RobustSyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "RobustSyntheticControl":
+        """Build the counterfactual from the de-noised weights and compute lift and inference.
+
+        Returns
+        -------
+        RobustSyntheticControl
+            Itself, so it can be chained with summarize().
+        """
         self.model = self._create_model()
         assert self.treatment_variable is not None
         self.actual_pre = (
@@ -210,7 +228,7 @@ class RobustSyntheticControl(EconometricEstimator):
         return self
 
     def _create_model(self) -> np.ndarray:
-        """Generates the weights used to predict our counterfactual
+        """Generate the weights used to predict our counterfactual.
 
         Returns
         -------
@@ -237,6 +255,14 @@ class RobustSyntheticControl(EconometricEstimator):
         return W
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the robust synthetic control results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -310,7 +336,7 @@ class RobustSyntheticControl(EconometricEstimator):
         return roas_lift, roas_ci_lower, roas_ci_upper
 
     def _svd(self, groupby_x_transposed: np.ndarray) -> np.ndarray:
-        """Performs singular value decomposition of our groupby_x_transposed matrix
+        """Perform singular value decomposition of our groupby_x_transposed matrix.
 
         Parameters
         ----------
@@ -340,7 +366,7 @@ class RobustSyntheticControl(EconometricEstimator):
         return M_hat
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------

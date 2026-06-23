@@ -1,3 +1,5 @@
+"""Difference-in-differences method for geo-experiment causal inference."""
+
 from math import ceil
 
 import narwhals as nw
@@ -10,6 +12,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class DiffinDiff(EconometricEstimator):
+    """Run difference-in-differences for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -25,7 +29,7 @@ class DiffinDiff(EconometricEstimator):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """A class to run difference-in-differences for our geo-test.
+        """Initialize the difference-in-differences estimator.
 
         Parameters
         ----------
@@ -78,6 +82,13 @@ class DiffinDiff(EconometricEstimator):
         self.n_dates: int | None = None
 
     def pre_process(self) -> "DiffinDiff":
+        """Aggregate the data by treatment, period and date and count post-period dates.
+
+        Returns
+        -------
+        DiffinDiff
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         assert self.treatment_variable is not None, "treatment_variable must not be None"
         self.groupby_data = (
@@ -93,6 +104,13 @@ class DiffinDiff(EconometricEstimator):
         return self
 
     def generate(self) -> "DiffinDiff":
+        """Fit the OLS model and compute lift, confidence intervals and incrementality.
+
+        Returns
+        -------
+        DiffinDiff
+            Itself, so it can be chained with summarize().
+        """
         assert self.groupby_data is not None, "groupby_data must not be None"
         self.model = smf.ols(
             f"{self.y_variable} ~ {self.treatment_variable} * treatment_period",
@@ -114,6 +132,14 @@ class DiffinDiff(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the difference-in-differences results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         if self.n_dates is None:
