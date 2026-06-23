@@ -1,3 +1,5 @@
+"""Augmented Synthetic Control method for geo-experiment causal inference."""
+
 from datetime import date as date_cls
 from math import ceil
 from typing import Any
@@ -15,6 +17,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class AugmentedSyntheticControl(EconometricEstimator):
+    """Run augmented synthetic control for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -32,7 +36,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         lambda_: float | None = None,
         conformal_q: float = 1.0,
     ) -> None:
-        """A class to run Augmented Synthetic Control for our geo-test.
+        """Initialize the augmented synthetic control estimator.
 
         Parameters
         ----------
@@ -100,6 +104,13 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self.conformal_q = conformal_q
 
     def pre_process(self) -> "AugmentedSyntheticControl":
+        """Aggregate the pre-period control and test data into the matrices used to fit weights.
+
+        Returns
+        -------
+        AugmentedSyntheticControl
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         assert self.treatment_variable is not None
@@ -142,6 +153,13 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "AugmentedSyntheticControl":
+        """Build the counterfactual from the fitted weights and compute lift and inference.
+
+        Returns
+        -------
+        AugmentedSyntheticControl
+            Itself, so it can be chained with summarize().
+        """
         self.model = self._create_model()
         assert self.treatment_variable is not None
         self.actual_pre = (
@@ -223,6 +241,14 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the augmented synthetic control results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -319,7 +345,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return W + W_ridge
 
     def _get_weights(self, V_matrix: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Creates our synthetic control using v, x and y
+        """Create our synthetic control using v, x and y.
 
         Parameters
         ----------
@@ -412,9 +438,9 @@ class AugmentedSyntheticControl(EconometricEstimator):
     def _cross_validate(
         self, X: np.ndarray, Y: np.ndarray, lambdas: np.ndarray, holdout_len: int = 1
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Method that calculates the mean error and standard error to the mean
-        error using a cross-validation procedure for the given ridge parameter
-        values.
+        """Calculate the mean error and standard error of the mean error via cross-validation.
+
+        Uses a cross-validation procedure across the given ridge parameter values.
         """
         n_rows = X.shape[0]
         V = np.identity(n_rows - holdout_len)
@@ -468,7 +494,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return 0.5 * x.T @ p @ x - q.T @ x
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------

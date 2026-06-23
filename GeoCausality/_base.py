@@ -24,7 +24,7 @@ class Estimator(abc.ABC):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """An abstract class for initializing our different geo-causality methods
+        """Initialize the geo-causality estimator (abstract base class).
 
         Parameters
         ----------
@@ -74,7 +74,7 @@ class Estimator(abc.ABC):
 
     @abc.abstractmethod
     def pre_process(self) -> "Estimator":
-        """Method used to pre-process our data to make it usable for our estimator
+        """Pre-process our data to make it usable for the estimator.
 
         Returns
         -------
@@ -84,7 +84,7 @@ class Estimator(abc.ABC):
 
     @abc.abstractmethod
     def generate(self) -> "Estimator":
-        """Method used to take our pre-processed data and run our models to estimate causality
+        """Run our models on pre-processed data to estimate causality.
 
         Returns
         -------
@@ -94,7 +94,7 @@ class Estimator(abc.ABC):
 
     @abc.abstractmethod
     def summarize(self, lift: str) -> None:
-        """Method used to summarize the results of generated models on our pre-processed data
+        """Summarize the results of generated models on our pre-processed data.
 
         Parameters
         ----------
@@ -113,7 +113,7 @@ class Estimator(abc.ABC):
 
     @abc.abstractmethod
     def _get_roas(self) -> tuple[float, float, float]:
-        """Returns our Return on Ad Spend (ROAS) and CIs
+        """Return our Return on Ad Spend (ROAS) and CIs.
 
         Returns
         -------
@@ -138,7 +138,7 @@ class EconometricEstimator(Estimator, ABC):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """An abstract class used for FixedEffects as well as Diff-in-Diff
+        """Initialize the econometric estimator (abstract base class for FixedEffects and Diff-in-Diff).
 
         Parameters
         ----------
@@ -236,7 +236,7 @@ class EconometricEstimator(Estimator, ABC):
         actual_post: Any,
         prediction_post: Any,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Computes pre- and post-period residuals as flat numpy arrays.
+        """Compute pre- and post-period residuals as flat numpy arrays.
 
         Parameters
         ----------
@@ -255,7 +255,7 @@ class EconometricEstimator(Estimator, ABC):
 
     @staticmethod
     def _block_statistics(residuals: np.ndarray, t1: int, q: float = 1.0) -> np.ndarray:
-        """Computes the moving-block test statistic over every cyclic block.
+        """Compute the moving-block test statistic over every cyclic block.
 
         For each of the ``len(residuals)`` cyclically-contiguous blocks of
         length ``t1`` we compute ``S = mean(|u|^q) ** (1 / q)``.
@@ -310,7 +310,7 @@ class EconometricEstimator(Estimator, ABC):
         alpha: float,
         iters: int = 64,
     ) -> float:
-        """Finds the effect boundary where the test inverts at level ``alpha``.
+        """Find the effect boundary where the test inverts at level ``alpha``.
 
         Assumes ``p_func(x_in) >= alpha`` (inside the acceptance region) and
         searches towards ``x_out`` for the furthest point still accepted.
@@ -466,7 +466,7 @@ class MLEstimator(Estimator, abc.ABC):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """An abstract class used for GeoX as well as Synthetic Control
+        """Initialize the ML estimator (abstract base class for GeoX and Synthetic Control).
 
         Parameters
         ----------

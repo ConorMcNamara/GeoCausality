@@ -1,4 +1,4 @@
-"""Testing Statistical Hypotheses through Geo Experiments"""
+"""Testing Statistical Hypotheses through Geo Experiments."""
 
 __version__ = "0.5.0"
 

@@ -1,3 +1,5 @@
+"""Penalized Synthetic Control method for geo-experiment causal inference."""
+
 from datetime import date as date_cls
 from math import ceil
 from typing import Any
@@ -15,6 +17,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class PenalizedSyntheticControl(EconometricEstimator):
+    """Run penalized synthetic control for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -32,7 +36,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         lambda_: float = 0.1,
         conformal_q: float = 1.0,
     ) -> None:
-        """A class to run Penalized Synthetic Control for our geo-test.
+        """Initialize the penalized synthetic control estimator.
 
         Parameters
         ----------
@@ -96,6 +100,13 @@ class PenalizedSyntheticControl(EconometricEstimator):
         self.conformal_q = conformal_q
 
     def pre_process(self) -> "PenalizedSyntheticControl":
+        """Aggregate the pre-period control and test data and build the V matrix.
+
+        Returns
+        -------
+        PenalizedSyntheticControl
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         assert self.treatment_variable is not None
@@ -123,6 +134,13 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "PenalizedSyntheticControl":
+        """Build the counterfactual from the weights and compute lift and conformal inference.
+
+        Returns
+        -------
+        PenalizedSyntheticControl
+            Itself, so it can be chained with summarize().
+        """
         assert self.treatment_variable is not None
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
@@ -204,6 +222,14 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the penalized synthetic control results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -282,7 +308,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         groupby_x_cols: list[str],
         groupby_y_scalar: float,
     ) -> "PenalizedSyntheticControl":
-        """Creates the V matrix used for calculating the weights of our model
+        """Create the V matrix used for calculating the weights of our model.
 
         Parameters
         ----------
@@ -312,7 +338,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return self
 
     def _create_model(self, groupby_x: np.ndarray, groupby_y: np.ndarray) -> np.ndarray:
-        """Creates the weights model used to establish our counterfactual
+        """Create the weights model used to establish our counterfactual.
 
         Parameters
         ----------
@@ -357,7 +383,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
     @staticmethod
     def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
-        """Calculates the loss function for our model weights matrix
+        """Calculate the loss function for our model weights matrix.
 
         Parameters
         ----------
@@ -375,7 +401,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         return q.T @ x + 0.5 * x.T @ p @ x
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------

@@ -1,3 +1,5 @@
+"""GeoX (time-based regression) method for geo-experiment causal inference."""
+
 from math import ceil
 from typing import Any
 
@@ -14,6 +16,8 @@ from GeoCausality._base import MLEstimator
 
 
 class GeoX(MLEstimator):
+    """Run a GeoX time-based regression experiment for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -29,7 +33,7 @@ class GeoX(MLEstimator):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """A class to run Geoexperiments for our geo-test.
+        """Initialize the GeoX estimator.
 
         Parameters
         ----------
@@ -84,6 +88,18 @@ class GeoX(MLEstimator):
         self.dates: list[Any] | None = None
 
     def generate(self, rescale: float = 1.0) -> "GeoX":
+        """Fit the control-on-test regression and compute the counterfactual and lift.
+
+        Parameters
+        ----------
+        rescale : float, default=1.0
+            An additional scaling factor for the cumulative delta distribution.
+
+        Returns
+        -------
+        GeoX
+            Itself, so it can be chained with summarize().
+        """
         if self.pre_control is None:
             raise ValueError("pre_control must not be None")
         if self.pre_test is None:
@@ -123,6 +139,14 @@ class GeoX(MLEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the GeoX results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -218,7 +242,7 @@ class GeoX(MLEstimator):
         return roas_lift, roas_ci_lower, roas_ci_upper
 
     def _cumulative_distribution(self, rescale: float = 1.0) -> Any:
-        """Calculates the shifted distribution of our cumulative data
+        """Calculate the shifted distribution of our cumulative data.
 
         Parameters
         ----------
@@ -260,7 +284,7 @@ class GeoX(MLEstimator):
         return t_dist(delta_df, loc=delta_mean, scale=delta_scale)
 
     def _get_cumulative_cis(self, rescale: float = 1.0) -> dict[str, np.ndarray]:
-        """From our shifted T-distribution, calculates the confidence intervals and p-values
+        """Calculate the confidence intervals and p-values from our shifted T-distribution.
 
         Parameters
         ----------
@@ -287,7 +311,7 @@ class GeoX(MLEstimator):
         return ci_dict
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------

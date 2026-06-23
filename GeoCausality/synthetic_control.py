@@ -1,3 +1,5 @@
+"""Synthetic Control methods (plain and V-weighted) for geo-experiment causal inference."""
+
 from datetime import date as date_cls
 from math import ceil
 from typing import Any
@@ -15,6 +17,8 @@ from GeoCausality._base import EconometricEstimator
 
 
 class SyntheticControl(EconometricEstimator):
+    """Run synthetic control for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -31,7 +35,7 @@ class SyntheticControl(EconometricEstimator):
         spend: float = 0.0,
         conformal_q: float = 1.0,
     ) -> None:
-        """A class to run Synthetic Control for our geo-test.
+        """Initialize the synthetic control estimator.
 
         Parameters
         ----------
@@ -93,6 +97,13 @@ class SyntheticControl(EconometricEstimator):
         self.conformal_q = conformal_q
 
     def pre_process(self) -> "SyntheticControl":
+        """Aggregate the pre-period control and test data into the matrices used to fit weights.
+
+        Returns
+        -------
+        SyntheticControl
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         assert self.treatment_variable is not None
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
@@ -133,6 +144,13 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def generate(self) -> "SyntheticControl":
+        """Build the counterfactual from the fitted weights and compute lift and inference.
+
+        Returns
+        -------
+        SyntheticControl
+            Itself, so it can be chained with summarize().
+        """
         if self.synthetic_control_df is None:
             raise ValueError("synthetic_control_df must not be None")
         if self.synthetic_test_df is None:
@@ -162,6 +180,14 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the synthetic control results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -232,7 +258,7 @@ class SyntheticControl(EconometricEstimator):
 
     @staticmethod
     def loss_square(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Loss function being the sum of squared distances
+        """Loss function being the sum of squared distances.
 
         Parameters
         ----------
@@ -251,7 +277,7 @@ class SyntheticControl(EconometricEstimator):
 
     @staticmethod
     def loss_root(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Loss function being the root of the sum of squared distances
+        """Loss function being the root of the sum of squared distances.
 
         Parameters
         ----------
@@ -269,8 +295,7 @@ class SyntheticControl(EconometricEstimator):
         return np.sqrt((y - x @ w).T @ (y - x @ w))
 
     def _create_model(self, y: Any, x: Any) -> np.ndarray:
-        """Creates our OLS model for synthetic control, with the constraint that our weights must
-        add up to 1.
+        """Create our OLS model for synthetic control, constraining the weights to sum to 1.
 
         Parameters
         ----------
@@ -307,7 +332,7 @@ class SyntheticControl(EconometricEstimator):
         return weights
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------
@@ -394,6 +419,8 @@ class SyntheticControl(EconometricEstimator):
 
 
 class SyntheticControlV(EconometricEstimator):
+    """Run synthetic control with a fitted V matrix for our geo-test."""
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -410,7 +437,7 @@ class SyntheticControlV(EconometricEstimator):
         spend: float = 0.0,
         conformal_q: float = 1.0,
     ) -> None:
-        """A class to run Synthetic Control, specifically accounting for the V matrix, for our geo-test.
+        """Initialize the V-weighted synthetic control estimator.
 
         Parameters
         ----------
@@ -471,6 +498,13 @@ class SyntheticControlV(EconometricEstimator):
         self.conformal_q = conformal_q
 
     def pre_process(self) -> "SyntheticControlV":
+        """Aggregate the pre-period control and test data into the matrices used to fit weights.
+
+        Returns
+        -------
+        SyntheticControlV
+            Itself, so it can be chained with generate().
+        """
         super().pre_process()
         assert self.treatment_variable is not None
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
@@ -514,6 +548,13 @@ class SyntheticControlV(EconometricEstimator):
         return self
 
     def generate(self) -> "SyntheticControlV":
+        """Fit the V matrix and weights, build the counterfactual, and compute lift and inference.
+
+        Returns
+        -------
+        SyntheticControlV
+            Itself, so it can be chained with summarize().
+        """
         assert self.treatment_variable is not None
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
@@ -587,7 +628,7 @@ class SyntheticControlV(EconometricEstimator):
         return self
 
     def _create_model(self, v: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Creates our synthetic control using v, x and y
+        """Create our synthetic control using v, x and y.
 
         Parameters
         ----------
@@ -620,7 +661,7 @@ class SyntheticControlV(EconometricEstimator):
 
     @staticmethod
     def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
-        """Calculates the loss function for our model weights matrix
+        """Calculate the loss function for our model weights matrix.
 
         Parameters
         ----------
@@ -644,7 +685,7 @@ class SyntheticControlV(EconometricEstimator):
         daily_x: np.ndarray,
         daily_y: np.ndarray,
     ) -> "SyntheticControlV":
-        """Finds the V matrix so that we can create our model
+        """Find the V matrix so that we can create our model.
 
         Parameters
         ----------
@@ -700,7 +741,7 @@ class SyntheticControlV(EconometricEstimator):
         daily_x: np.ndarray,
         daily_y: np.ndarray,
     ) -> np.ndarray:
-        """Generates the weights and loss of our V matrix
+        """Generate the weights and loss of our V matrix.
 
         Parameters
         ----------
@@ -726,7 +767,7 @@ class SyntheticControlV(EconometricEstimator):
 
     @staticmethod
     def calc_loss_v(W: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Calculates the V loss.
+        """Calculate the V loss.
 
         Parameters
         ----------
@@ -748,6 +789,14 @@ class SyntheticControlV(EconometricEstimator):
         return loss_V
 
     def summarize(self, lift: str) -> None:
+        """Print a tabulated summary of the synthetic control results.
+
+        Parameters
+        ----------
+        lift : str
+            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
+        """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = lift.casefold()
@@ -822,7 +871,7 @@ class SyntheticControlV(EconometricEstimator):
         return roas_lift, roas_ci_lower, roas_ci_upper
 
     def plot(self) -> None:
-        """Plots our actual results, our counterfactual, the pointwise difference and cumulative difference
+        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Returns
         -------
