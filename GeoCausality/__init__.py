@@ -9,6 +9,7 @@ from GeoCausality import (
     fixed_effects,
     geox,
     penalized_synthetic_control,
+    power,
     robust_synthetic_control,
     synthetic_control,
 )
@@ -21,6 +22,7 @@ __all__: list[str] = [
     "penalized_synthetic_control",
     "robust_synthetic_control",
     "augmented_synthetic_control",
+    "power",
 ]
 
 
