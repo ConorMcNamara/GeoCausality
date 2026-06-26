@@ -49,6 +49,7 @@ pip install geocausality
 | Class | Module | Description |
 |---|---|---|
 | `PowerAnalysis` | `power` | Pre-experiment power / Minimum Detectable Effect via placebo simulation (GeoLift `GeoLiftPower` analog) |
+| `MarketSelection` | `market_selection` | Rank candidate test-geo sets by power and pre-period fit (GeoLift `GeoLiftMarketSelection` analog) |
 
 ```python
 from GeoCausality import power
@@ -66,6 +67,25 @@ pa = power.PowerAnalysis(
 pa.simulate(effect_sizes=[0.0, 0.05, 0.10, 0.15], durations=[14, 28], n_sims=200).mde(target_power=0.8)
 pa.summarize()   # power curve + MDE table
 pa.plot()        # power-vs-effect curve, one line per duration
+```
+
+Don't know which geos to treat yet? `MarketSelection` searches candidate test
+sets and ranks them, reusing `PowerAnalysis` as its scoring engine:
+
+```python
+from GeoCausality import market_selection
+
+ms = market_selection.MarketSelection(
+    df,
+    geo_variable="geo",
+    date_variable="date",
+    pre_period="2022-06-30",
+    y_variable="orders",
+    estimator=AugmentedSyntheticControl,
+)
+ms.search(n_test_geos=[1, 2, 3], effect_size=0.10, duration=28, n_sims=200)
+ms.summarize()   # ranked test markets: power, pre-fit, score
+ms.plot()        # top candidates by score
 ```
 
 ---
