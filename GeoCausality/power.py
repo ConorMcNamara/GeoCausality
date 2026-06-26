@@ -28,6 +28,7 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
+import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
@@ -390,8 +391,6 @@ class PowerAnalysis:
         """
         if self.power_curve is None:
             raise ValueError("Call simulate() before plot()")
-        import plotly.graph_objects as go
-
         fig = go.Figure()
         durations = sorted({r["duration"] for r in self.power_curve})
         for duration in durations:
