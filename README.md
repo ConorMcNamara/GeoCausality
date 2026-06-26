@@ -159,6 +159,18 @@ model.pre_process().generate().summarize(lift="roas")
 | `"roas"` | Return on ad spend (requires `spend`) |
 | `"cost-per"` | Cost per incremental unit (requires `spend`) |
 
+### Inference on short pre-periods
+
+Synthetic-control estimators report a distribution-free p-value and confidence
+intervals via the Chernozhukov–Wüthrich–Zhu moving-block permutation test and a
+split-conformal band. When the pre-treatment period is too short for those to be
+reliable (the band quantile saturates), inference automatically falls back to
+**jackknife+** (Barber et al., 2021), which reuses every pre-period point for
+both fitting and calibration. The method used is reported in
+`results["method"]` (`"conformal"`, `"jackknife+"`, or `"jackknife+ (residual)"`),
+and can be forced with `model.inference_method = "conformal" | "jackknife"` before
+`generate()`.
+
 ---
 
 ## API Overview
@@ -196,5 +208,6 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Abadie, Alberto, and Jérémy L'Hour. "A penalized synthetic control estimator for disaggregated data." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1971535)
 - Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
 - Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
+- Barber, Rina Foygel, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. "Predictive inference with the jackknife+." *Annals of Statistics* 49.1 (2021): 486–507. [Link](https://projecteuclid.org/journals/annals-of-statistics/volume-49/issue-1/Predictive-inference-with-the-jackknife/10.1214/20-AOS1965.full)
 - Xu, Yiqing. "Generalized Synthetic Control Method: Causal Inference with Interactive Fixed Effects Models." *Political Analysis* 25.1 (2017): 57–76. [Link](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3)
 - GeoLift (Meta). [Documentation](https://facebookincubator.github.io/GeoLift/)

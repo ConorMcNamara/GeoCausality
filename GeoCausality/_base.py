@@ -184,6 +184,9 @@ class EconometricEstimator(Estimator, ABC):
             spend,
         )
         self.model: Any = None
+        # Inference path: "auto" picks conformal for long pre-periods and falls
+        # back to jackknife+ for short ones; "conformal" / "jackknife" force one.
+        self.inference_method: str = "auto"
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
@@ -419,7 +422,7 @@ class EconometricEstimator(Estimator, ABC):
         actual_post: Any,
         prediction_post: Any,
         q: float = 1.0,
-    ) -> dict[str, float]:
+    ) -> dict[str, Any]:
         """Bundles conformal p-value, effect CIs and prediction band.
 
         Parameters
@@ -434,20 +437,203 @@ class EconometricEstimator(Estimator, ABC):
         Returns
         -------
         A dict suitable for ``self.results.update(...)`` containing the
-        p-value, per-period ``lift`` CIs, total ``incrementality`` CIs and the
-        split-conformal prediction band half-width.
+        p-value, per-period ``lift`` CIs, total ``incrementality`` CIs, the
+        prediction band half-width, and the ``method`` used for the intervals
+        (``"conformal"``, ``"jackknife+"`` or ``"jackknife+ (residual)"``).
+
+        Notes
+        -----
+        The moving-block permutation test and split-conformal band both need a
+        reasonable number of pre-period points: the band quantile saturates and
+        the permutation p-value loses resolution when the pre-period is short.
+        When that happens (see ``_pre_period_too_short``) the interval falls back
+        to jackknife+ (Barber et al., 2021), which reuses every pre-period point
+        for both fitting and calibration. An estimator that overrides
+        ``_loo_counterfactuals`` gets the faithful refit-based jackknife+;
+        otherwise a residual-only approximation is used.
         """
         pre_resid, post_resid = self._conformal_residuals(actual_pre, prediction_pre, actual_post, prediction_post)
         t1 = post_resid.shape[0]
-        lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q)
+        p_value = self._conformal_p_value(pre_resid, post_resid, q)
+
+        if self._pre_period_too_short(pre_resid.shape[0]):
+            loo = self._loo_counterfactuals()
+            if loo is not None:
+                method = "jackknife+"
+                lift_lower, lift_upper, band = self._jackknife_plus_interval(
+                    loo[0], loo[1], np.asarray(actual_post, dtype=float).ravel(), t1
+                )
+            else:
+                method = "jackknife+ (residual)"
+                lift_lower, lift_upper, band = self._jackknife_residual_interval(pre_resid, post_resid)
+        else:
+            method = "conformal"
+            lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q)
+            band = self._split_conformal_band(pre_resid)
+
         return {
-            "p_value": self._conformal_p_value(pre_resid, post_resid, q),
+            "p_value": p_value,
             "lift_ci_lower": lift_lower,
             "lift_ci_upper": lift_upper,
             "incrementality_ci_lower": lift_lower * t1,
             "incrementality_ci_upper": lift_upper * t1,
-            "conformal_band": self._split_conformal_band(pre_resid),
+            "conformal_band": band,
+            "method": method,
         }
+
+    # ------------------------------------------------------------------
+    # Jackknife+ fallback
+    #
+    # When the pre-period is too short for the conformal tools above, we fall
+    # back to jackknife+ (Barber, Candes, Ramdas & Tibshirani, 2021), which
+    # reuses every pre-period point for both fitting and calibration via
+    # leave-one-out and carries a distribution-free >= 1 - 2*alpha coverage
+    # guarantee. The faithful version needs per-fold refits, supplied by an
+    # estimator overriding ``_loo_counterfactuals``; without it we approximate
+    # using the pre-period residuals with the counterfactual held fixed.
+    # ------------------------------------------------------------------
+    def _pre_period_too_short(self, n_pre: int, alpha: float | None = None) -> bool:
+        """Whether the pre-period is too short for the conformal interval.
+
+        Honours an explicit ``inference_method`` override; otherwise the
+        pre-period is "too short" exactly when the split-conformal quantile level
+        ``ceil((n + 1)(1 - alpha)) / n`` saturates at 1.0, the documented failure
+        mode where the band collapses to the largest residual.
+
+        Parameters
+        ----------
+        n_pre : int
+            The number of pre-period points.
+        alpha : float, optional
+            The significance level. Defaults to ``self.alpha``.
+
+        Returns
+        -------
+        True if the jackknife+ fallback should be used.
+        """
+        if self.inference_method == "jackknife":
+            return True
+        if self.inference_method == "conformal":
+            return False
+        if alpha is None:
+            alpha = self.alpha
+        return bool(np.ceil((n_pre + 1) * (1 - alpha)) > n_pre)
+
+    def _loo_counterfactuals(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Leave-one-out pre-period residuals and post-period counterfactuals.
+
+        The default returns ``None``, so estimators without a refit hook use the
+        residual-only jackknife+ approximation. An estimator can override this to
+        return ``(loo_residuals, loo_post_predictions)`` where ``loo_residuals``
+        has shape ``(n_folds,)`` (the absolute held-out pre-period residual of
+        each fold) and ``loo_post_predictions`` has shape ``(n_folds, t1)`` (each
+        leave-one-out model's counterfactual over the post-period).
+
+        Returns
+        -------
+        The leave-one-out arrays, or None if unsupported.
+        """
+        return None
+
+    @staticmethod
+    def _jackknife_quantile(abs_residuals: np.ndarray, alpha: float) -> float:
+        """Return the jackknife+ ``(1 - alpha)`` quantile of absolute residuals.
+
+        Uses the ``ceil((1 - alpha)(n + 1))``-th smallest absolute residual,
+        widening to the maximum when that rank exceeds ``n``.
+
+        Parameters
+        ----------
+        abs_residuals : numpy array
+            Absolute residuals.
+        alpha : float
+            The significance level.
+
+        Returns
+        -------
+        The band half-width.
+        """
+        scores = np.sort(np.abs(abs_residuals))
+        n = scores.shape[0]
+        k = int(np.ceil((1 - alpha) * (n + 1)))
+        if k > n:
+            return float(scores[-1])
+        return float(scores[k - 1])
+
+    def _jackknife_residual_interval(
+        self,
+        pre_resid: np.ndarray,
+        post_resid: np.ndarray,
+        alpha: float | None = None,
+    ) -> tuple[float, float, float]:
+        """Residual-only jackknife+ interval for a constant per-period effect.
+
+        Holds the counterfactual fixed and calibrates a band from the pre-period
+        residuals (every point used for both fit and calibration), centred on the
+        mean post-period residual.
+
+        Parameters
+        ----------
+        pre_resid, post_resid : numpy array
+            Pre- and post-period residuals.
+        alpha : float, optional
+            The significance level. Defaults to ``self.alpha``.
+
+        Returns
+        -------
+        A tuple of (lift_lower, lift_upper, band_half_width).
+        """
+        if alpha is None:
+            alpha = self.alpha
+        band = self._jackknife_quantile(pre_resid, alpha)
+        center = float(np.mean(post_resid))
+        return center - band, center + band, band
+
+    def _jackknife_plus_interval(
+        self,
+        loo_resid: np.ndarray,
+        loo_post_pred: np.ndarray,
+        actual_post: np.ndarray,
+        t1: int,
+        alpha: float | None = None,
+    ) -> tuple[float, float, float]:
+        """Faithful jackknife+ interval from leave-one-out refits.
+
+        For each post-period point the counterfactual bounds combine every
+        leave-one-out model's prediction at that point with that model's held-out
+        residual; the per-period lift bounds are aggregated into a per-period
+        effect CI (so ``lift_ci * t1`` recovers the incrementality CI).
+
+        Parameters
+        ----------
+        loo_resid : numpy array, shape (n_folds,)
+            Absolute held-out pre-period residual of each fold.
+        loo_post_pred : numpy array, shape (n_folds, t1)
+            Each leave-one-out model's post-period counterfactual.
+        actual_post : numpy array, shape (t1,)
+            Observed post-period outcome.
+        t1 : int
+            The number of post-period points.
+        alpha : float, optional
+            The significance level. Defaults to ``self.alpha``.
+
+        Returns
+        -------
+        A tuple of (lift_lower, lift_upper, band_half_width).
+        """
+        if alpha is None:
+            alpha = self.alpha
+        n = loo_resid.shape[0]
+        lo_idx = max(int(np.floor(alpha * (n + 1))), 1) - 1
+        hi_idx = min(int(np.ceil((1 - alpha) * (n + 1))), n) - 1
+        incr_lower, incr_upper = 0.0, 0.0
+        for t in range(t1):
+            cf_lower = np.sort(loo_post_pred[:, t] - loo_resid)[lo_idx]
+            cf_upper = np.sort(loo_post_pred[:, t] + loo_resid)[hi_idx]
+            incr_lower += actual_post[t] - cf_upper
+            incr_upper += actual_post[t] - cf_lower
+        band = self._jackknife_quantile(loo_resid, alpha)
+        return incr_lower / t1, incr_upper / t1, band
 
 
 class MLEstimator(Estimator, abc.ABC):
