@@ -44,6 +44,30 @@ pip install geocausality
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
 
+### Pre-experiment design
+
+| Class | Module | Description |
+|---|---|---|
+| `PowerAnalysis` | `power` | Pre-experiment power / Minimum Detectable Effect via placebo simulation (GeoLift `GeoLiftPower` analog) |
+
+```python
+from GeoCausality import power
+from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
+
+pa = power.PowerAnalysis(
+    df,
+    geo_variable="geo",
+    treatment_variable="is_treatment",
+    date_variable="date",
+    pre_period="2022-06-30",   # last date of clean history
+    y_variable="orders",
+    estimator=AugmentedSyntheticControl,
+)
+pa.simulate(effect_sizes=[0.0, 0.05, 0.10, 0.15], durations=[14, 28], n_sims=200).mde(target_power=0.8)
+pa.summarize()   # power curve + MDE table
+pa.plot()        # power-vs-effect curve, one line per duration
+```
+
 ---
 
 ## Quick Start
