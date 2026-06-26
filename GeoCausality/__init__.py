@@ -8,6 +8,7 @@ from GeoCausality import (
     diff_in_diff,
     fixed_effects,
     geox,
+    market_selection,
     penalized_synthetic_control,
     power,
     robust_synthetic_control,
@@ -23,6 +24,7 @@ __all__: list[str] = [
     "robust_synthetic_control",
     "augmented_synthetic_control",
     "power",
+    "market_selection",
 ]
 
 
