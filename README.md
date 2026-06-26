@@ -43,6 +43,7 @@ pip install geocausality
 | `PenalizedSyntheticControl` | `penalized_synthetic_control` | Synthetic control with pairwise penalty (Abadie & L'Hour) |
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
+| `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects / latent factor model (Xu) |
 
 ### Pre-experiment design
 
@@ -195,4 +196,5 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Abadie, Alberto, and Jérémy L'Hour. "A penalized synthetic control estimator for disaggregated data." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1971535)
 - Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
 - Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
+- Xu, Yiqing. "Generalized Synthetic Control Method: Causal Inference with Interactive Fixed Effects Models." *Political Analysis* 25.1 (2017): 57–76. [Link](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3)
 - GeoLift (Meta). [Documentation](https://facebookincubator.github.io/GeoLift/)
