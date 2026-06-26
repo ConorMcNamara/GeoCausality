@@ -340,15 +340,16 @@ class PowerAnalysis:
         -------
         The interpolated MDE, or None if no tested effect reaches the target.
         """
-        prev_e, prev_p = None, None
+        prev: tuple[float, float] | None = None
         for effect, power in points:
             if power >= target_power:
-                if prev_p is None or power == prev_p:
+                if prev is None or power == prev[1]:
                     return effect
                 # Interpolate between the last sub-target point and this one.
+                prev_e, prev_p = prev
                 frac = (target_power - prev_p) / (power - prev_p)
                 return prev_e + frac * (effect - prev_e)
-            prev_e, prev_p = effect, power
+            prev = (effect, power)
         return None
 
     def summarize(self) -> None:
