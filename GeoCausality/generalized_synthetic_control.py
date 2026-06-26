@@ -125,6 +125,11 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         self.prediction_post: nw.DataFrame | None = None
         self.actual_pre: nw.DataFrame | None = None
         self.actual_post: nw.DataFrame | None = None
+        # Factor design over all periods, pre-period length and treated series,
+        # cached for the leave-one-out jackknife+ refits.
+        self._jk_design: np.ndarray | None = None
+        self._jk_n_pre: int | None = None
+        self._jk_y1: np.ndarray | None = None
 
     def pre_process(self) -> "GeneralizedSyntheticControl":
         """Aggregate the treated series and record the sorted date axis.
@@ -254,7 +259,40 @@ class GeneralizedSyntheticControl(EconometricEstimator):
 
         factors = self._design(u, r)
         beta = self._ols(factors[:n_pre], y1_all[:n_pre])
+        self._jk_design = factors
+        self._jk_n_pre = n_pre
+        self._jk_y1 = y1_all
         return factors @ beta
+
+    def _loo_counterfactuals(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Leave-one-out pre-period residuals and post-period counterfactuals.
+
+        The latent factors are estimated from the controls and so are unchanged by
+        dropping a treated pre-period day; only the loading regression is refit.
+        Each fold therefore costs a single least-squares solve, making faithful
+        jackknife+ cheap for this estimator.
+
+        Returns
+        -------
+        ``(loo_residuals, loo_post_predictions)`` of shapes ``(n_folds,)`` and
+        ``(n_folds, t1)``, or None if the model has not been fit.
+        """
+        if self._jk_design is None or self._jk_n_pre is None or self._jk_y1 is None:
+            return None
+        design, n_pre, y = self._jk_design, self._jk_n_pre, self._jk_y1
+        pre_x, pre_y, post_x = design[:n_pre], y[:n_pre], design[n_pre:]
+        n_params = pre_x.shape[1]
+        loo_resid, loo_post = [], []
+        for i in range(n_pre):
+            mask = np.arange(n_pre) != i
+            if mask.sum() <= n_params:
+                continue  # underdetermined fold; skip
+            beta = self._ols(pre_x[mask], pre_y[mask])
+            loo_resid.append(abs(float(pre_y[i] - pre_x[i] @ beta)))
+            loo_post.append(post_x @ beta)
+        if not loo_resid:
+            return None
+        return np.array(loo_resid), np.array(loo_post)
 
     @staticmethod
     def _design(u: np.ndarray, r: int) -> np.ndarray:
