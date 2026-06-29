@@ -38,13 +38,12 @@ REF_PERCENT_LIFT = 5.5
 REF_INCREMENTAL = 4704
 
 # Tolerances (reimplementation, not a port): confirm GeoLift-comparable results,
-# not exact equality. After the #20 fix (intercept-augmented / de-meaned SCM) the
-# level bias is resolved and we land at ~7.6% / ~6,378 vs GeoLift's 5.5% / 4,704
-# (cf/day ~5,623 vs ~5,734). The residual gap is our ridge augmentation differing
-# from R augsynth's; the bands below confirm the right ballpark (single-digit
-# lift, level matched) and exclude the pre-fix bias (~57% / 33,100).
-PERCENT_LIFT_ABS_TOL = 3.0  # percentage points
-INCREMENTAL_REL_TOL = 0.40  # 40%
+# not exact equality. With the intercept-augmented ridge ASCM (#20) and the
+# one-standard-error lambda rule (#22) we land at ~6.5% / ~5,552 vs GeoLift's
+# 5.5% / 4,704 (cf/day ~5,678 vs ~5,734) -- within ~1 pp. The small residual is
+# our lambda selection vs R augsynth's exact internal scaling.
+PERCENT_LIFT_ABS_TOL = 1.5  # percentage points
+INCREMENTAL_REL_TOL = 0.25  # 25%
 
 
 @pytest.fixture(scope="module")
@@ -97,7 +96,7 @@ class TestGeoLiftParity:
         # The most direct check that the #20 level bias is fixed: GeoLift's
         # counterfactual is ~5,734/day for Chicago + Portland over 15 days.
         baseline_per_day = float(fitted.results["counterfactual"]["Y"].sum()) / 15
-        assert baseline_per_day == pytest.approx(5734, rel=0.15)
+        assert baseline_per_day == pytest.approx(5734, rel=0.10)
 
     @staticmethod
     def test_effect_is_significant(fitted: GeoLift) -> None:

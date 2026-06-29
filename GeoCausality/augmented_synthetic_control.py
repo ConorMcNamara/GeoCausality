@@ -10,7 +10,6 @@ import plotly.graph_objects as go
 import polars as pl
 from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
-from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -312,12 +311,15 @@ class AugmentedSyntheticControl(EconometricEstimator):
             raise ValueError("daily_x must not be None")
         if self.daily_y is None:
             raise ValueError("daily_y must not be None")
-        # Fit in the time-de-meaned (intercept-augmented) space: subtract each
-        # donor's and the treated unit's pre-period mean, so the weights model
-        # deviations and the level is carried by the stored means. Without this
-        # the simplex weights produce a raw weighted average of donor levels,
-        # which cannot match an aggregated treated unit outside the donor convex
-        # hull and biases the counterfactual low.
+        # Intercept-augmented ridge ASCM (Ben-Michael et al.): fit ridge-penalised
+        # donor weights on the time-de-meaned pre-period (subtracting each donor's
+        # and the treated unit's pre-period mean). The level is carried by the
+        # stored means and the weights are NOT constrained to the simplex, so they
+        # can match an aggregated treated unit outside the donor convex hull. Plain
+        # simplex weights produce a raw weighted average of donor levels and bias
+        # the counterfactual low. lambda is chosen by the one-standard-error rule,
+        # which favours the more-regularised fit within one SE of the CV minimum --
+        # the bare minimum under-regularises and inflates post-period extrapolation.
         daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
         self._x_bar = daily_x_mat.mean(axis=0, keepdims=True)
         self._y_bar = float(self.daily_y.mean())
@@ -325,103 +327,72 @@ class AugmentedSyntheticControl(EconometricEstimator):
         daily_y_dm = self.daily_y - self._y_bar
         if self.lambda_ is None:
             lambdas = self._generate_lambdas(daily_x_dm)
-            lambdas, errors_means, errors_se = self._cross_validate(daily_x_dm, daily_y_dm, lambdas)
-            self.lambda_ = lambdas[errors_means.argmin()].item()
-        n_r, _ = daily_x_dm.shape
-        V_mat = np.diag(np.full(n_r, 1 / n_r))
-        W = self._get_weights(V_matrix=V_mat, x=daily_x_dm, y=daily_y_dm)
-        W_ridge = self._get_ridge_weights(daily_y_dm, daily_x_dm, W, self.lambda_)
-        return W + W_ridge
-
-    def _get_weights(self, V_matrix: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Create our synthetic control using v, x and y.
-
-        Parameters
-        ----------
-        V_matrix : numpy array
-            Our V matrix
-        x : numpy array
-            Our predictors
-        y : numpy array
-            What we're trying to predict
-
-        Returns
-        -------
-        The weights for our model
-        """
-        _, n_c = x.shape
-
-        P = x.T @ V_matrix @ x
-        q = y.T @ V_matrix @ x
-
-        bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
-        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
-
-        x0 = np.full(n_c, 1 / n_c)
-        res = minimize(
-            fun=lambda x: self._loss_function(x, P, q),
-            x0=x0,
-            bounds=bounds,
-            constraints=constraints,
-            method="SLSQP",
-        )
-        weights = res["x"]
-        return weights
+            self.lambda_ = self._select_lambda(daily_x_dm, daily_y_dm, lambdas)
+        return self._ridge_weights(daily_x_dm, daily_y_dm, self.lambda_)
 
     @staticmethod
-    def _get_ridge_weights(a: np.ndarray, b: np.ndarray, w: np.ndarray, lambda_: float | np.ndarray) -> np.ndarray:
-        """Calculate the ridge adjustment to the weights.
+    def _ridge_weights(x: np.ndarray, y: np.ndarray, lambda_: float) -> np.ndarray:
+        """Ridge-regression donor weights on the de-meaned pre-period.
+
+        Solves ``min_w ||y - x w||^2 + lambda ||w||^2`` in closed form. The weights
+        are unconstrained (off-simplex), matching the augmented synthetic control
+        formulation of Ben-Michael et al.
 
         Parameters
         ----------
-        a : numpy array
-            Our y values
-        b : numpy array
-            Our x values
-        w : numpy array
-            Weights matrix
-        lambda_ : numpy array
-            Our penalty term
+        x : numpy array, shape (n_periods, n_donors)
+            De-meaned donor matrix.
+        y : numpy array, shape (n_periods,)
+            De-meaned treated series.
+        lambda_ : float
+            Ridge penalty.
 
         Returns
         -------
-        The weights for our ridge penalty
+        The donor weight vector, shape (n_donors,).
         """
-        m = a - b @ w
-        n = np.linalg.inv(b @ b.T + lambda_ * np.identity(b.shape[0]))
-        return m @ n @ b
+        n_c = x.shape[1]
+        return np.linalg.solve(x.T @ x + lambda_ * np.identity(n_c), x.T @ y)
 
-    def _cross_validate(
-        self, X: np.ndarray, Y: np.ndarray, lambdas: np.ndarray, holdout_len: int = 1
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Calculate the mean error and standard error of the mean error via cross-validation.
+    def _select_lambda(self, x: np.ndarray, y: np.ndarray, lambdas: np.ndarray) -> float:
+        """Select the ridge penalty by the one-standard-error rule.
 
-        Uses a cross-validation procedure across the given ridge parameter values.
+        Leave-one-out cross-validation over the pre-period gives a mean squared
+        error and its standard error per candidate lambda; the chosen lambda is the
+        largest whose mean error is within one standard error of the minimum. That
+        favours more regularisation (less extrapolation) than the bare CV minimum,
+        which under-regularises and inflates the counterfactual's post-period
+        movement.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_periods, n_donors)
+            De-meaned donor matrix.
+        y : numpy array, shape (n_periods,)
+            De-meaned treated series.
+        lambdas : numpy array
+            Candidate ridge penalties.
+
+        Returns
+        -------
+        The selected ridge penalty.
         """
-        n_rows = X.shape[0]
-        V = np.identity(n_rows - holdout_len)
-        res = list()
-        for start in range(n_rows - holdout_len + 1):
-            holdout = slice(start, start + holdout_len)
-            train_mask = np.ones(n_rows, dtype=bool)
-            train_mask[holdout] = False
-
-            X_t = X[train_mask]
-            X_v = X[holdout]
-            Y_t = Y[train_mask]
-            Y_v = Y[holdout]
-
-            w = self._get_weights(V_matrix=V, x=X_t, y=Y_t)
-            this_res = list()
-            for lambda_ in lambdas:
-                ridge_weights = self._get_ridge_weights(a=Y_t, b=X_t, w=w, lambda_=lambda_)
-                W_aug = w + ridge_weights
-                err = np.sum((Y_v - X_v @ W_aug) ** 2)
-                this_res.append(err.item())
-            res.append(this_res)
-        means = np.array(res).mean(axis=0)
-        ses = np.array(res).std(axis=0) / np.sqrt(len(lambdas))
-        return lambdas, means, ses
+        lambdas = np.sort(lambdas)  # ascending, so the last within-threshold index is the largest lambda
+        n = x.shape[0]
+        fold_err = np.empty((n, lambdas.shape[0]))
+        for i in range(n):
+            mask = np.arange(n) != i
+            gram = x[mask].T @ x[mask]
+            rhs = x[mask].T @ y[mask]
+            identity = np.identity(gram.shape[0])
+            for j, lambda_ in enumerate(lambdas):
+                w = np.linalg.solve(gram + lambda_ * identity, rhs)
+                fold_err[i, j] = (y[i] - x[i] @ w) ** 2
+        mean = fold_err.mean(axis=0)
+        se = fold_err.std(axis=0, ddof=1) / np.sqrt(n)
+        j_min = int(np.argmin(mean))
+        within = np.flatnonzero(mean <= mean[j_min] + se[j_min])
+        return float(lambdas[within[-1]])
 
     @staticmethod
     def _generate_lambdas(X: np.ndarray, lambda_min_ratio: float = 1e-08, n_lambda: int = 20) -> np.ndarray:
@@ -444,10 +415,6 @@ class AugmentedSyntheticControl(EconometricEstimator):
         lambda_max = np.power(s[0].item(), 2)
         scaler = np.power(lambda_min_ratio, (1 / n_lambda))
         return lambda_max * (np.power(scaler, np.arange(n_lambda)))
-
-    @staticmethod
-    def _loss_function(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
-        return 0.5 * x.T @ p @ x - q.T @ x
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
