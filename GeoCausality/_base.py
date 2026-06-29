@@ -185,8 +185,12 @@ class EconometricEstimator(Estimator, ABC):
         )
         self.model: Any = None
         # Inference path: "auto" picks conformal for long pre-periods and falls
-        # back to jackknife+ for short ones; "conformal" / "jackknife" force one.
+        # back to jackknife+ for short ones; "conformal" / "jackknife" force one;
+        # "bootstrap" uses the parametric bootstrap (needs ``_bootstrap_refit``).
         self.inference_method: str = "auto"
+        # Parametric-bootstrap settings (used when inference_method == "bootstrap").
+        self.n_boot: int = 1000
+        self.bootstrap_seed: int = 0
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
@@ -456,7 +460,16 @@ class EconometricEstimator(Estimator, ABC):
         t1 = post_resid.shape[0]
         p_value = self._conformal_p_value(pre_resid, post_resid, q)
 
-        if self._pre_period_too_short(pre_resid.shape[0]):
+        boot = None
+        if self.inference_method == "bootstrap":
+            fitted_pre = np.asarray(prediction_pre, dtype=float).ravel()
+            fitted_post = np.asarray(prediction_post, dtype=float).ravel()
+            actual_post_arr = np.asarray(actual_post, dtype=float).ravel()
+            boot = self._parametric_bootstrap_interval(fitted_pre, fitted_post, actual_post_arr, pre_resid)
+        if boot is not None:
+            method = "bootstrap"
+            lift_lower, lift_upper, band, p_value = boot
+        elif self._pre_period_too_short(pre_resid.shape[0]):
             loo = self._loo_counterfactuals()
             if loo is not None:
                 method = "jackknife+"
@@ -634,6 +647,91 @@ class EconometricEstimator(Estimator, ABC):
             incr_upper += actual_post[t] - cf_lower
         band = self._jackknife_quantile(loo_resid, alpha)
         return incr_lower / t1, incr_upper / t1, band
+
+    # ------------------------------------------------------------------
+    # Parametric bootstrap
+    #
+    # Mirrors GeoLift's Generalized Synthetic Control inference: hold the
+    # estimated counterfactual fixed, draw parametric noise at the pre-period
+    # residual scale, rebuild pseudo treated pre-period series, refit the
+    # counterfactual (via ``_bootstrap_refit``) and accumulate an incrementality
+    # distribution. The CI is the percentile interval; the p-value is the
+    # two-sided proportion of no-effect replicates at least as extreme as the
+    # observed incrementality. Needs a refit hook, so estimators without one fall
+    # back to the conformal / jackknife+ path.
+    # ------------------------------------------------------------------
+    def _bootstrap_refit(self, treated_pre: np.ndarray) -> np.ndarray | None:
+        """Refit the counterfactual over the post-period from a resampled pre-period.
+
+        The default returns ``None``, so estimators without a refit hook do not
+        support the parametric bootstrap. An estimator can override this to take a
+        bootstrap-resampled treated pre-period series and return its refit
+        counterfactual over the post-period (shape ``(t1,)``).
+
+        Parameters
+        ----------
+        treated_pre : numpy array, shape (n_pre,)
+            A resampled treated pre-period series.
+
+        Returns
+        -------
+        The refit post-period counterfactual, or None if unsupported.
+        """
+        return None
+
+    def _parametric_bootstrap_interval(
+        self,
+        fitted_pre: np.ndarray,
+        fitted_post: np.ndarray,
+        actual_post: np.ndarray,
+        pre_resid: np.ndarray,
+        alpha: float | None = None,
+    ) -> tuple[float, float, float, float] | None:
+        """Parametric-bootstrap interval and p-value for the incrementality.
+
+        Parameters
+        ----------
+        fitted_pre, fitted_post : numpy array
+            The fitted counterfactual over the pre- and post-period.
+        actual_post : numpy array
+            Observed post-period outcome.
+        pre_resid : numpy array
+            Pre-period residuals, whose scale sets the parametric noise.
+        alpha : float, optional
+            The significance level. Defaults to ``self.alpha``.
+
+        Returns
+        -------
+        A tuple of (lift_lower, lift_upper, band_half_width, p_value), or None if
+        the estimator does not implement ``_bootstrap_refit``.
+        """
+        if alpha is None:
+            alpha = self.alpha
+        if self._bootstrap_refit(fitted_pre) is None:
+            return None
+
+        sigma = float(np.std(pre_resid))
+        if sigma == 0.0:
+            sigma = 1.0
+        n_pre, t1 = fitted_pre.shape[0], actual_post.shape[0]
+        rng = np.random.default_rng(self.bootstrap_seed)
+        incr_obs = float(np.sum(actual_post - fitted_post))
+
+        incr_samples = np.empty(self.n_boot)
+        null_samples = np.empty(self.n_boot)
+        for b in range(self.n_boot):
+            cf_post = self._bootstrap_refit(fitted_pre + rng.normal(0.0, sigma, n_pre))
+            eps_post = rng.normal(0.0, sigma, t1)
+            # Replicate of the observed incrementality (counterfactual + post noise).
+            incr_samples[b] = float(np.sum(actual_post - cf_post - eps_post))
+            # Replicate under the sharp null of no effect (observed == counterfactual).
+            null_samples[b] = float(np.sum(fitted_post + eps_post - cf_post))
+
+        lower = float(np.percentile(incr_samples, 100 * alpha / 2))
+        upper = float(np.percentile(incr_samples, 100 * (1 - alpha / 2)))
+        band = self._jackknife_quantile(pre_resid, alpha)
+        p_value = float(np.mean(np.abs(null_samples) >= abs(incr_obs)))
+        return lower / t1, upper / t1, band, p_value
 
 
 class MLEstimator(Estimator, abc.ABC):

@@ -294,6 +294,28 @@ class GeneralizedSyntheticControl(EconometricEstimator):
             return None
         return np.array(loo_resid), np.array(loo_post)
 
+    def _bootstrap_refit(self, treated_pre: np.ndarray) -> np.ndarray | None:
+        """Refit the counterfactual over the post-period from a resampled pre-period.
+
+        The latent factors come from the controls and are unchanged by resampling
+        the treated series, so each bootstrap replicate is a single least-squares
+        refit of the loadings on the cached design.
+
+        Parameters
+        ----------
+        treated_pre : numpy array, shape (n_pre,)
+            A bootstrap-resampled treated pre-period series.
+
+        Returns
+        -------
+        The refit post-period counterfactual, or None if the model is not fit.
+        """
+        if self._jk_design is None or self._jk_n_pre is None:
+            return None
+        design, n_pre = self._jk_design, self._jk_n_pre
+        beta = self._ols(design[:n_pre], treated_pre)
+        return design[n_pre:] @ beta
+
     @staticmethod
     def _design(u: np.ndarray, r: int) -> np.ndarray:
         """Assemble the design matrix: an intercept plus ``r`` leading factors.
