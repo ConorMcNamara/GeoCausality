@@ -90,11 +90,12 @@ class AugmentedSyntheticControl(EconometricEstimator):
             msrp,
             spend,
         )
-        self.groupby_x: np.ndarray | None = None
-        self.groupby_x_cols: list[str] | None = None
-        self.groupby_y: float | None = None
         self.daily_x: nw.DataFrame | None = None
         self.daily_y: np.ndarray | None = None
+        # Per-donor and treated pre-period means, used to anchor the level of the
+        # intercept-augmented (de-meaned) counterfactual.
+        self._x_bar: np.ndarray | None = None
+        self._y_bar: float | None = None
         self.dates: list[Any] | None = None
         self.lambda_ = lambda_
         self.prediction_pre: nw.DataFrame | None = None
@@ -114,26 +115,6 @@ class AugmentedSyntheticControl(EconometricEstimator):
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         assert self.treatment_variable is not None
-        x_sum = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .select([self.y_variable, self.geo_variable, self.date_variable])
-            .group_by(self.geo_variable)
-            .agg(nw.col(self.y_variable).mean())
-            .sort(self.geo_variable)
-        )
-        # groupby_x: shape (1, n_geos) — one row (the mean y per geo)
-        self.groupby_x = x_sum[self.y_variable].to_numpy().reshape(1, -1)
-        self.groupby_x_cols = x_sum[self.geo_variable].to_list()
-
-        y_sum = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        self.groupby_y = float(y_sum[self.y_variable].to_numpy().mean())
-
         day_x = self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0)).select(
             [self.y_variable, self.geo_variable, self.date_variable]
         )
@@ -202,8 +183,13 @@ class AugmentedSyntheticControl(EconometricEstimator):
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
 
-        prediction_pre_arr = control_pre_mat @ self.model
-        prediction_post_arr = control_post_mat @ self.model
+        # Intercept-augmented (de-meaned) counterfactual: anchor the level at the
+        # treated unit's own pre-period mean and track donor deviations from their
+        # pre-period means, using the same means the weights were fit against.
+        assert self._x_bar is not None and self._y_bar is not None
+        donor_pre_mean = self._x_bar.flatten()
+        prediction_pre_arr = self._y_bar + (control_pre_mat - donor_pre_mean) @ self.model
+        prediction_post_arr = self._y_bar + (control_post_mat - donor_pre_mean) @ self.model
 
         self.prediction_pre = nw.from_native(
             pl.DataFrame(
@@ -326,22 +312,25 @@ class AugmentedSyntheticControl(EconometricEstimator):
             raise ValueError("daily_x must not be None")
         if self.daily_y is None:
             raise ValueError("daily_y must not be None")
-        daily_x_arr, daily_y_arr, groupby_x_arr, groupby_y_arr = self._normalize()
-        x_stacked = np.vstack([daily_x_arr, groupby_x_arr])
-        y_stacked = np.concatenate([daily_y_arr, groupby_y_arr])
+        # Fit in the time-de-meaned (intercept-augmented) space: subtract each
+        # donor's and the treated unit's pre-period mean, so the weights model
+        # deviations and the level is carried by the stored means. Without this
+        # the simplex weights produce a raw weighted average of donor levels,
+        # which cannot match an aggregated treated unit outside the donor convex
+        # hull and biases the counterfactual low.
         daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
+        self._x_bar = daily_x_mat.mean(axis=0, keepdims=True)
+        self._y_bar = float(self.daily_y.mean())
+        daily_x_dm = daily_x_mat - self._x_bar
+        daily_y_dm = self.daily_y - self._y_bar
         if self.lambda_ is None:
-            lambdas = self._generate_lambdas(daily_x_mat)
-            lambdas, errors_means, errors_se = self._cross_validate(daily_x_mat, self.daily_y, lambdas)
+            lambdas = self._generate_lambdas(daily_x_dm)
+            lambdas, errors_means, errors_se = self._cross_validate(daily_x_dm, daily_y_dm, lambdas)
             self.lambda_ = lambdas[errors_means.argmin()].item()
-        n_r, _ = daily_x_mat.shape
+        n_r, _ = daily_x_dm.shape
         V_mat = np.diag(np.full(n_r, 1 / n_r))
-        W = self._get_weights(
-            V_matrix=V_mat,
-            x=daily_x_mat,
-            y=self.daily_y,
-        )
-        W_ridge = self._get_ridge_weights(y_stacked, x_stacked, W, self.lambda_)
+        W = self._get_weights(V_matrix=V_mat, x=daily_x_dm, y=daily_y_dm)
+        W_ridge = self._get_ridge_weights(daily_y_dm, daily_x_dm, W, self.lambda_)
         return W + W_ridge
 
     def _get_weights(self, V_matrix: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -401,39 +390,6 @@ class AugmentedSyntheticControl(EconometricEstimator):
         m = a - b @ w
         n = np.linalg.inv(b @ b.T + lambda_ * np.identity(b.shape[0]))
         return m @ n @ b
-
-    def _normalize(
-        self,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Normalise the data before the weight calculation."""
-        if self.groupby_x is None:
-            raise ValueError("groupby_x must not be None")
-        if self.groupby_y is None:
-            raise ValueError("groupby_y must not be None")
-        if self.daily_x is None:
-            raise ValueError("daily_x must not be None")
-        if self.daily_y is None:
-            raise ValueError("daily_y must not be None")
-
-        daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()  # (n_dates, n_geos)
-        daily_y_arr = self.daily_y  # (n_dates,)
-
-        # groupby_x is (1, n_geos); demean along axis=1 (the geos axis)
-        groupby_x_demean = self.groupby_x - self.groupby_x.mean(axis=1, keepdims=True)
-        groupby_y_demean = self.groupby_y - self.groupby_y  # scalar - scalar = 0.0, shape: scalar
-
-        # daily_x: demean each row (date) across geos
-        daily_x_demean = daily_x_mat - daily_x_mat.mean(axis=1, keepdims=True)
-        daily_y_demean = daily_y_arr - daily_y_arr.mean()
-
-        groupby_x_std = groupby_x_demean.std(axis=1, keepdims=True, ddof=1)  # (1, 1)
-        groupby_x_std = np.where(groupby_x_std == 0, 1.0, groupby_x_std)
-        daily_x_std = daily_x_demean.std(ddof=1)
-
-        groupby_x_normal = (groupby_x_demean / groupby_x_std) * daily_x_std
-        groupby_y_normal = (groupby_y_demean / groupby_x_std.flatten()[0]) * daily_x_std
-
-        return daily_x_demean, daily_y_demean, groupby_x_normal, np.array([groupby_y_normal])
 
     def _cross_validate(
         self, X: np.ndarray, Y: np.ndarray, lambdas: np.ndarray, holdout_len: int = 1
