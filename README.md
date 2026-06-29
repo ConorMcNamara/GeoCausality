@@ -95,6 +95,31 @@ ms.plot()        # top candidates by score
 
 All estimators share the same three-step chainable interface: `pre_process()` → `generate()` → `summarize()`.
 
+### GeoLift (one-call, GeoLift-style)
+
+`GeoLift` mirrors Meta's GeoLift pipeline: it uses **Augmented Synthetic Control**
+for the de-biased point estimate and **Generalized Synthetic Control** with
+**parametric-bootstrap** inference for the uncertainty, behind one call.
+
+```python
+from GeoCausality import geolift
+
+model = geolift.GeoLift(
+    df,
+    geo_variable="geo",
+    treatment_variable="is_treatment",
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+    spend=500_000,
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()
+# model.results["incrementality"]  -> ASC point estimate
+# model.results["p_value"], ["incrementality_ci_lower/upper"]  -> GSC bootstrap inference
+```
+
 ### GeoX (Time-Based Regression)
 
 ```python
