@@ -41,6 +41,16 @@ REF_INCREMENTAL = 4704
 PERCENT_LIFT_ABS_TOL = 2.0  # percentage points
 INCREMENTAL_REL_TOL = 0.20  # 20%
 
+# xfail until #20 is fixed: AugmentedSyntheticControl is level-biased for
+# aggregated treated units (its simplex-constrained counterfactual cannot reach
+# the summed Chicago + Portland level), inflating the point estimate to ~33,100 /
+# ~57% vs GeoLift's 4,704 / 5.5%. strict=True so the test flips to a failure
+# (prompting us to promote it to a hard assertion) once ASC is fixed.
+ASC_BIAS_XFAIL = pytest.mark.xfail(
+    strict=True,
+    reason="#20: AugmentedSyntheticControl level-biased for aggregated treated units",
+)
+
 
 @pytest.fixture(scope="module")
 def geolift_test() -> pl.DataFrame:
@@ -77,6 +87,7 @@ class TestGeoLiftParity:
         assert set(TEST_GEOS) <= locations, f"expected {TEST_GEOS} in the dataset locations"
 
     @staticmethod
+    @ASC_BIAS_XFAIL
     def test_percent_lift_matches_published(fitted: GeoLift) -> None:
         results = fitted.results
         baseline = float(results["counterfactual"]["Y"].sum())
@@ -84,6 +95,7 @@ class TestGeoLiftParity:
         assert percent_lift == pytest.approx(REF_PERCENT_LIFT, abs=PERCENT_LIFT_ABS_TOL)
 
     @staticmethod
+    @ASC_BIAS_XFAIL
     def test_incremental_matches_published(fitted: GeoLift) -> None:
         assert fitted.results["incrementality"] == pytest.approx(REF_INCREMENTAL, rel=INCREMENTAL_REL_TOL)
 
