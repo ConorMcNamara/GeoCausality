@@ -182,6 +182,10 @@ class PenalizedSyntheticControl(EconometricEstimator):
         # Drop the index column before matrix multiply; keep only geo columns
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
+        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        self._jk_x_pre = control_pre_mat
+        self._jk_x_post = control_post_mat
+        self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
 
         prediction_pre_arr = control_pre_mat @ self.model
         prediction_post_arr = control_post_mat @ self.model
@@ -336,6 +340,32 @@ class PenalizedSyntheticControl(EconometricEstimator):
         self.V = np.identity(groupby_x_scaled.shape[0])
         self.model = self._create_model(groupby_x_scaled, groupby_y_scaled.flatten())
         return self
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the penalized weights on a subset and predict.
+
+        The weights are fit on the per-geo pre-period means (the standardised
+        aggregate the full fit uses), reconstructed here from the training rows.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        groupby_x = x_train.mean(axis=0, keepdims=True)
+        x_full = np.hstack([groupby_x, [[float(y_train.mean())]]])
+        std_vals = np.where(x_full.std(axis=1, keepdims=True) == 0, 1.0, x_full.std(axis=1, keepdims=True))
+        x_scaled = x_full / std_vals
+        weights = self._create_model(x_scaled[:, :-1], x_scaled[:, -1:].flatten())
+        return x_eval @ weights
 
     def _create_model(self, groupby_x: np.ndarray, groupby_y: np.ndarray) -> np.ndarray:
         """Create the weights model used to establish our counterfactual.

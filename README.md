@@ -191,7 +191,10 @@ intervals via the Chernozhukov–Wüthrich–Zhu moving-block permutation test a
 split-conformal band. When the pre-treatment period is too short for those to be
 reliable (the band quantile saturates), inference automatically falls back to
 **jackknife+** (Barber et al., 2021), which reuses every pre-period point for
-both fitting and calibration. Setting `model.inference_method = "bootstrap"`
+both fitting and calibration. Every synthetic-control estimator refits its own
+weights leave-one-out for a faithful jackknife+ (`"jackknife+"`); estimators
+without that refit fall back to a residual-only approximation
+(`"jackknife+ (residual)"`). Setting `model.inference_method = "bootstrap"`
 instead performs inference by **parametric bootstrap** (GeoLift's GSC-style
 approach, currently implemented for `GeneralizedSyntheticControl`); `n_boot` and
 `bootstrap_seed` are configurable. The method used is reported in

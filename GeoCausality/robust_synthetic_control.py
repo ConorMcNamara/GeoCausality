@@ -188,6 +188,10 @@ class RobustSyntheticControl(EconometricEstimator):
         )
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
+        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        self._jk_x_pre = control_pre_mat
+        self._jk_x_post = control_post_mat
+        self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
 
         prediction_pre_arr = control_pre_mat @ self.model
         prediction_post_arr = control_post_mat @ self.model
@@ -334,6 +338,32 @@ class RobustSyntheticControl(EconometricEstimator):
         ci_lower = ceil(self.results["incrementality_ci_lower"])
         roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
         return roas_lift, roas_ci_lower, roas_ci_upper
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the SVD-denoised ridge weights on a subset and predict.
+
+        Denoises the training donor matrix via the same truncated SVD as the full
+        fit, solves the ridge weights on the denoised pre-period, and predicts the
+        raw evaluation rows (matching ``generate``'s fit-denoised / predict-raw
+        scheme).
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        denoised = self._svd(x_train.T).T
+        n_c = denoised.shape[1]
+        weights = np.linalg.solve(denoised.T @ denoised + self.lambda_ * np.identity(n_c), denoised.T @ y_train)
+        return x_eval @ weights
 
     def _svd(self, groupby_x_transposed: np.ndarray) -> np.ndarray:
         """Perform singular value decomposition of our groupby_x_transposed matrix.
