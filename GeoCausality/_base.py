@@ -191,6 +191,11 @@ class EconometricEstimator(Estimator, ABC):
         # Parametric-bootstrap settings (used when inference_method == "bootstrap").
         self.n_boot: int = 1000
         self.bootstrap_seed: int = 0
+        # Donor matrices cached by synthetic-control estimators for faithful
+        # jackknife+ (the shared leave-one-out loop in ``_block_loo``).
+        self._jk_x_pre: np.ndarray | None = None
+        self._jk_y_pre: np.ndarray | None = None
+        self._jk_x_post: np.ndarray | None = None
 
     def pre_process(self) -> "EconometricEstimator":
         if self.test_geos is not None:
@@ -535,18 +540,92 @@ class EconometricEstimator(Estimator, ABC):
     def _loo_counterfactuals(self) -> tuple[np.ndarray, np.ndarray] | None:
         """Leave-one-out pre-period residuals and post-period counterfactuals.
 
-        The default returns ``None``, so estimators without a refit hook use the
-        residual-only jackknife+ approximation. An estimator can override this to
-        return ``(loo_residuals, loo_post_predictions)`` where ``loo_residuals``
+        Returns ``(loo_residuals, loo_post_predictions)`` where ``loo_residuals``
         has shape ``(n_folds,)`` (the absolute held-out pre-period residual of
         each fold) and ``loo_post_predictions`` has shape ``(n_folds, t1)`` (each
-        leave-one-out model's counterfactual over the post-period).
+        leave-one-out model's counterfactual over the post-period). Returns
+        ``None`` -- triggering the residual-only jackknife+ approximation -- when
+        the estimator has not cached the donor matrices (``_jk_x_pre`` etc.) and
+        implemented ``_fit_predict_weights``.
+
+        Synthetic-control estimators all predict ``donor_matrix @ weights`` (with
+        an intercept for the augmented method), so the leave-one-out loop is
+        shared in ``_block_loo`` and each estimator only supplies its weight fit.
 
         Returns
         -------
         The leave-one-out arrays, or None if unsupported.
         """
+        x_pre = self._jk_x_pre
+        if x_pre is None or self._jk_y_pre is None or self._jk_x_post is None:
+            return None
+        return self._block_loo(x_pre, self._jk_y_pre, self._jk_x_post)
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Fit this estimator's donor weights on a pre-period subset and predict.
+
+        Default returns ``None`` (no faithful jackknife+). A synthetic-control
+        estimator overrides this to fit its weights on ``(x_train, y_train)`` --
+        a subset of the pre-period rows -- and return the counterfactual for the
+        rows of ``x_eval`` (a held-out pre-period row stacked on the post-period
+        donor matrix). Donor-column order matches the cached ``_jk_x_*`` matrices.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit the weights.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict the counterfactual for.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row, or None if unsupported.
+        """
         return None
+
+    def _block_loo(
+        self,
+        x_pre: np.ndarray,
+        y_pre: np.ndarray,
+        x_post: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Run the leave-one-out refit loop over the pre-period via ``_fit_predict_weights``.
+
+        For each pre-period row, refit the weights on the remaining rows and
+        predict both the held-out row (its residual) and the post-period
+        counterfactual. Folds the fit declines (returns None) are skipped. The
+        synthetic-control weight fits are regularised or simplex-constrained, so
+        they remain well posed when donors outnumber the training rows.
+
+        Parameters
+        ----------
+        x_pre : numpy array, shape (n_pre, n_donors)
+            Pre-period donor matrix.
+        y_pre : numpy array, shape (n_pre,)
+            Treated pre-period series.
+        x_post : numpy array, shape (t1, n_donors)
+            Post-period donor matrix.
+
+        Returns
+        -------
+        ``(loo_residuals, loo_post_predictions)``, or None if no fold succeeded.
+        """
+        n = x_pre.shape[0]
+        loo_resid: list[float] = []
+        loo_post: list[np.ndarray] = []
+        for i in range(n):
+            mask = np.arange(n) != i
+            eval_mat = np.vstack([x_pre[i][None, :], x_post])
+            pred = self._fit_predict_weights(x_pre[mask], y_pre[mask], eval_mat)
+            if pred is None:
+                continue
+            loo_resid.append(abs(float(y_pre[i] - pred[0])))
+            loo_post.append(np.asarray(pred[1:], dtype=float))
+        if not loo_resid:
+            return None
+        return np.array(loo_resid), np.array(loo_post)
 
     @staticmethod
     def _jackknife_quantile(abs_residuals: np.ndarray, alpha: float) -> float:

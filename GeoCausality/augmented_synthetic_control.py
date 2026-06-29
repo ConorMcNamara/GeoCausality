@@ -181,6 +181,10 @@ class AugmentedSyntheticControl(EconometricEstimator):
         )
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
+        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        self._jk_x_pre = control_pre_mat
+        self._jk_x_post = control_post_mat
+        self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
 
         # Intercept-augmented (de-meaned) counterfactual: anchor the level at the
         # treated unit's own pre-period mean and track donor deviations from their
@@ -353,6 +357,31 @@ class AugmentedSyntheticControl(EconometricEstimator):
         """
         n_c = x.shape[1]
         return np.linalg.solve(x.T @ x + lambda_ * np.identity(n_c), x.T @ y)
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the intercept-augmented ridge weights on a subset and predict.
+
+        The penalty ``self.lambda_`` is held at its full-fit value (not re-selected
+        per fold) so the leave-one-out counterfactuals reflect the same model.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        x_bar = x_train.mean(axis=0, keepdims=True)
+        y_bar = float(y_train.mean())
+        assert self.lambda_ is not None
+        w = self._ridge_weights(x_train - x_bar, y_train - y_bar, self.lambda_)
+        return y_bar + (x_eval - x_bar.flatten()) @ w
 
     def _select_lambda(self, x: np.ndarray, y: np.ndarray, lambdas: np.ndarray) -> float:
         """Select the ridge penalty by the one-standard-error rule.

@@ -162,6 +162,10 @@ class SyntheticControl(EconometricEstimator):
         self.model = self._create_model(self.actual_pre, train_x.to_numpy())
         self.prediction_pre = train_x.to_numpy() @ self.model
         self.prediction_post = test_x.to_numpy() @ self.model
+        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        self._jk_x_pre = train_x.to_numpy()
+        self._jk_x_post = test_x.to_numpy()
+        self._jk_y_pre = self.actual_pre
         self.results = {
             "test": self.actual_post,
             "counterfactual": self.prediction_post,
@@ -330,6 +334,24 @@ class SyntheticControl(EconometricEstimator):
             )
         weights = res["x"]
         return weights
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the simplex synthetic-control weights on a subset and predict.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        return x_eval @ self._create_model(y_train, x_train)
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
@@ -590,6 +612,10 @@ class SyntheticControlV(EconometricEstimator):
         )
         control_pre_arr = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_arr = control_post_pivot.drop(self.date_variable).to_numpy()
+        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        self._jk_x_pre = control_pre_arr
+        self._jk_x_post = control_post_arr
+        self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
         prediction_pre_arr = control_pre_arr @ self.model
         prediction_post_arr = control_post_arr @ self.model
         self.prediction_post = nw.from_native(
@@ -713,25 +739,76 @@ class SyntheticControlV(EconometricEstimator):
         daily_x_arr: np.ndarray = daily_x
         daily_y_arr: np.ndarray = daily_y
 
-        n_r, _ = groupby_x_arr.shape
-        groupby_arr = np.hstack([groupby_x_arr, groupby_y_arr.reshape(-1, 1)])
+        self.V, self.model = self._solve_v_weights(groupby_x_arr, groupby_y_arr, daily_x_arr, daily_y_arr)
+        return self
+
+    def _solve_v_weights(
+        self,
+        groupby_x: np.ndarray,
+        groupby_y: np.ndarray,
+        daily_x: np.ndarray,
+        daily_y: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Solve for the V matrix and donor weights (pure, no mutation of self).
+
+        Parameters
+        ----------
+        groupby_x : numpy array, shape (1, n_geos)
+            Scaled per-geo control pre-period means.
+        groupby_y : numpy array, shape (1,)
+            Scaled treated pre-period mean.
+        daily_x : numpy array, shape (n_pre, n_geos)
+            Daily control pre-period matrix.
+        daily_y : numpy array, shape (n_pre,)
+            Daily treated pre-period series.
+
+        Returns
+        -------
+        A tuple of (V matrix, donor weights).
+        """
+        groupby_arr = np.hstack([groupby_x, groupby_y.reshape(-1, 1)])
         groupby_arr = np.hstack([np.full((groupby_arr.shape[1], 1), 1), groupby_arr.T])
-
-        daily_arr = np.hstack([daily_x_arr, daily_y_arr.reshape(-1, 1)])
-
+        daily_arr = np.hstack([daily_x, daily_y.reshape(-1, 1)])
         try:
             beta = (np.linalg.inv(groupby_arr.T @ groupby_arr) @ groupby_arr.T @ daily_arr.T)[1:,]
         except np.linalg.LinAlgError:
             raise ValueError("Could not invert X^T.X. There is most likely collinearity in your data.")
         x0 = np.diag(beta @ beta.T)
         res = minimize(
-            fun=lambda x: self._loss_v(x, groupby_x_arr, groupby_y_arr, daily_x_arr, daily_y_arr.reshape(-1)),
+            fun=lambda x: self._loss_v(x, groupby_x, groupby_y, daily_x, daily_y.reshape(-1)),
             x0=x0,
             method="SLSQP",
         )
-        self.V = np.diag(np.abs(res["x"])) / np.sum(np.abs(res["x"]))
-        self.model = self._create_model(v=self.V, y=groupby_y_arr, x=groupby_x_arr)
-        return self
+        v_matrix = np.diag(np.abs(res["x"])) / np.sum(np.abs(res["x"]))
+        weights = self._create_model(v=v_matrix, y=groupby_y, x=groupby_x)
+        return v_matrix, weights
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the V matrix and weights on a subset and predict.
+
+        Reconstructs the standardised per-geo means from the training rows, refits
+        V and the weights via the same solver as the full fit (without mutating
+        ``self``), and predicts the evaluation rows.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        groupby_x = x_train.mean(axis=0, keepdims=True)
+        full = np.hstack([groupby_x, [[float(y_train.mean())]]])
+        row_std = np.where(np.std(full, axis=1, keepdims=True) == 0, 1.0, np.std(full, axis=1, keepdims=True))
+        scaled = full / row_std
+        _, weights = self._solve_v_weights(scaled[:, :-1], scaled[:, -1], x_train, y_train)
+        return x_eval @ weights
 
     def _loss_v(
         self,

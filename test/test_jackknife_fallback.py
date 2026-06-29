@@ -107,8 +107,11 @@ class TestJackknifeQuantile:
 
 class TestResidualFallback:
     @staticmethod
-    def test_short_pre_uses_residual_jackknife() -> None:
+    def test_residual_fallback_when_hook_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+        # When an estimator's leave-one-out hook yields nothing, the short-pre-period
+        # path falls back to the residual-only jackknife+ approximation.
         df, pre, post = _panel(n_pre=6, n_post=5, effect=30.0)
+        monkeypatch.setattr(SyntheticControl, "_loo_counterfactuals", lambda self: None)
         results = _fit(SyntheticControl, df, pre, post).results
         assert results["method"] == "jackknife+ (residual)"
         assert results["conformal_band"] >= 0.0
