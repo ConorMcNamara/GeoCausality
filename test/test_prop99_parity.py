@@ -15,20 +15,26 @@ this test skips, exactly like the GeoLift / Card-Krueger parity tests.
 
 What we observe (and assert), per estimator -- the average post-period gap:
 
-* ``SyntheticControl``        -19.5  -> matches the published ~-19.5 closely.
+* ``SyntheticControl``          -19.5 -> matches the published ~-19.5 closely.
 * ``AugmentedSyntheticControl`` -15.8 -> same sign and ballpark (mildly
-                                         attenuated by the ridge augmentation),
-                                         within a generous tolerance.
-* ``PenalizedSyntheticControl`` -33.3 -> overshoots ~1.7x; the parity assertion
-                                         is ``xfail(strict=True)`` -> issue #31.
-* ``GeneralizedSyntheticControl`` -3.6 -> the factor model absorbs most of the
-                                         effect; ``xfail(strict=True)`` -> #32.
+                                         attenuated by the ridge augmentation).
+* ``PenalizedSyntheticControl`` -23.5 -> matches after #31 was fixed (it now
+                                         tracks the full pre-period trajectory
+                                         with a scaled Abadie & L'Hour penalty,
+                                         rather than matching only the pre-period
+                                         mean).
+* ``GeneralizedSyntheticControl`` -20.7 -> matches after #32 was fixed (the
+                                         factor count is now chosen by the
+                                         eigenvalue-ratio criterion, which no
+                                         longer over-selects and washes out the
+                                         effect).
 
-This is the same approach the GeoLift parity test took: a strict xfail surfaces a
-genuine reimplementation spec difference worth investigating (GeoLift -> #20)
-rather than silently tolerating it. Tolerances are deliberately generous: this
-guards against gross divergence, not exact equality, since our predictor
-specification and solvers differ from Abadie's exact Prop 99 setup.
+All four originally diverged in interesting ways; the two that were off
+(PenalizedSyntheticControl #31, GeneralizedSyntheticControl #32) were genuine
+reimplementation bugs that this parity test surfaced -- exactly as the GeoLift
+parity test surfaced #20. Tolerances are deliberately generous: this guards
+against gross divergence, not exact equality, since our predictor specification
+and solvers differ from Abadie's exact Prop 99 setup.
 """
 
 from pathlib import Path
@@ -151,18 +157,14 @@ class TestPenalizedSyntheticControlParity:
         return _fit(PenalizedSyntheticControl, prop99)
 
     @staticmethod
-    def test_effect_is_negative_and_significant(fitted: PenalizedSyntheticControl) -> None:
-        # Sign and significance are right even though the magnitude is not (#31).
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_avg_gap_matches_published(fitted: PenalizedSyntheticControl) -> None:
+        # Fixed in #31: matches the full pre-period trajectory with a scaled penalty.
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
 
     @staticmethod
-    @pytest.mark.xfail(
-        strict=True,
-        reason="PenalizedSyntheticControl overshoots the Prop 99 ATT (~-33 vs ~-19.5); see issue #31",
-    )
-    def test_avg_gap_matches_published(fitted: PenalizedSyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+    def test_effect_is_negative_and_significant(fitted: PenalizedSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
 
 
 class TestGeneralizedSyntheticControlParity:
@@ -171,17 +173,14 @@ class TestGeneralizedSyntheticControlParity:
         return _fit(GeneralizedSyntheticControl, prop99)
 
     @staticmethod
-    def test_effect_is_negative(fitted: GeneralizedSyntheticControl) -> None:
-        # Right sign, but heavily attenuated and not significant (#32).
-        assert _avg_gap(fitted) < 0.0
+    def test_avg_gap_matches_published(fitted: GeneralizedSyntheticControl) -> None:
+        # Fixed in #32: eigenvalue-ratio factor selection no longer over-selects.
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
 
     @staticmethod
-    @pytest.mark.xfail(
-        strict=True,
-        reason="GeneralizedSyntheticControl underestimates the Prop 99 ATT (~-3.6 vs ~-19.5); see issue #32",
-    )
-    def test_avg_gap_matches_published(fitted: GeneralizedSyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+    def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
 
 
 if __name__ == "__main__":

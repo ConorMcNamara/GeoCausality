@@ -6,7 +6,6 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 from narwhals.typing import IntoDataFrame
@@ -14,7 +13,6 @@ from plotly.subplots import make_subplots
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
-from GeoCausality.utils import HoldoutSplitter
 
 
 class GeneralizedSyntheticControl(EconometricEstimator):
@@ -83,12 +81,15 @@ class GeneralizedSyntheticControl(EconometricEstimator):
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
         n_factors : int, optional
-            The number of latent factors to use. If None, it is selected by
-            cross-validation on the pre-period over ``range(0, max_factors + 1)``.
+            The number of latent factors to use. If None, it is selected by the
+            eigenvalue-ratio criterion (Ahn & Horenstein, 2013) on the control
+            panel's spectrum, capped at ``max_factors``.
         max_factors : int, default=5
-            The largest number of factors considered during cross-validation.
+            The largest number of factors considered during selection.
         holdout_len : int, default=1
-            The block length held out on each cross-validation iteration.
+            Pre-period margin reserved when capping the factor count: the count is
+            bounded by ``n_pre - holdout_len - 1`` so the loading fit keeps spare
+            degrees of freedom.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).
@@ -248,13 +249,13 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         # Column-centre so the factors capture common temporal dynamics; the
         # intercept added below carries the treated unit's level.
         y0_centered = y0 - y0.mean(axis=0, keepdims=True)
-        u, _, _ = np.linalg.svd(y0_centered, full_matrices=False)
+        u, s, _ = np.linalg.svd(y0_centered, full_matrices=False)
 
         max_r = max(0, min(self.max_factors, u.shape[1], n_pre - self.holdout_len - 1))
         if self.n_factors is not None:
             r = min(self.n_factors, max_r)
         else:
-            r = self._select_n_factors(u[:n_pre], y1_all[:n_pre], max_r)
+            r = self._eigenvalue_ratio_factors(s, max_r)
         self.n_factors_selected = r
 
         factors = self._design(u, r)
@@ -354,46 +355,42 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         beta, *_ = np.linalg.lstsq(x, y, rcond=None)
         return beta
 
-    def _select_n_factors(self, u_pre: np.ndarray, y1_pre: np.ndarray, max_r: int) -> int:
-        """Choose the factor count by cross-validation on the pre-period.
+    @staticmethod
+    def _eigenvalue_ratio_factors(singular_values: np.ndarray, max_r: int) -> int:
+        """Choose the factor count by the eigenvalue-ratio criterion.
 
-        For each candidate factor count, a moving block of the pre-period is held
-        out (via :class:`~GeoCausality.utils.HoldoutSplitter`), the loadings are
-        fit on the remainder and scored on the block; the count with the smallest
-        mean held-out error wins.
+        Selects the number of latent factors from the control panel's own spectrum
+        (Ahn & Horenstein, 2013): with eigenvalues ``mu_k`` (the squared singular
+        values of the centred control matrix in descending order), the estimated
+        factor count is the ``k`` in ``1..max_r`` that maximises the adjacent
+        ratio ``mu_k / mu_{k+1}``. A genuine factor leaves a large gap before the
+        noise eigenvalues, so the ratio spikes at the true count.
+
+        This deliberately replaces a treated-pre-period cross-validation: minimising
+        held-out *treated* error rewards ever-richer factor subspaces that fit the
+        pre-period but overfit the counterfactual (they reconstruct the treated
+        unit's post-period and wash out the effect). The factor *count* is a
+        property of the donor panel's covariance, so we estimate it there instead.
 
         Parameters
         ----------
-        u_pre : numpy array, shape (n_pre, k)
-            Pre-period rows of the control left singular vectors.
-        y1_pre : numpy array, shape (n_pre,)
-            Treated series over the pre-period.
+        singular_values : numpy array
+            Singular values of the centred control matrix, descending.
         max_r : int
             The largest factor count to consider.
 
         Returns
         -------
-        The selected factor count.
+        The selected factor count, in ``0..max_r``.
         """
-        best_r, best_err = 0, np.inf
-        for r in range(max_r + 1):
-            design = self._design(u_pre, r)
-            df = pd.DataFrame(design)
-            ser = pd.Series(y1_pre)
-            errors, folds = 0.0, 0
-            for x_train, x_holdout, y_train, y_holdout in HoldoutSplitter(df, ser, self.holdout_len):
-                if x_train.shape[0] <= x_train.shape[1]:
-                    continue  # underdetermined fold; skip
-                beta = self._ols(x_train.to_numpy(), y_train.to_numpy())
-                pred = x_holdout.to_numpy() @ beta
-                errors += float(np.sum((y_holdout.to_numpy() - pred) ** 2))
-                folds += 1
-            if folds == 0:
-                continue
-            mse = errors / folds
-            if mse < best_err:
-                best_err, best_r = mse, r
-        return best_r
+        if max_r < 1:
+            return 0
+        eig = np.asarray(singular_values, dtype=float)[: max_r + 1] ** 2
+        if eig.shape[0] < 2:
+            return min(1, max_r)
+        denom = np.where(eig[1:] <= 0.0, np.finfo(float).tiny, eig[1:])
+        ratios = eig[:-1] / denom  # ratios[k-1] = mu_k / mu_{k+1} for k = 1..len
+        return int(np.argmax(ratios)) + 1
 
     def summarize(self, lift: str) -> None:
         """Print a tabulated summary of the generalized synthetic control results.
