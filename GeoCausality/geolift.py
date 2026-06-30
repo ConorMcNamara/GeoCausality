@@ -147,7 +147,8 @@ class GeoLift:
 
         estimate = self.estimator.results
         inference = self.inference.results
-        assert estimate is not None and inference is not None
+        if estimate is None or inference is None:
+            raise ValueError("estimator and inference results must not be None")
 
         # Recentre the GSC bootstrap interval onto the ASC point estimate so the
         # reported interval brackets the reported lift, then graft the GSC p-value.

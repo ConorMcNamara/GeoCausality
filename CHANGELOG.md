@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced the internal `assert` statements in the library (the `GeoCausality`
+  package) with explicit `raise ValueError(...)`, so these invariant checks are
+  preserved when Python runs with assertions disabled (`-O`). Test-suite
+  assertions are unchanged.
+
 ### Added
 
 - **Card & Krueger (1994) parity test** (`test/test_card_krueger_parity.py`) —

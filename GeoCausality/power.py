@@ -247,7 +247,8 @@ class PowerAnalysis:
             **self.estimator_kwargs,
         )
         model.pre_process().generate()
-        assert model.results is not None
+        if model.results is None:
+            raise ValueError("model.results must not be None")
         return float(model.results["p_value"]) <= self.alpha
 
     def simulate(

@@ -120,7 +120,8 @@ class RobustSyntheticControl(EconometricEstimator):
         """
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         day_x = self.data.filter(nw.col(self.treatment_variable) == 0).select(
             [self.y_variable, self.geo_variable, self.date_variable]
         )
@@ -148,7 +149,8 @@ class RobustSyntheticControl(EconometricEstimator):
             Itself, so it can be chained with summarize().
         """
         self.model = self._create_model()
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
             .select([self.y_variable, self.date_variable])

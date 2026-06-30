@@ -90,7 +90,8 @@ class DiffinDiff(EconometricEstimator):
             Itself, so it can be chained with generate().
         """
         super().pre_process()
-        assert self.treatment_variable is not None, "treatment_variable must not be None"
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.groupby_data = (
             self.data.group_by(
                 [self.treatment_variable, "treatment_period", self.date_variable],
@@ -111,7 +112,8 @@ class DiffinDiff(EconometricEstimator):
         DiffinDiff
             Itself, so it can be chained with summarize().
         """
-        assert self.groupby_data is not None, "groupby_data must not be None"
+        if self.groupby_data is None:
+            raise ValueError("groupby_data must not be None")
         self.model = smf.ols(
             f"{self.y_variable} ~ {self.treatment_variable} * treatment_period",
             data=self.groupby_data.to_pandas(),
@@ -124,7 +126,8 @@ class DiffinDiff(EconometricEstimator):
             lift_ci_lower=float(cis[0]),
             lift_ci_upper=float(cis[1]),
         )
-        assert self.n_dates is not None
+        if self.n_dates is None:
+            raise ValueError("n_dates must not be None")
         self.results["incrementality"] = self.results["lift"] * self.n_dates
         self.results["incrementality_ci_lower"] = self.results["lift_ci_lower"] * self.n_dates
         self.results["incrementality_ci_upper"] = self.results["lift_ci_upper"] * self.n_dates

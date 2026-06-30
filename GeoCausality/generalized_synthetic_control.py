@@ -165,7 +165,8 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         GeneralizedSyntheticControl
             Itself, so it can be chained with summarize().
         """
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         # Treated series, aggregated across test geos, split into pre / post.
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))

@@ -222,7 +222,8 @@ class MarketSelection:
             **self.estimator_kwargs,
         )
         model.pre_process().generate()
-        assert model.results is not None
+        if model.results is None:
+            raise ValueError("model.results must not be None")
         band = model.results.get("conformal_band")
         if band is None:
             return None
@@ -282,7 +283,8 @@ class MarketSelection:
                 seed=self.seed,
             ).simulate(effect_sizes=[effect_size], durations=[duration], n_sims=n_sims)
             curve = pa.power_curve
-            assert curve is not None
+            if curve is None:
+                raise ValueError("power_curve must not be None")
             records.append(
                 {
                     "test_geos": list(test_geos),
