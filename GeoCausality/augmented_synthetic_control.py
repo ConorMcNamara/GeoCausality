@@ -113,7 +113,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
         """
         super().pre_process()
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         day_x = self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0)).select(
             [self.y_variable, self.geo_variable, self.date_variable]
         )
@@ -141,7 +142,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
             Itself, so it can be chained with summarize().
         """
         self.model = self._create_model()
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
             .select([self.y_variable, self.date_variable])
@@ -189,7 +191,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
         # Intercept-augmented (de-meaned) counterfactual: anchor the level at the
         # treated unit's own pre-period mean and track donor deviations from their
         # pre-period means, using the same means the weights were fit against.
-        assert self._x_bar is not None and self._y_bar is not None
+        if self._x_bar is None or self._y_bar is None:
+            raise ValueError("_x_bar and _y_bar must not be None")
         donor_pre_mean = self._x_bar.flatten()
         prediction_pre_arr = self._y_bar + (control_pre_mat - donor_pre_mean) @ self.model
         prediction_post_arr = self._y_bar + (control_post_mat - donor_pre_mean) @ self.model
@@ -379,7 +382,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
         """
         x_bar = x_train.mean(axis=0, keepdims=True)
         y_bar = float(y_train.mean())
-        assert self.lambda_ is not None
+        if self.lambda_ is None:
+            raise ValueError("lambda_ must not be None")
         w = self._ridge_weights(x_train - x_bar, y_train - y_bar, self.lambda_)
         return y_bar + (x_eval - x_bar.flatten()) @ w
 

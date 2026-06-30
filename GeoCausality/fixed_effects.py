@@ -90,7 +90,8 @@ class FixedEffects(EconometricEstimator):
             Itself, so it can be chained with generate().
         """
         super().pre_process()
-        assert self.treatment_variable is not None, "treatment_variable must not be None"
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.data: nw.DataFrame = self.data.with_columns(
             (nw.col("treatment_period") * nw.col(self.treatment_variable)).alias("campaign_treatment")
         )

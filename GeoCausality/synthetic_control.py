@@ -105,7 +105,8 @@ class SyntheticControl(EconometricEstimator):
             Itself, so it can be chained with generate().
         """
         super().pre_process()
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         test_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
@@ -528,7 +529,8 @@ class SyntheticControlV(EconometricEstimator):
             Itself, so it can be chained with generate().
         """
         super().pre_process()
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         x_sum = (
             self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
@@ -577,7 +579,8 @@ class SyntheticControlV(EconometricEstimator):
         SyntheticControlV
             Itself, so it can be chained with summarize().
         """
-        assert self.treatment_variable is not None
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
         self.actual_pre = (
             self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
             .group_by(self.date_variable)
