@@ -1,0 +1,42 @@
+California Proposition 99 ("smoking") dataset
+=============================================
+
+File: prop99_smoking.csv  (long format: state, year, cigsale, + predictors)
+
+Source
+------
+Abadie, A., Diamond, A., & Hainmueller, J. (2010). "Synthetic Control Methods
+for Comparative Case Studies: Estimating the Effect of California's Tobacco
+Control Program." Journal of the American Statistical Association, 105(490),
+493-505.
+
+This is the `smoking` dataset distributed with the R `Synth` package (Abadie,
+Diamond & Hainmueller) -- the canonical Proposition 99 panel and one of the most
+widely redistributed teaching datasets in the synthetic-control literature. The
+vendored CSV is a faithful export whose values match the package exactly
+(California cigarette sales: 123.0 packs in 1970, 90.1 in 1988, 41.6 in 2000).
+
+What is vendored
+----------------
+39 states observed annually 1970-2000 (31 years each, balanced panel):
+
+    state     state name; treated unit = "California"
+    year      1970-2000 (integer)
+    cigsale   per-capita cigarette sales in packs (the outcome `y`)
+    lnincome, beer, age15to24, retprice
+              the original Abadie predictors, kept for provenance; the
+              GeoCausality estimators use only `cigsale`
+
+California passed Proposition 99 in 1988 (a large tobacco-control program), so
+it is treated from 1989 onward. The other 38 states form the donor pool.
+
+Published result this fixture reproduces
+----------------------------------------
+Abadie, Diamond & Hainmueller (2010) estimate that by 2000 annual per-capita
+cigarette sales in California were about 26 packs lower than the synthetic
+control, with an average post-period (1989-2000) gap of roughly -19 to -20
+packs. Our `SyntheticControl` recovers ~-19.5 (average) / ~-26.6 (year 2000).
+
+Regenerating
+------------
+    python test/data/vendor_prop99.py
