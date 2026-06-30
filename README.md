@@ -16,6 +16,7 @@ A Python library for measuring the causal impact of geo-level A/B experiments. G
 - [Available Methods](#available-methods)
 - [Quick Start](#quick-start)
 - [API Overview](#api-overview)
+- [Validation](#validation)
 - [Contributing](#contributing)
 - [References](#references)
 
@@ -224,6 +225,40 @@ Every estimator accepts the same core constructor arguments:
 | `msrp` | `float` | `0.0` | Average sale price (for revenue lift) |
 | `spend` | `float` | `0.0` | Campaign spend (for ROAS / cost-per) |
 
+`GeneralizedSyntheticControl` also accepts `factor_selection` (`"er"` by default,
+the eigenvalue-ratio criterion; `"cv"` for cross-validation) and `n_factors` to
+fix the latent-factor count directly.
+
+---
+
+## Validation
+
+GeoCausality's estimators are checked against the **published results of each
+method's foundational paper** — "golden master" parity tests in `test/` that
+vendor the canonical public dataset for each benchmark and assert our point
+estimate reproduces the literature within a reimplementation tolerance. Each test
+skips cleanly if its vendored dataset is absent.
+
+| Benchmark | Dataset | Estimators | Published | GeoCausality |
+|---|---|---|---|---|
+| Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
+| Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
+| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 |
+
+These tests catch real bugs. The GeoLift parity test caught a level bias in
+augmented synthetic control, and the Proposition 99 parity test surfaced — and we
+then fixed — two synthetic-control bugs:
+
+- **`PenalizedSyntheticControl`** now fits its donor weights against the full
+  pre-period **trajectory** (like `SyntheticControl`) with a per-period-scaled
+  Abadie & L'Hour penalty, instead of matching only the pre-period mean
+  (average post-period gap −33 → −23.5).
+- **`GeneralizedSyntheticControl`** now selects its latent-factor count by the
+  eigenvalue-ratio criterion (Ahn & Horenstein, 2013) by default, which no longer
+  over-selects factors and washes out the effect (average post-period gap −3.6 →
+  −20.7). The previous cross-validation is still available via
+  `factor_selection="cv"`.
+
 ---
 
 ## Contributing
@@ -241,5 +276,8 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
 - Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
 - Barber, Rina Foygel, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. "Predictive inference with the jackknife+." *Annals of Statistics* 49.1 (2021): 486–507. [Link](https://projecteuclid.org/journals/annals-of-statistics/volume-49/issue-1/Predictive-inference-with-the-jackknife/10.1214/20-AOS1965.full)
+- Ahn, Seung C., and Alex R. Horenstein. "Eigenvalue ratio test for the number of factors." *Econometrica* 81.3 (2013): 1203–1227. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA8968)
+- Abadie, Alberto, Alexis Diamond, and Jens Hainmueller. "Synthetic control methods for comparative case studies: Estimating the effect of California's tobacco control program." *Journal of the American Statistical Association* 105.490 (2010): 493–505. [Link](https://www.tandfonline.com/doi/abs/10.1198/jasa.2009.ap08746)
+- Card, David, and Alan B. Krueger. "Minimum wages and employment: A case study of the fast-food industry in New Jersey and Pennsylvania." *American Economic Review* 84.4 (1994): 772–793. [Link](https://www.nber.org/papers/w4509)
 - Xu, Yiqing. "Generalized Synthetic Control Method: Causal Inference with Interactive Fixed Effects Models." *Political Analysis* 25.1 (2017): 57–76. [Link](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3)
 - GeoLift (Meta). [Documentation](https://facebookincubator.github.io/GeoLift/)
