@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Card & Krueger (1994) parity test** (`test/test_card_krueger_parity.py`) —
+  literature-validation ("golden master") tests for `FixedEffects` and
+  `DiffinDiff` against the canonical NJ/PA minimum-wage difference-in-differences
+  result (+2.76 FTE). `FixedEffects` (two-way fixed effects) is checked on the
+  full store-level panel; `DiffinDiff` on the per-state mean series. The authors'
+  public `public.dat` is vendored to `test/data/card_krueger_1994.csv` (reshaped
+  by `test/data/vendor_card_krueger.py`, provenance in
+  `card_krueger_1994.README.txt`); the test skips cleanly when the CSV is absent.
+
 ## [0.6.0] - 2026-06-29
 
 A GeoLift-parity release: GeoCausality now mirrors Meta's GeoLift workflow
