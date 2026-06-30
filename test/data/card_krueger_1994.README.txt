@@ -1,0 +1,42 @@
+Card & Krueger (1994) NJ/PA minimum-wage fast-food dataset
+==========================================================
+
+File: card_krueger_1994.csv  (long format: geo, date, y, state)
+
+Source
+------
+Card, D., & Krueger, A. B. (1994). "Minimum Wages and Employment: A Case Study
+of the Fast-Food Industry in New Jersey and Pennsylvania." American Economic
+Review, 84(4), 772-793.
+
+Underlying microdata: David Card's public data archive,
+https://davidcard.berkeley.edu/data_sets/njmin.zip (file `public.dat`, 410
+restaurants surveyed in two waves). The authors released this dataset publicly
+for replication; it is one of the most widely redistributed teaching datasets in
+applied econometrics.
+
+What is vendored
+----------------
+`public.dat` was reshaped into one row per store-wave with a non-missing
+full-time-equivalent employment value. Columns:
+
+    geo    store id ("s<SHEET>" from the codebook)
+    date   1992-02-01 (wave 1, Feb/Mar 1992, before the NJ wage rise) or
+           1992-11-01 (wave 2, Nov/Dec 1992, after)
+    y      FTE employment = EMPFT + NMGRS + 0.5 * EMPPT
+           (full-timers + managers + half of part-timers), the paper's
+           definition
+    state  "NJ" (treated) or "PA" (control)
+
+NJ raised its minimum wage from $4.25 to $5.05 on 1 April 1992; PA did not, so
+PA serves as the control group.
+
+Published results reproduced by this fixture (Table 3, FTE employment)
+----------------------------------------------------------------------
+    NJ: 20.44 (before) -> 21.03 (after)
+    PA: 23.33 (before) -> 21.17 (after)
+    Difference-in-differences = (21.03 - 20.44) - (21.17 - 23.33) = +2.76 FTE
+
+Regenerating
+------------
+    python test/data/vendor_card_krueger.py
