@@ -39,10 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~9.0 to ~3.7.
 - **`GeneralizedSyntheticControl`** (#32) — the latent-factor count is now chosen
   by the eigenvalue-ratio criterion (Ahn & Horenstein, 2013) on the control
-  panel's spectrum, replacing a treated-pre-period cross-validation that
-  over-selected factors and overfit the counterfactual (washing out the effect).
-  On Prop 99 the average post-period gap moves from -3.6 (not significant) to
-  -20.7 (significant).
+  panel's spectrum by default, instead of a treated-pre-period cross-validation
+  that over-selected factors and overfit the counterfactual (washing out the
+  effect). On Prop 99 the average post-period gap moves from -3.6 (not
+  significant) to -20.7 (significant). The previous cross-validation remains
+  available opt-in via the new ``factor_selection="cv"`` argument
+  (``factor_selection="er"`` is the default).
 
 ## [0.6.0] - 2026-06-29
 

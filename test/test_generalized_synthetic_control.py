@@ -4,8 +4,9 @@
 recovers the treated unit's loadings from its pre-period, and projects the
 counterfactual forward. These tests assert the conformal-inference contract
 shared by every synthetic-control estimator (matching ``test_conformal_inference``),
-the factor-count behaviour (cross-validated vs. fixed), and that the method
-recovers a known effect under a parallel-trends (two-way fixed effects) regime.
+the factor-count behaviour (auto-selected via eigenvalue-ratio or cross-validation,
+or fixed), and that the method recovers a known effect under a parallel-trends
+(two-way fixed effects) regime.
 """
 
 import io
@@ -167,11 +168,28 @@ class TestConformalInference:
 
 class TestFactorSelection:
     @staticmethod
-    def test_cross_validation_selects_factor_count(effect_data: pl.DataFrame) -> None:
+    def test_default_selects_factor_count(effect_data: pl.DataFrame) -> None:
+        # The default ("er") selects a factor count within the configured range.
         model = _model(effect_data, max_factors=5).pre_process().generate()
+        assert model.factor_selection == "er"
         assert model.n_factors_selected is not None
         assert 0 <= model.n_factors_selected <= 5
         assert model.results["n_factors"] == model.n_factors_selected
+
+    @staticmethod
+    @pytest.mark.parametrize("selection", ["er", "cv"])
+    def test_both_selectors_run_and_recover_effect(selection: str, effect_data: pl.DataFrame) -> None:
+        # Both factor-selection strategies should run and recover the strong
+        # injected effect on the well-specified synthetic panel.
+        model = _model(effect_data, factor_selection=selection, max_factors=5).pre_process().generate()
+        assert 0 <= model.n_factors_selected <= 5
+        assert model.results["p_value"] <= 0.1
+        assert model.results["incrementality_ci_lower"] > 0.0
+
+    @staticmethod
+    def test_invalid_factor_selection_raises(effect_data: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match="factor_selection"):
+            _model(effect_data, factor_selection="bogus")
 
     @staticmethod
     def test_fixed_n_factors_is_respected(effect_data: pl.DataFrame) -> None:
