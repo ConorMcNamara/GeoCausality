@@ -50,6 +50,7 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         n_factors: int | None = None,
         max_factors: int = 5,
         holdout_len: int = 1,
+        factor_selection: str = "er",
         conformal_q: float = 1.0,
     ) -> None:
         """Initialize the generalized synthetic control estimator.
@@ -83,12 +84,22 @@ class GeneralizedSyntheticControl(EconometricEstimator):
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
         n_factors : int, optional
-            The number of latent factors to use. If None, it is selected by
-            cross-validation on the pre-period over ``range(0, max_factors + 1)``.
+            The number of latent factors to use. If None, it is selected
+            automatically by ``factor_selection``, capped at ``max_factors``.
         max_factors : int, default=5
-            The largest number of factors considered during cross-validation.
+            The largest number of factors considered during selection.
         holdout_len : int, default=1
-            The block length held out on each cross-validation iteration.
+            Pre-period margin reserved when capping the factor count: the count is
+            bounded by ``n_pre - holdout_len - 1`` so the loading fit keeps spare
+            degrees of freedom. Also the block length held out per fold when
+            ``factor_selection="cv"``.
+        factor_selection : {"er", "cv"}, default="er"
+            How the factor count is chosen when ``n_factors`` is None.
+            ``"er"`` uses the eigenvalue-ratio criterion (Ahn & Horenstein, 2013)
+            on the control panel's spectrum -- the factor count is a property of
+            the donor pool, so this is robust. ``"cv"`` minimises held-out
+            treated pre-period error via cross-validation; it can over-select
+            factors and overfit the counterfactual, so it is opt-in.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).
@@ -115,9 +126,12 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         )
         if n_factors is not None and n_factors < 0:
             raise ValueError(f"n_factors must be non-negative, got {n_factors}")
+        if factor_selection not in ("er", "cv"):
+            raise ValueError(f"factor_selection must be 'er' or 'cv', got {factor_selection!r}")
         self.n_factors = n_factors
         self.max_factors = max_factors
         self.holdout_len = holdout_len
+        self.factor_selection = factor_selection
         self.conformal_q = conformal_q
         self.dates: list[Any] | None = None
         self.n_factors_selected: int | None = None
@@ -248,13 +262,15 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         # Column-centre so the factors capture common temporal dynamics; the
         # intercept added below carries the treated unit's level.
         y0_centered = y0 - y0.mean(axis=0, keepdims=True)
-        u, _, _ = np.linalg.svd(y0_centered, full_matrices=False)
+        u, s, _ = np.linalg.svd(y0_centered, full_matrices=False)
 
         max_r = max(0, min(self.max_factors, u.shape[1], n_pre - self.holdout_len - 1))
         if self.n_factors is not None:
             r = min(self.n_factors, max_r)
-        else:
+        elif self.factor_selection == "cv":
             r = self._select_n_factors(u[:n_pre], y1_all[:n_pre], max_r)
+        else:
+            r = self._eigenvalue_ratio_factors(s, max_r)
         self.n_factors_selected = r
 
         factors = self._design(u, r)
@@ -354,13 +370,53 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         beta, *_ = np.linalg.lstsq(x, y, rcond=None)
         return beta
 
+    @staticmethod
+    def _eigenvalue_ratio_factors(singular_values: np.ndarray, max_r: int) -> int:
+        """Choose the factor count by the eigenvalue-ratio criterion.
+
+        Selects the number of latent factors from the control panel's own spectrum
+        (Ahn & Horenstein, 2013): with eigenvalues ``mu_k`` (the squared singular
+        values of the centred control matrix in descending order), the estimated
+        factor count is the ``k`` in ``1..max_r`` that maximises the adjacent
+        ratio ``mu_k / mu_{k+1}``. A genuine factor leaves a large gap before the
+        noise eigenvalues, so the ratio spikes at the true count.
+
+        This deliberately replaces a treated-pre-period cross-validation: minimising
+        held-out *treated* error rewards ever-richer factor subspaces that fit the
+        pre-period but overfit the counterfactual (they reconstruct the treated
+        unit's post-period and wash out the effect). The factor *count* is a
+        property of the donor panel's covariance, so we estimate it there instead.
+
+        Parameters
+        ----------
+        singular_values : numpy array
+            Singular values of the centred control matrix, descending.
+        max_r : int
+            The largest factor count to consider.
+
+        Returns
+        -------
+        The selected factor count, in ``0..max_r``.
+        """
+        if max_r < 1:
+            return 0
+        eig = np.asarray(singular_values, dtype=float)[: max_r + 1] ** 2
+        if eig.shape[0] < 2:
+            return min(1, max_r)
+        denom = np.where(eig[1:] <= 0.0, np.finfo(float).tiny, eig[1:])
+        ratios = eig[:-1] / denom  # ratios[k-1] = mu_k / mu_{k+1} for k = 1..len
+        return int(np.argmax(ratios)) + 1
+
     def _select_n_factors(self, u_pre: np.ndarray, y1_pre: np.ndarray, max_r: int) -> int:
         """Choose the factor count by cross-validation on the pre-period.
 
-        For each candidate factor count, a moving block of the pre-period is held
-        out (via :class:`~GeoCausality.utils.HoldoutSplitter`), the loadings are
-        fit on the remainder and scored on the block; the count with the smallest
-        mean held-out error wins.
+        Opt-in alternative to the eigenvalue-ratio criterion (``factor_selection
+        ="cv"``). For each candidate factor count, a moving block of the
+        pre-period is held out (via :class:`~GeoCausality.utils.HoldoutSplitter`),
+        the loadings are fit on the remainder and scored on the block; the count
+        with the smallest mean held-out error wins. Because more factors keep
+        improving the pre-period fit, this can over-select and overfit the
+        counterfactual -- prefer ``"er"`` unless you specifically want CV.
 
         Parameters
         ----------

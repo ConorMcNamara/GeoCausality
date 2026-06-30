@@ -20,14 +20,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Proposition 99 parity test** (`test/test_prop99_parity.py`) —
   literature-validation ("golden master") tests for the synthetic-control family
   against Abadie, Diamond & Hainmueller's (2010) California Prop 99 result
-  (~-19.5 average / ~-26 year-2000 packs/capita). `SyntheticControl` matches
-  closely and `AugmentedSyntheticControl` lands in the same ballpark;
-  `PenalizedSyntheticControl` (overshoots, #31) and `GeneralizedSyntheticControl`
-  (attenuates, #32) are marked `xfail(strict=True)` to surface genuine spec
-  differences, as the GeoLift parity test did (#20). The `Synth` `smoking`
-  dataset is vendored to `test/data/prop99_smoking.csv` (via
+  (~-19.5 average / ~-26 year-2000 packs/capita). All four estimators now match
+  within tolerance (`SyntheticControl` -19.5, `AugmentedSyntheticControl` -15.8,
+  `PenalizedSyntheticControl` -23.5, `GeneralizedSyntheticControl` -20.7) after
+  the two divergences the test originally surfaced (#31, #32) were fixed. The
+  `Synth` `smoking` dataset is vendored to `test/data/prop99_smoking.csv` (via
   `test/data/vendor_prop99.py`, provenance in `prop99_smoking.README.txt`); the
   test skips cleanly when the CSV is absent.
+
+### Fixed
+
+- **`PenalizedSyntheticControl`** (#31) — now fits its donor weights against the
+  full pre-period **trajectory** (as `SyntheticControl` does) instead of a single
+  pre-period mean per geo, and the Abadie & L'Hour discrepancy penalty is scaled
+  per-period so `lambda_` trades off fit and penalty in comparable units
+  (`lambda_ -> 0` recovers the unpenalized estimator). On Prop 99 the average
+  post-period gap moves from -33.3 to -23.5 and the pre-period fit RMSE from
+  ~9.0 to ~3.7.
+- **`GeneralizedSyntheticControl`** (#32) — the latent-factor count is now chosen
+  by the eigenvalue-ratio criterion (Ahn & Horenstein, 2013) on the control
+  panel's spectrum by default, instead of a treated-pre-period cross-validation
+  that over-selected factors and overfit the counterfactual (washing out the
+  effect). On Prop 99 the average post-period gap moves from -3.6 (not
+  significant) to -20.7 (significant). The previous cross-validation remains
+  available opt-in via the new ``factor_selection="cv"`` argument
+  (``factor_selection="er"`` is the default).
 
 ## [0.6.0] - 2026-06-29
 
