@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   public `public.dat` is vendored to `test/data/card_krueger_1994.csv` (reshaped
   by `test/data/vendor_card_krueger.py`, provenance in
   `card_krueger_1994.README.txt`); the test skips cleanly when the CSV is absent.
+- **Proposition 99 parity test** (`test/test_prop99_parity.py`) —
+  literature-validation ("golden master") tests for the synthetic-control family
+  against Abadie, Diamond & Hainmueller's (2010) California Prop 99 result
+  (~-19.5 average / ~-26 year-2000 packs/capita). `SyntheticControl` matches
+  closely and `AugmentedSyntheticControl` lands in the same ballpark;
+  `PenalizedSyntheticControl` (overshoots, #31) and `GeneralizedSyntheticControl`
+  (attenuates, #32) are marked `xfail(strict=True)` to surface genuine spec
+  differences, as the GeoLift parity test did (#20). The `Synth` `smoking`
+  dataset is vendored to `test/data/prop99_smoking.csv` (via
+  `test/data/vendor_prop99.py`, provenance in `prop99_smoking.README.txt`); the
+  test skips cleanly when the CSV is absent.
 
 ## [0.6.0] - 2026-06-29
 
