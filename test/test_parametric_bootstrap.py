@@ -120,9 +120,11 @@ class TestReproducibility:
 
 class TestFallback:
     @staticmethod
-    def test_estimator_without_hook_falls_back(effect_data: pl.DataFrame) -> None:
-        # SyntheticControl has no _bootstrap_refit, so "bootstrap" must not crash;
+    def test_estimator_without_hook_falls_back(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Synthetic-control estimators now support the bootstrap via the shared
+        # weight hook; when that hook is unavailable, "bootstrap" must not crash —
         # it falls through to the conformal / jackknife path instead.
+        monkeypatch.setattr(SyntheticControl, "_fit_predict_weights", lambda self, x_train, y_train, x_eval: None)
         model = SyntheticControl(
             effect_data, treatment_variable="is_treatment", pre_period=PRE_PERIOD, post_period=POST_PERIOD
         )
