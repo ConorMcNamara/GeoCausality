@@ -46,7 +46,7 @@ import pytest
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
-from GeoCausality.synthetic_control import SyntheticControl
+from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
 
 DATA_PATH = Path(__file__).parent / "data" / "prop99_smoking.csv"
 
@@ -132,6 +132,29 @@ class TestSyntheticControlParity:
 
     @staticmethod
     def test_effect_is_negative_and_significant(fitted: SyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestSyntheticControlVParity:
+    """SyntheticControlV (Abadie & Gardeazabal V-weighted method)."""
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> SyntheticControlV:
+        return _fit(SyntheticControlV, prop99)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: SyntheticControlV) -> None:
+        # The V-weighted method on lagged outcomes recovers the same fit as the
+        # plain estimator on this panel, so it matches the published gap closely.
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=SC_AVG_ABS_TOL)
+
+    @staticmethod
+    def test_terminal_gap_matches_published(fitted: SyntheticControlV) -> None:
+        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: SyntheticControlV) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
 
