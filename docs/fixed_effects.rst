@@ -1,6 +1,6 @@
-===================
+====================
 Fixed Effects Models
-===================
+====================
 
 .. contents:: Table of Contents
    :depth: 2
@@ -49,7 +49,7 @@ Advantages
 * **Relatively Simple to Implement:** Once the data is transformed, the model can be estimated using standard regression techniques.
 
 Limitations
-----------
+-----------
 
 * **Cannot Estimate Effects of Time-Invariant Variables:** Because the fixed effects absorb all time-invariant variation, it is not possible to estimate the effects of variables that do not change over time (e.g., gender, race) using a standard fixed effects model.
 * **Potential for Increased Variance:** The demeaning transformation can reduce the precision of the estimates, especially when there is little within-entity variation in the independent variables.
