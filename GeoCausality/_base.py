@@ -742,10 +742,13 @@ class EconometricEstimator(Estimator, ABC):
     def _bootstrap_refit(self, treated_pre: np.ndarray) -> np.ndarray | None:
         """Refit the counterfactual over the post-period from a resampled pre-period.
 
-        The default returns ``None``, so estimators without a refit hook do not
-        support the parametric bootstrap. An estimator can override this to take a
-        bootstrap-resampled treated pre-period series and return its refit
-        counterfactual over the post-period (shape ``(t1,)``).
+        Delegates to ``_fit_predict_weights``: refit the weights on the cached
+        pre-period donor matrix against the resampled treated series and predict
+        the post-period donor matrix. Synthetic-control estimators get the
+        parametric bootstrap for free this way; an estimator that caches a
+        different design (e.g. the factor design) overrides this directly. Returns
+        ``None`` -- so the bootstrap falls back -- when the donor matrices are not
+        cached or the weight fit is unsupported.
 
         Parameters
         ----------
@@ -756,7 +759,9 @@ class EconometricEstimator(Estimator, ABC):
         -------
         The refit post-period counterfactual, or None if unsupported.
         """
-        return None
+        if self._jk_x_pre is None or self._jk_x_post is None:
+            return None
+        return self._fit_predict_weights(self._jk_x_pre, treated_pre, self._jk_x_post)
 
     def _parametric_bootstrap_interval(
         self,
@@ -806,8 +811,14 @@ class EconometricEstimator(Estimator, ABC):
             # Replicate under the sharp null of no effect (observed == counterfactual).
             null_samples[b] = float(np.sum(fitted_post + eps_post - cf_post))
 
-        lower = float(np.percentile(incr_samples, 100 * alpha / 2))
-        upper = float(np.percentile(incr_samples, 100 * (1 - alpha / 2)))
+        # Center the bootstrap spread on the reported incrementality. A refit on
+        # the fitted counterfactual need not reproduce it exactly for penalised or
+        # mean-based estimators, which would otherwise bias the percentile
+        # interval off the point estimate; centering on incr_obs de-biases it and
+        # guarantees the interval brackets the reported lift.
+        boot_mean = float(np.mean(incr_samples))
+        lower = incr_obs + float(np.percentile(incr_samples, 100 * alpha / 2)) - boot_mean
+        upper = incr_obs + float(np.percentile(incr_samples, 100 * (1 - alpha / 2))) - boot_mean
         band = self._jackknife_quantile(pre_resid, alpha)
         p_value = float(np.mean(np.abs(null_samples) >= abs(incr_obs)))
         return lower / t1, upper / t1, band, p_value

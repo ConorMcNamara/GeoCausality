@@ -196,7 +196,7 @@ weights leave-one-out for a faithful jackknife+ (`"jackknife+"`); estimators
 without that refit fall back to a residual-only approximation
 (`"jackknife+ (residual)"`). Setting `model.inference_method = "bootstrap"`
 instead performs inference by **parametric bootstrap** (GeoLift's GSC-style
-approach, currently implemented for `GeneralizedSyntheticControl`); `n_boot` and
+approach), supported across the whole synthetic-control family; `n_boot` and
 `bootstrap_seed` are configurable. The method used is reported in
 `results["method"]` (`"conformal"`, `"jackknife+"`, `"jackknife+ (residual)"`, or
 `"bootstrap"`), and can be forced with
