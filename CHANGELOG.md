@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolved the `zuban` type-check errors in `SyntheticControl.summarize` and
+  `GeoX.summarize` (the `table_dict` was inferred as `list[float64]` from its
+  numeric `np.sum(...)` entries, rejecting the later string-list assignments).
+  Annotating it `dict[str, list[Any]]` clears all 40 errors, turning the CI
+  type-check step green. No runtime change.
+
 ### Changed
 
 - Replaced the internal `assert` statements in the library (the `GeoCausality`

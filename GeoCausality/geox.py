@@ -162,7 +162,7 @@ class GeoX(MLEstimator):
                 f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
                 f"or `roas`"
             )
-        table_dict = {
+        table_dict: dict[str, list[Any]] = {
             "Variant": [np.sum(self.results["test"])],
             "Baseline": [np.sum(self.results["counterfactual"])],
         }
