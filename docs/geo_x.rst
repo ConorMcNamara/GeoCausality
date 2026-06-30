@@ -44,7 +44,7 @@ Advantages
 * **Flexibility:** TBR can be applied in situations where GBR is applicable, and also in situations where GBR is not.
 
 Limitations
-----------
+-----------
 
 * **Model Assumptions:** The accuracy of TBR depends on the validity of the assumptions of the regression model.
 
@@ -53,7 +53,7 @@ Limitations
 * **Potential for Bias:** Like any statistical model, TBR can be susceptible to bias if the model is misspecified or if there are unobserved confounders.
 
 Relationship to Geo Experiments
------------------------------
+-------------------------------
 TBR is a valuable tool for analyzing data from geo experiments, particularly when the experimental design involves a small number of geos or matched market tests. It complements other geo experiment methodologies and provides a framework for estimating causal effects in challenging situations.
 
 Key Research Papers

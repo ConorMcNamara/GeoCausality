@@ -30,7 +30,7 @@ The key steps involved in SCM are:
 3.  **Estimation of the Treatment Effect:** Calculate the difference between the treated unit's actual post-intervention outcomes and the synthetic control's post-intervention outcomes.  This difference is the estimated effect of the intervention.
 
 Mathematical Formulation
------------------------
+------------------------
 Let:
 
 * \(Y_{it}\) be the outcome of unit \(i\) at time \(t\).
@@ -56,7 +56,7 @@ The estimated treatment effect for the treated unit at time \(t\) (\(t > T_0\)) 
 $$\hat{\tau}_t = Y_{1t} - \sum_{j=2}^{J+1} \hat{w}_j Y_{jt}$$
 
 Advantages of the Synthetic Control Method
------------------------------------------
+------------------------------------------
 
 * **Data-Driven:** SCM provides a systematic and transparent way to select control units and estimate treatment effects.
 * **Relaxes Parallel Trends:** SCM does not rely on the strict parallel trends assumption of difference-in-differences.
@@ -64,7 +64,7 @@ Advantages of the Synthetic Control Method
 * **Provides a Plausible Counterfactual:** SCM constructs a counterfactual outcome for the treated unit, allowing for a more credible estimation of the treatment effect.
 
 Limitations of the Synthetic Control Method
------------------------------------------
+-------------------------------------------
 
 * **Extrapolation:** If the treated unit is very different from the control units, SCM may involve some extrapolation.
 * **Sensitivity to Control Unit Selection:** The results of SCM can be sensitive to the choice of control units.
@@ -78,6 +78,6 @@ The Synthetic Control Method is a valuable tool for estimating the effects of in
 References
 ----------
 
-* Abadie, A., & Gardeazabal, J. (2003). The economic costs of conflict: A case study of the Basque Country. *American Economic Review*, *93*(1), 113-132.
-* Abadie, A., Diamond, A., & Hainmueller, J. (2010). Synthetic control methods for comparative case studies: Estimating the effect of California's Proposition 99 on cigarette consumption. *Journal of the American Statistical Association*, *105*(490), 493-505.
-* Abadie, A., Diamond, A., & Hainmueller, J. (2015). Comparative politics and the synthetic control method. *American Journal of Political Science*, *59*(2), 495-510.
+* Abadie, A., & Gardeazabal, J. (2003). The economic costs of conflict: A case study of the Basque Country. *American Economic Review*, 93(1), 113-132.
+* Abadie, A., Diamond, A., & Hainmueller, J. (2010). Synthetic control methods for comparative case studies: Estimating the effect of California's Proposition 99 on cigarette consumption. *Journal of the American Statistical Association*, 105(490), 493-505.
+* Abadie, A., Diamond, A., & Hainmueller, J. (2015). Comparative politics and the synthetic control method. *American Journal of Political Science*, 59(2), 495-510.

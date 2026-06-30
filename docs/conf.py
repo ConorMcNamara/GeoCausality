@@ -24,16 +24,26 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
     "sphinx_copybutton",
-    "sphinx_gallery.gen_gallery",  # Moved this here directly
 ]
 
 latex_elements = {"preamble": r"\usepackage{mathtools}"}
 
+# -- Autodoc / autosummary
+# The package and its runtime dependencies are installed for the docs build
+# (``pip install -e .``), so autodoc imports the real modules — no mocking, which
+# would break the ``np.ndarray | None`` annotations.
 
-def setup(app):
-    app.add_js_file("static/custom_mathjax.js")
+autodoc_typehints = "description"
+autodoc_member_order = "bysource"
+autodoc_default_options = {
+    "members": True,
+    "show-inheritance": True,
+}
 
+napoleon_google_docstring = False
+napoleon_numpy_docstring = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
@@ -41,18 +51,15 @@ intersphinx_mapping = {
 }
 intersphinx_disabled_domains = ["std"]
 
-templates_path = ["_templates"]
-
 # -- Options for HTML output
 
 html_theme = "sphinx_book_theme"
+html_title = "GeoCausality"
+html_theme_options = {
+    "repository_url": "https://github.com/ConorMcNamara/GeoCausality",
+    "use_repository_button": True,
+    "use_issues_button": True,
+}
 
 # -- Options for EPUB output
 epub_show_urls = "footnote"
-
-# -- Sphinx Gallery Configuration
-sphinx_gallery_conf = {
-    "examples_dirs": ["auto_examples"],  # Path to your examples folder
-    "gallery_dirs": ["auto_examples"],  # Path to the gallery build output
-    "filename_pattern": r"auto_examples/.*\.py",
-}

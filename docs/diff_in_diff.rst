@@ -18,7 +18,7 @@ Assumptions
 The key assumption in DiD is the **parallel trends assumption**.  This assumes that, in the absence of the treatment, the treated and control groups would have followed similar trends in the outcome variable.
 
 Mathematical Representation
---------------------------
+---------------------------
 Let:
 
 * \(Y_{it}\) be the outcome for unit \(i\) at time \(t\).
@@ -63,7 +63,7 @@ Advantages
 * **Handles Unobserved Confounding:** By differencing, DiD can eliminate the bias from time-invariant unobserved confounders.
 
 Limitations
-----------
+-----------
 
 * **Parallel Trends Assumption:** This is a strong assumption that is often difficult to verify.
 * **Sensitivity to Functional Form:** The results can be sensitive to the specification of the regression model.
@@ -71,7 +71,7 @@ Limitations
 * **Staggered Treatment Adoption:** Recent research has shown that with staggered treatment timing, the standard two-way fixed effects estimator can be biased.
 
 Extensions and Recent Developments
----------------------------------
+----------------------------------
 
 * **Multiple Time Periods:** DiD can be extended to settings with multiple pre- and post-treatment periods.
 * **Variable Treatment Timing:** New methods have been developed to address the challenges of staggered treatment adoption (see, for example, Callaway and Sant'Anna, 2021).
@@ -85,5 +85,5 @@ References
 ----------
 
 * Angrist, J. D., & Pischke, J. S. (2008). *Mostly harmless econometrics: An empiricist's companion*. Princeton university press.
-* Callaway, B., & Sant'Anna, P. H. C. (2021). Difference-in-differences with multiple time periods. *Journal of Econometrics*, *225*(1), 68-95.
-* Lechner, M. (2011). The estimation of causal effects by difference-in-differences methods. *Foundations and Trends® in Econometrics*, *4*(3), 165-224.
+* Callaway, B., & Sant'Anna, P. H. C. (2021). Difference-in-differences with multiple time periods. *Journal of Econometrics*, 225(1), 68-95.
+* Lechner, M. (2011). The estimation of causal effects by difference-in-differences methods. *Foundations and Trends® in Econometrics*, 4(3), 165-224.

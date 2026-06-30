@@ -83,6 +83,6 @@ PSC is a valuable extension to standard SC, especially when there are many contr
 References
 ----------
 
-* Abadie, A., & Gardeazabal, J. (2003).  The economic costs of conflict: A case study of the Basque Country.  *American Economic Review*, *93*(1), 113-132.
-* Abadie, A., Diamond, A., & Hainmueller, J. (2010).  Synthetic control methods for comparative case studies: Estimating the effect of California's Proposition 99 on cigarette consumption.  *Journal of the American Statistical Association*, *105*(490), 493-505.
-* Abadie, A., & L'Hour, J. (2021).  A penalized synthetic control estimator for disaggregated data. *Journal of the American Statistical Association*, *116*(536), 1817-1834.
+* Abadie, A., & Gardeazabal, J. (2003).  The economic costs of conflict: A case study of the Basque Country.  *American Economic Review*, 93(1), 113-132.
+* Abadie, A., Diamond, A., & Hainmueller, J. (2010).  Synthetic control methods for comparative case studies: Estimating the effect of California's Proposition 99 on cigarette consumption.  *Journal of the American Statistical Association*, 105(490), 493-505.
+* Abadie, A., & L'Hour, J. (2021).  A penalized synthetic control estimator for disaggregated data. *Journal of the American Statistical Association*, 116(536), 1817-1834.

@@ -359,7 +359,7 @@ class PowerAnalysis:
         Raises
         ------
         ValueError
-            If ``simulate()` has not been run yet.
+            If ``simulate()`` has not been run yet.
         """
         if self.power_curve is None:
             raise ValueError("Call simulate() before summarize()")
