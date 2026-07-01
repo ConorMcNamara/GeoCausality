@@ -215,15 +215,15 @@ class FixedEffects(EconometricEstimator):
         date_rank = {d: i for i, d in enumerate(unique_dates)}
         post_dates = data_pd.loc[data_pd["treatment_period"] == 1, self.date_variable]
         start_rank = date_rank[min(post_dates)]
-        data_pd["relative_period"] = data_pd[self.date_variable].map(date_rank) - start_rank
+        data_pd["relative_period"] = data_pd[self.date_variable].map(lambda d: date_rank[d]) - start_rank
         event_columns = []
         for k in sorted(data_pd["relative_period"].unique()):
             if k == reference:
                 continue
             column = f"evt_{k}".replace("-", "m")
-            data_pd[column] = (
-                (data_pd["relative_period"] == k) & (data_pd[self.treatment_variable] == 1)
-            ).astype(float)
+            data_pd[column] = ((data_pd["relative_period"] == k) & (data_pd[self.treatment_variable] == 1)).astype(
+                float
+            )
             event_columns.append((k, column))
         indexed = data_pd.set_index([self.geo_variable, self.date_variable])
         formula = (
@@ -231,9 +231,7 @@ class FixedEffects(EconometricEstimator):
             + " + ".join(column for _, column in event_columns)
             + " + EntityEffects + TimeEffects"
         )
-        event_model = PanelOLS.from_formula(formula, data=indexed).fit(
-            cov_type="clustered", cluster_entity=True
-        )
+        event_model = PanelOLS.from_formula(formula, data=indexed).fit(cov_type="clustered", cluster_entity=True)
         cis = event_model.conf_int(1 - self.alpha)
         periods = [reference]
         estimates = [0.0]
@@ -242,8 +240,8 @@ class FixedEffects(EconometricEstimator):
         for k, column in event_columns:
             periods.append(k)
             estimates.append(float(event_model.params[column]))
-            lowers.append(float(cis["lower"][column]))
-            uppers.append(float(cis["upper"][column]))
+            lowers.append(float(cis.loc[column, "lower"]))
+            uppers.append(float(cis.loc[column, "upper"]))
         order = np.argsort(periods)
         periods = np.asarray(periods)[order]
         estimates = np.asarray(estimates)[order]
