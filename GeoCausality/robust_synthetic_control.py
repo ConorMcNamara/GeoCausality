@@ -35,6 +35,7 @@ class RobustSyntheticControl(EconometricEstimator):
         lambda_: float = 0.1,
         threshold: float | None = None,
         sv_count: int | None = None,
+        sv_energy: float = 0.999,
         conformal_q: float = 1.0,
     ) -> None:
         """Initialize the robust synthetic control estimator.
@@ -70,10 +71,16 @@ class RobustSyntheticControl(EconometricEstimator):
         lambda_ : float, default=0.1
             Ridge parameter to use
         threshold : float, optional
-            Remove singular values that are less than this threshold.
+            Remove singular values that are less than this threshold. Overrides
+            ``sv_count`` and ``sv_energy`` when set.
         sv_count : int, optional
-            Keep this many of the largest singular values when
-            reducing the outcome matrix
+            Keep this many of the largest singular values when reducing the
+            outcome matrix. Overrides ``sv_energy`` when set.
+        sv_energy : float, default=0.999
+            Used when neither ``threshold`` nor ``sv_count`` is given: keep the
+            fewest leading singular values that retain this fraction of the donor
+            matrix's spectral (squared-singular-value) energy. This makes the
+            estimator usable without manually choosing a rank.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).
@@ -102,10 +109,14 @@ class RobustSyntheticControl(EconometricEstimator):
         self.actual_pre: nw.DataFrame | None = None
         self.actual_post: nw.DataFrame | None = None
         self.lambda_ = lambda_
-        if (threshold is None) and (sv_count is None):
-            raise ValueError("At least one of `threshold` or `sv_count` cannot be None")
+        if not 0.0 < sv_energy <= 1.0:
+            raise ValueError(f"sv_energy must be in (0, 1], got {sv_energy}")
+        # ``threshold`` and ``sv_count`` are explicit rank overrides; when neither is
+        # given we fall back to retaining ``sv_energy`` of the spectral energy, so the
+        # estimator runs without manual rank selection.
         self.threshold = threshold
         self.sv_count = sv_count
+        self.sv_energy = sv_energy
         self.conformal_q = conformal_q
         self.daily_x: nw.DataFrame | None = None
         self.daily_y: nw.DataFrame | None = None
@@ -125,11 +136,12 @@ class RobustSyntheticControl(EconometricEstimator):
         day_x = self.data.filter(nw.col(self.treatment_variable) == 0).select(
             [self.y_variable, self.geo_variable, self.date_variable]
         )
-        # Pivot: rows=dates, cols=geos
+        # Pivot: rows=dates, cols=geos. Sort by date so the pre-period rows are the
+        # leading block (the split in ``_create_model`` relies on this ordering).
         self.daily_x = nw.from_native(
             day_x.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
             eager_only=True,
-        )
+        ).sort(self.date_variable)
         daily_y = (
             self.data.filter(nw.col(self.treatment_variable) == 1)
             .select([self.y_variable, self.date_variable])
@@ -248,9 +260,12 @@ class RobustSyntheticControl(EconometricEstimator):
         daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
         daily_x_transposed = daily_x_mat.T
         M_hat = self._svd(daily_x_transposed).T
-        post_period_date = date_cls.fromisoformat(self.post_period)
+        # Number of pre-period rows: compare dates as ISO strings so the split is
+        # backend- and format-agnostic (matches the base class; integer years like
+        # "1989" are not valid ``date.fromisoformat`` input). ``daily_x`` is sorted
+        # by date, so the pre-period is the leading block.
         date_list = self.daily_x[self.date_variable].to_list()
-        end_idx = date_list.index(post_period_date)
+        end_idx = sum(1 for d in date_list if str(d) <= self.pre_period)
         M_hat_neg = M_hat[:end_idx, :]
         Y1_neg = self.daily_y[self.y_variable].to_numpy()[:end_idx]
 
@@ -386,10 +401,14 @@ class RobustSyntheticControl(EconometricEstimator):
             idx = 0
             while s[idx] > self.threshold and idx < s_shape:
                 idx += 1
-        else:
-            if self.sv_count is None:
-                raise ValueError("sv_count must not be None")
+        elif self.sv_count is not None:
             idx = self.sv_count
+        else:
+            # Default: keep the fewest leading singular values retaining
+            # ``sv_energy`` of the squared-singular-value (spectral) energy.
+            energy = np.cumsum(s**2) / np.sum(s**2)
+            idx = int(np.searchsorted(energy, self.sv_energy) + 1)
+        idx = min(idx, s.shape[0])
         s_res = np.zeros_like(groupby_x_transposed)
         s_res[:idx, :idx] = np.diag(s[:idx])
         r, c = groupby_x_transposed.shape

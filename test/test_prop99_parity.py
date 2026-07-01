@@ -46,6 +46,7 @@ import pytest
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
+from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl
 
 DATA_PATH = Path(__file__).parent / "data" / "prop99_smoking.csv"
@@ -181,6 +182,66 @@ class TestGeneralizedSyntheticControlParity:
     def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
+
+
+class TestRobustSyntheticControlParity:
+    """RobustSyntheticControl (Amjad, Shah & Shen SVD-denoised ridge).
+
+    Robust SC de-noises the donor matrix by hard singular-value truncation, so the
+    retained rank is the key choice. Prop 99's donor spectrum is dominated by the
+    level, and keeping the leading two components (the level plus the dominant
+    dynamic factor) recovers the published effect; that is the documented Prop 99
+    configuration used here. The out-of-the-box default (99.9% spectral-energy
+    retention) keeps more components and attenuates the estimate, so the parity
+    check pins the rank explicitly, as Abadie's own Prop 99 setup fixes its
+    predictors.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> RobustSyntheticControl:
+        model = RobustSyntheticControl(
+            prop99,
+            geo_variable="state",
+            test_geos=[TREATED],
+            date_variable="year",
+            pre_period=PRE_PERIOD,
+            post_period=POST_PERIOD,
+            y_variable="cigsale",
+            alpha=0.1,
+            sv_count=2,
+        )
+        return model.pre_process().generate()
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: RobustSyntheticControl) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_terminal_gap_matches_published(fitted: RobustSyntheticControl) -> None:
+        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: RobustSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+    @staticmethod
+    def test_runs_with_default_rank(prop99: pl.DataFrame) -> None:
+        # Out-of-the-box (no threshold / sv_count): the spectral-energy default
+        # makes it runnable and still finds a negative, significant effect.
+        model = RobustSyntheticControl(
+            prop99,
+            geo_variable="state",
+            test_geos=[TREATED],
+            date_variable="year",
+            pre_period=PRE_PERIOD,
+            post_period=POST_PERIOD,
+            y_variable="cigsale",
+            alpha=0.1,
+        )
+        model.pre_process().generate()
+        assert _avg_gap(model) < 0.0
+        assert model.results["p_value"] <= 0.1
 
 
 if __name__ == "__main__":

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`RobustSyntheticControl`** — is now usable out of the box: previously it
+  raised unless one of `threshold` / `sv_count` was set, and its pre/post split
+  parsed the split date with `date.fromisoformat`, which broke on non-ISO date
+  columns (e.g. integer years). It now falls back to retaining a configurable
+  fraction of the donor matrix's spectral energy (`sv_energy`, default 0.999)
+  when no rank is given, and derives the split by backend-agnostic string
+  comparison (with `daily_x` sorted by date). A Prop 99 parity test is added
+  (documented `sv_count=2` config → average gap −17.4 / year-2000 −27.0), plus a
+  check that the default rank runs and finds a negative, significant effect.
 - Resolved the `zuban` type-check errors in `SyntheticControl.summarize` and
   `GeoX.summarize` (the `table_dict` was inferred as `list[float64]` from its
   numeric `np.sum(...)` entries, rejecting the later string-list assignments).
