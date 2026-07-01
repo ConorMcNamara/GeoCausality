@@ -5,41 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-06-30
 
-### Fixed
-
-- **`RobustSyntheticControl`** — is now usable out of the box: previously it
-  raised unless one of `threshold` / `sv_count` was set, and its pre/post split
-  parsed the split date with `date.fromisoformat`, which broke on non-ISO date
-  columns (e.g. integer years). It now falls back to retaining a configurable
-  fraction of the donor matrix's spectral energy (`sv_energy`, default 0.999)
-  when no rank is given, and derives the split by backend-agnostic string
-  comparison (with `daily_x` sorted by date). A Prop 99 parity test is added
-  (documented `sv_count=2` config → average gap −17.4 / year-2000 −27.0), plus a
-  check that the default rank runs and finds a negative, significant effect.
-- **`SyntheticControlV`** — corrected the Abadie & Gardeazabal implementation,
-  which diverged from the Prop 99 benchmark (average post-period gap −30.5 vs the
-  published ~−19.5). It was matching only a single pre-period **mean** per geo (so
-  the V matrix collapsed to a degenerate 1×1 and the outer V optimization was a
-  no-op) and the simplex sum-to-one constraint on the donor weights was commented
-  out. It now matches the full pre-period **trajectory** as the predictor set (V
-  is `n_pre × n_pre`, as in pysyncon's `Synth`) with the simplex constraint
-  restored, recovering −19.5 / −26.6 on Prop 99 with weights that sum to one and a
-  pre-period RMSE of 1.66 (was 7.26). A `SyntheticControlV` Prop 99 parity test is
-  added.
-- Resolved the `zuban` type-check errors in `SyntheticControl.summarize` and
-  `GeoX.summarize` (the `table_dict` was inferred as `list[float64]` from its
-  numeric `np.sum(...)` entries, rejecting the later string-list assignments).
-  Annotating it `dict[str, list[Any]]` clears all 40 errors, turning the CI
-  type-check step green. No runtime change.
-
-### Changed
-
-- Replaced the internal `assert` statements in the library (the `GeoCausality`
-  package) with explicit `raise ValueError(...)`, so these invariant checks are
-  preserved when Python runs with assertions disabled (`-O`). Test-suite
-  assertions are unchanged.
+A correctness and validation release. Literature-validation ("golden master")
+tests against the canonical Card & Krueger (1994) and Abadie, Diamond &
+Hainmueller (2010) Proposition 99 datasets now guard the econometric and
+synthetic-control estimators against their foundational papers' published
+results. Building these tests surfaced — and this release fixes — four
+reimplementation bugs across the synthetic-control family; all six SC-family
+estimators now reproduce the Prop 99 effect within tolerance.
 
 ### Added
 
@@ -54,16 +28,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Proposition 99 parity test** (`test/test_prop99_parity.py`) —
   literature-validation ("golden master") tests for the synthetic-control family
   against Abadie, Diamond & Hainmueller's (2010) California Prop 99 result
-  (~-19.5 average / ~-26 year-2000 packs/capita). All four estimators now match
-  within tolerance (`SyntheticControl` -19.5, `AugmentedSyntheticControl` -15.8,
-  `PenalizedSyntheticControl` -23.5, `GeneralizedSyntheticControl` -20.7) after
-  the two divergences the test originally surfaced (#31, #32) were fixed. The
+  (~-19.5 average / ~-26 year-2000 packs/capita). All six SC-family estimators
+  now match within tolerance (`SyntheticControl` -19.5, `SyntheticControlV`
+  -19.5, `AugmentedSyntheticControl` -15.8, `PenalizedSyntheticControl` -23.5,
+  `GeneralizedSyntheticControl` -20.7, `RobustSyntheticControl` -17.4). The
   `Synth` `smoking` dataset is vendored to `test/data/prop99_smoking.csv` (via
   `test/data/vendor_prop99.py`, provenance in `prop99_smoking.README.txt`); the
   test skips cleanly when the CSV is absent.
+- **`GeneralizedSyntheticControl`** gains a `factor_selection` argument (`"er"`,
+  the eigenvalue-ratio default; `"cv"` for the previous cross-validation).
+- **`RobustSyntheticControl`** gains an `sv_energy` argument (default 0.999) that
+  selects the retained rank when neither `threshold` nor `sv_count` is given.
+
+### Changed
+
+- Replaced the internal `assert` statements in the library (the `GeoCausality`
+  package) with explicit `raise ValueError(...)`, so these invariant checks are
+  preserved when Python runs with assertions disabled (`-O`). Test-suite
+  assertions are unchanged.
 
 ### Fixed
 
+- **`SyntheticControlV`** — corrected the Abadie & Gardeazabal implementation,
+  which diverged from the Prop 99 benchmark (average post-period gap −30.5 vs the
+  published ~−19.5). It was matching only a single pre-period **mean** per geo (so
+  the V matrix collapsed to a degenerate 1×1 and the outer V optimization was a
+  no-op) and the simplex sum-to-one constraint on the donor weights was commented
+  out. It now matches the full pre-period **trajectory** as the predictor set (V
+  is `n_pre × n_pre`, as in pysyncon's `Synth`) with the simplex constraint
+  restored, recovering −19.5 / −26.6 on Prop 99 with weights that sum to one and a
+  pre-period RMSE of 1.66 (was 7.26).
+- **`RobustSyntheticControl`** — is now usable out of the box: previously it
+  raised unless one of `threshold` / `sv_count` was set, and its pre/post split
+  parsed the split date with `date.fromisoformat`, which broke on non-ISO date
+  columns (e.g. integer years). It now falls back to retaining a configurable
+  fraction of the donor matrix's spectral energy (`sv_energy`, default 0.999)
+  when no rank is given, and derives the split by backend-agnostic string
+  comparison (with `daily_x` sorted by date).
 - **`PenalizedSyntheticControl`** (#31) — now fits its donor weights against the
   full pre-period **trajectory** (as `SyntheticControl` does) instead of a single
   pre-period mean per geo, and the Abadie & L'Hour discrepancy penalty is scaled
@@ -76,9 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panel's spectrum by default, instead of a treated-pre-period cross-validation
   that over-selected factors and overfit the counterfactual (washing out the
   effect). On Prop 99 the average post-period gap moves from -3.6 (not
-  significant) to -20.7 (significant). The previous cross-validation remains
-  available opt-in via the new ``factor_selection="cv"`` argument
-  (``factor_selection="er"`` is the default).
+  significant) to -20.7 (significant).
+- Resolved the `zuban` type-check errors in `SyntheticControl.summarize` and
+  `GeoX.summarize` (the `table_dict` was inferred as `list[float64]` from its
+  numeric `np.sum(...)` entries, rejecting the later string-list assignments).
+  Annotating it `dict[str, list[Any]]` clears all 40 errors, turning the CI
+  type-check step green. No runtime change.
 
 ## [0.6.0] - 2026-06-29
 
@@ -128,4 +132,5 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.7.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.7.0
 [0.6.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.6.0
