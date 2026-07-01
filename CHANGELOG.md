@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison (with `daily_x` sorted by date). A Prop 99 parity test is added
   (documented `sv_count=2` config → average gap −17.4 / year-2000 −27.0), plus a
   check that the default rank runs and finds a negative, significant effect.
+- **`SyntheticControlV`** — corrected the Abadie & Gardeazabal implementation,
+  which diverged from the Prop 99 benchmark (average post-period gap −30.5 vs the
+  published ~−19.5). It was matching only a single pre-period **mean** per geo (so
+  the V matrix collapsed to a degenerate 1×1 and the outer V optimization was a
+  no-op) and the simplex sum-to-one constraint on the donor weights was commented
+  out. It now matches the full pre-period **trajectory** as the predictor set (V
+  is `n_pre × n_pre`, as in pysyncon's `Synth`) with the simplex constraint
+  restored, recovering −19.5 / −26.6 on Prop 99 with weights that sum to one and a
+  pre-period RMSE of 1.66 (was 7.26). A `SyntheticControlV` Prop 99 parity test is
+  added.
 - Resolved the `zuban` type-check errors in `SyntheticControl.summarize` and
   `GeoX.summarize` (the `table_dict` was inferred as `list[float64]` from its
   numeric `np.sum(...)` entries, rejecting the later string-list assignments).

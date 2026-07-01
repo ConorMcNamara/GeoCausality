@@ -532,28 +532,13 @@ class SyntheticControlV(EconometricEstimator):
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        x_sum = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .group_by(self.geo_variable)
-            .agg(nw.col(self.y_variable).mean())
-            .sort(self.geo_variable)
-        )
-        # groupby_x: 1-row numpy array with one value per control geo (mean y per geo)
-        groupby_x_arr: np.ndarray = x_sum[self.y_variable].to_numpy().reshape(1, -1)
 
-        y_sum = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        # groupby_y: scalar mean of test y, shaped as (1,) array
-        groupby_y_arr: np.ndarray = np.array([y_sum[self.y_variable].to_numpy().mean()])
-
+        # Following Abadie & Gardeazabal, the pre-period outcome trajectory is the
+        # predictor set used to fit the V matrix and the donor weights: daily_x has
+        # rows = pre-period dates, cols = donor geos; daily_y is the treated series.
         day_x = self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0)).select(
             [self.y_variable, self.geo_variable, self.date_variable]
         )
-        # daily_x: rows=dates, columns=geos, values=y
         daily_x_pivot = nw.from_native(
             day_x.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
             eager_only=True,
@@ -568,7 +553,7 @@ class SyntheticControlV(EconometricEstimator):
         )
         daily_y_arr: np.ndarray = daily_y[self.y_variable].to_numpy()
 
-        self._create_v(groupby_x_arr, groupby_y_arr, daily_x_arr, daily_y_arr)
+        self._create_v(daily_x_arr, daily_y_arr)
         return self
 
     def generate(self) -> "SyntheticControlV":
@@ -674,15 +659,15 @@ class SyntheticControlV(EconometricEstimator):
         """
         _, n_c = x.shape
         bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
+        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
         x0 = np.full(n_c, 1 / n_c)
         p = x.T @ v @ x
         q = y.T @ v @ x
-        # constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
         res = minimize(
             fun=lambda a: self._loss_w(a, p, q),
             x0=x0,
             bounds=bounds,
-            # constraints=constraints,
+            constraints=constraints,
             method="SLSQP",
         )
         weights = res["x"]
@@ -707,91 +692,101 @@ class SyntheticControlV(EconometricEstimator):
         """
         return 0.5 * x.T @ p @ x - q.T @ x
 
-    def _create_v(
-        self,
-        groupby_x: np.ndarray,
-        groupby_y: np.ndarray,
-        daily_x: np.ndarray,
-        daily_y: np.ndarray,
-    ) -> "SyntheticControlV":
-        """Find the V matrix so that we can create our model.
+    def _create_v(self, daily_x: np.ndarray, daily_y: np.ndarray) -> "SyntheticControlV":
+        """Scale the pre-period predictors and fit the V matrix and donor weights.
 
         Parameters
         ----------
-        groupby_x : numpy array
-            Contains the average y-variable of our control geos
-        groupby_y : numpy array
-            Contains the average cumulative y-variable of our test geos
-        daily_x : numpy array
-            Contains the daily y-variable of our control geos
-        daily_y : numpy array
-            Contains the daily cumulative y-variable of our test geos
+        daily_x : numpy array, shape (n_pre, n_donors)
+            Control pre-period outcome trajectory (rows = dates, cols = donor geos).
+        daily_y : numpy array, shape (n_pre,)
+            Treated pre-period outcome trajectory.
 
         Returns
         -------
-        Itself, to be chained with other methods
+        Itself, to be chained with other methods.
         """
-        # X is shape (1, n_geos+1): concat control means and test mean as last column
-        X = np.hstack([groupby_x, groupby_y.reshape(1, -1)])  # (1, n_geos+1)
-        # Scale each row by its std (here only 1 row, so divide by scalar std)
-        row_std = np.std(X, axis=1, keepdims=True)
-        row_std = np.where(row_std == 0, 1.0, row_std)
-        X_scaled = X / row_std
-        groupby_x_arr: np.ndarray = X_scaled[:, :-1]  # (1, n_geos)
-        groupby_y_arr: np.ndarray = X_scaled[:, -1]  # (1,)
-        daily_x_arr: np.ndarray = daily_x
-        daily_y_arr: np.ndarray = daily_y
-
-        self.V, self.model = self._solve_v_weights(groupby_x_arr, groupby_y_arr, daily_x_arr, daily_y_arr)
+        x0_scaled, x1_scaled = self._scale_predictors(daily_x, daily_y)
+        self.V, self.model = self._solve_v_weights(x0_scaled, x1_scaled, daily_x, daily_y)
         return self
 
-    def _solve_v_weights(
-        self,
-        groupby_x: np.ndarray,
-        groupby_y: np.ndarray,
-        daily_x: np.ndarray,
-        daily_y: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Solve for the V matrix and donor weights (pure, no mutation of self).
+    @staticmethod
+    def _scale_predictors(daily_x: np.ndarray, daily_y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Scale each predictor (pre-period date) by its standard deviation across units.
+
+        Mirrors pysyncon: the donor and treated columns are scaled together so the
+        V matrix weights every predictor on a common scale.
 
         Parameters
         ----------
-        groupby_x : numpy array, shape (1, n_geos)
-            Scaled per-geo control pre-period means.
-        groupby_y : numpy array, shape (1,)
-            Scaled treated pre-period mean.
-        daily_x : numpy array, shape (n_pre, n_geos)
-            Daily control pre-period matrix.
+        daily_x : numpy array, shape (n_pre, n_donors)
+            Control pre-period trajectory.
         daily_y : numpy array, shape (n_pre,)
-            Daily treated pre-period series.
+            Treated pre-period trajectory.
+
+        Returns
+        -------
+        A tuple of (scaled donor predictors, scaled treated predictors).
+        """
+        x = np.hstack([daily_x, daily_y.reshape(-1, 1)])  # (n_pre, n_donors + 1)
+        row_std = np.std(x, axis=1, keepdims=True)
+        row_std = np.where(row_std == 0, 1.0, row_std)
+        x_scaled = x / row_std
+        return x_scaled[:, :-1], x_scaled[:, -1]
+
+    def _solve_v_weights(
+        self,
+        x0_pred: np.ndarray,
+        x1_pred: np.ndarray,
+        z0: np.ndarray,
+        z1: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Solve for the diagonal V matrix and donor weights (pure, no mutation of self).
+
+        The outer optimisation (Nelder-Mead, starting from equal weights) chooses
+        the predictor-importance weights V to minimise the pre-period outcome fit;
+        the inner optimisation (``_create_model``) solves the simplex-constrained
+        donor weights for a given V. This is the nested Abadie & Gardeazabal
+        procedure as implemented in pysyncon's ``Synth``.
+
+        Parameters
+        ----------
+        x0_pred : numpy array, shape (n_pre, n_donors)
+            Scaled donor predictors (one row per pre-period date).
+        x1_pred : numpy array, shape (n_pre,)
+            Scaled treated predictors.
+        z0 : numpy array, shape (n_pre, n_donors)
+            Unscaled donor pre-period outcomes, used to score V.
+        z1 : numpy array, shape (n_pre,)
+            Unscaled treated pre-period outcomes.
 
         Returns
         -------
         A tuple of (V matrix, donor weights).
         """
-        groupby_arr = np.hstack([groupby_x, groupby_y.reshape(-1, 1)])
-        groupby_arr = np.hstack([np.full((groupby_arr.shape[1], 1), 1), groupby_arr.T])
-        daily_arr = np.hstack([daily_x, daily_y.reshape(-1, 1)])
-        try:
-            beta = (np.linalg.inv(groupby_arr.T @ groupby_arr) @ groupby_arr.T @ daily_arr.T)[1:,]
-        except np.linalg.LinAlgError:
-            raise ValueError("Could not invert X^T.X. There is most likely collinearity in your data.")
-        x0 = np.diag(beta @ beta.T)
+        n_pred = x0_pred.shape[0]
+        x_init = np.full(n_pred, 1.0 / n_pred)
         res = minimize(
-            fun=lambda x: self._loss_v(x, groupby_x, groupby_y, daily_x, daily_y.reshape(-1)),
-            x0=x0,
-            method="SLSQP",
+            fun=lambda v: self._loss_v(v, x0_pred, x1_pred, z0, z1),
+            x0=x_init,
+            method="Nelder-Mead",
+            options={"maxiter": 1000},
         )
-        v_matrix = np.diag(np.abs(res["x"])) / np.sum(np.abs(res["x"]))
-        weights = self._create_model(v=v_matrix, y=groupby_y, x=groupby_x)
+        v_diag = np.abs(res["x"])
+        denom = np.sum(v_diag)
+        v_matrix = np.diag(v_diag) / (denom if denom != 0 else 1.0)
+        weights = self._create_model(v=v_matrix, x=x0_pred, y=x1_pred)
         return v_matrix, weights
 
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
-        """Refit the V matrix and weights on a subset and predict.
+        """Refit the donor weights on a pre-period subset and predict.
 
-        Reconstructs the standardised per-geo means from the training rows, refits
-        V and the weights via the same solver as the full fit (without mutating
-        ``self``), and predicts the evaluation rows.
+        When the subset has the full pre-period length (e.g. the parametric
+        bootstrap, which resamples the treated series but keeps every date) the
+        already-fitted V matrix still applies, so only the simplex-constrained
+        donor weights are re-solved -- much cheaper than re-running the outer V
+        optimisation per replicate. For leave-one-out subsets (jackknife+), which
+        drop a predictor, V is re-optimised on the subset.
 
         Parameters
         ----------
@@ -806,43 +801,45 @@ class SyntheticControlV(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        groupby_x = x_train.mean(axis=0, keepdims=True)
-        full = np.hstack([groupby_x, [[float(y_train.mean())]]])
-        row_std = np.where(np.std(full, axis=1, keepdims=True) == 0, 1.0, np.std(full, axis=1, keepdims=True))
-        scaled = full / row_std
-        _, weights = self._solve_v_weights(scaled[:, :-1], scaled[:, -1], x_train, y_train)
+        x0_scaled, x1_scaled = self._scale_predictors(x_train, y_train)
+        if self.V is not None and x_train.shape[0] == self.V.shape[0]:
+            weights = self._create_model(v=self.V, x=x0_scaled, y=x1_scaled)
+        else:
+            _, weights = self._solve_v_weights(x0_scaled, x1_scaled, x_train, y_train)
         return x_eval @ weights
 
     def _loss_v(
         self,
         x: np.ndarray,
-        groupby_x: np.ndarray,
-        groupby_y: np.ndarray,
-        daily_x: np.ndarray,
-        daily_y: np.ndarray,
+        x0_pred: np.ndarray,
+        x1_pred: np.ndarray,
+        z0: np.ndarray,
+        z1: np.ndarray,
     ) -> np.ndarray:
-        """Generate the weights and loss of our V matrix.
+        """Score a candidate V by the pre-period outcome fit of its implied weights.
 
         Parameters
         ----------
-        x : numpy array
-            Our initial guess for the V matrix
-        groupby_x : numpy array
-            Contains the average y-variable of our control geos
-        groupby_y : numpy array
-            Contains the average y-variable of our test geos
-        daily_x : numpy array
-            Contains the daily y-variable of our control geos
-        daily_y : numpy array
-            Contains the daily cumulative y-variable of our test geos
+        x : numpy array, shape (n_pre,)
+            Candidate (unnormalised) diagonal of the V matrix.
+        x0_pred : numpy array, shape (n_pre, n_donors)
+            Scaled donor predictors.
+        x1_pred : numpy array, shape (n_pre,)
+            Scaled treated predictors.
+        z0 : numpy array, shape (n_pre, n_donors)
+            Unscaled donor pre-period outcomes.
+        z1 : numpy array, shape (n_pre,)
+            Unscaled treated pre-period outcomes.
 
         Returns
         -------
-        The loss weights used to calculate V
+        The pre-period outcome loss of the donor weights implied by ``x``.
         """
-        v = np.diag(np.abs(x)) / np.sum(np.abs(x))
-        W = self._create_model(v, groupby_x, groupby_y)
-        loss_V = self.calc_loss_v(W=W, x=daily_x, y=daily_y)
+        v_diag = np.abs(x)
+        denom = np.sum(v_diag)
+        v = np.diag(v_diag) / (denom if denom != 0 else 1.0)
+        W = self._create_model(v, x0_pred, x1_pred)
+        loss_V = self.calc_loss_v(W=W, x=z0, y=z1)
         return loss_V
 
     @staticmethod
