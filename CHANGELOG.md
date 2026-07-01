@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-07-01
+
+A plotting release: the two econometric estimators gain the visual diagnostics
+their synthetic-control and GeoX counterparts already had.
+
+### Added
+
+- **`DiffinDiff.plot()`** — a parallel-trends diagnostic plotting the treated and
+  control group averages over time alongside the parallel-trends counterfactual
+  for the treated group (the control series level-shifted by the pre-period gap
+  between the groups). The post-period gap between the treated series and the
+  counterfactual equals the fitted difference-in-differences estimand, and the
+  pre-period overlay lets the parallel-trends assumption be checked visually.
+- **`FixedEffects.plot()`** — an event-study plot of the dynamic treatment effect.
+  It fits an auxiliary two-way fixed-effects model interacting the treated
+  indicator with each period relative to treatment onset (the period just before
+  onset is the omitted reference) and plots the coefficient path with confidence
+  intervals: pre-onset coefficients near zero support parallel trends, post-onset
+  coefficients trace the dynamic effect. The auxiliary model is fit independently
+  of `generate()` (and uses entity-clustered standard errors, appropriate for the
+  single-cohort event-study design), leaving the headline single-coefficient
+  results unchanged.
+
 ## [0.7.0] - 2026-06-30
 
 A correctness and validation release. Literature-validation ("golden master")
@@ -132,5 +155,6 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.7.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.7.1
 [0.7.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.7.0
 [0.6.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.6.0

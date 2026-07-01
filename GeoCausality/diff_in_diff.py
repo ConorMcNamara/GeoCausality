@@ -4,6 +4,7 @@ from math import ceil
 
 import narwhals as nw
 import numpy as np
+import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
@@ -212,6 +213,73 @@ class DiffinDiff(EconometricEstimator):
             table_dict[f"{ci_alpha} Upper CI"] = [f"${round(roas_ci_upper, 2)}"]
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
+
+    def plot(self) -> None:
+        """Plot the parallel-trends diagnostic for our difference-in-differences.
+
+        Plots the treated and control group averages over time alongside the
+        parallel-trends counterfactual for the treated group. The counterfactual
+        is the control series level-shifted by the pre-period gap between the two
+        groups; in the pre-period it overlays the treated series when trends are
+        parallel, and the post-period gap between the treated series and the
+        counterfactual is the difference-in-differences estimand.
+
+        Returns
+        -------
+        The parallel-trends plot summarizing the results.
+        """
+        if self.groupby_data is None:
+            raise ValueError("groupby_data must not be None")
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
+        treated = self.groupby_data.filter(nw.col(self.treatment_variable) == 1).sort(self.date_variable)
+        control = self.groupby_data.filter(nw.col(self.treatment_variable) == 0).sort(self.date_variable)
+        treated_dates = treated[self.date_variable].to_list()
+        control_dates = control[self.date_variable].to_list()
+        treated_y = treated[self.y_variable].to_numpy()
+        control_y = control[self.y_variable].to_numpy()
+        treated_pre = treated.filter(nw.col("treatment_period") == 0)[self.y_variable].to_numpy()
+        control_pre = control.filter(nw.col("treatment_period") == 0)[self.y_variable].to_numpy()
+        offset = treated_pre.mean() - control_pre.mean()
+        counterfactual = control_y + offset
+        fig = go.Figure(
+            [
+                go.Scatter(
+                    x=treated_dates,
+                    y=treated_y,
+                    marker={"color": "blue"},
+                    mode="lines",
+                    name="Treated",
+                ),
+                go.Scatter(
+                    x=control_dates,
+                    y=control_y,
+                    marker={"color": "green"},
+                    mode="lines",
+                    name="Control",
+                ),
+                go.Scatter(
+                    x=control_dates,
+                    y=counterfactual,
+                    marker={"color": "red"},
+                    mode="lines",
+                    line={"dash": "dash"},
+                    name="Counterfactual",
+                ),
+            ]
+        )
+        fig.add_vline(
+            x=self.post_period,
+            line_width=1,
+            line_dash="dash",
+            line_color="black",
+        )
+        fig.update_layout(
+            title="Parallel Trends",
+            xaxis_title=self.date_variable,
+            yaxis_title=self.y_variable,
+        )
+        fig.show()
 
     def _get_roas(self) -> tuple[float, float, float]:
         if self.results is None:

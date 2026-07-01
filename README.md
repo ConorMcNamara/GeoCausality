@@ -156,6 +156,24 @@ model = diff_in_diff.DiffinDiff(
     y_variable="orders",
 )
 model.pre_process().generate().summarize(lift="relative")
+model.plot()   # parallel-trends: treated, control, and the counterfactual for the treated group
+```
+
+### Fixed Effects
+
+```python
+from GeoCausality import fixed_effects
+
+model = fixed_effects.FixedEffects(
+    df,
+    geo_variable="geo",
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()   # event study: dynamic effect by period relative to treatment onset, with CIs
 ```
 
 ### Synthetic Control
@@ -203,6 +221,29 @@ approach), supported across the whole synthetic-control family; `n_boot` and
 `"bootstrap"`), and can be forced with
 `model.inference_method = "conformal" | "jackknife" | "bootstrap"` before
 `generate()`.
+
+### Plotting
+
+Every estimator exposes a `plot()` method (call it after `generate()`) that
+renders an interactive Plotly figure with the diagnostic best suited to the
+method:
+
+| Estimator | `plot()` shows |
+|---|---|
+| `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`) | Three panels: actual vs. synthetic counterfactual, pointwise difference, and cumulative difference |
+| `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
+| `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
+
+`GeoLift.plot()` reuses the synthetic-control three-panel view, and the
+pre-experiment tools plot their own summaries (`PowerAnalysis.plot()` — the
+power-vs-effect curve; `MarketSelection.plot()` — top candidate test sets by
+score).
+
+The `DiffinDiff` and `FixedEffects` plots are fit for visualization only and do
+not change the point estimate or intervals reported by `summarize()`. In
+particular, `FixedEffects.plot()` fits an auxiliary event-study model
+independently of `generate()`.
 
 ---
 
