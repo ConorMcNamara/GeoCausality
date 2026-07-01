@@ -4,6 +4,7 @@ from math import ceil
 
 import narwhals as nw
 import numpy as np
+import plotly.graph_objects as go
 from linearmodels.panel import PanelOLS
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
@@ -188,6 +189,87 @@ class FixedEffects(EconometricEstimator):
             table_dict[f"{ci_alpha} Upper CI"] = [f"${round(roas_ci_upper, 2)}"]
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
+
+    def plot(self) -> None:
+        """Plot the event-study dynamic treatment effects for our fixed-effects model.
+
+        Fits an auxiliary two-way fixed-effects model that interacts the treated
+        indicator with each period relative to treatment onset (the period just
+        before onset is the omitted reference), then plots the estimated
+        coefficient path with confidence intervals. Pre-onset coefficients near
+        zero support the parallel-trends assumption, while post-onset coefficients
+        trace the dynamic treatment effect. This is fit independently of
+        ``generate()`` and does not alter the headline single-coefficient results.
+
+        Returns
+        -------
+        The event-study plot summarizing the dynamic treatment effect.
+        """
+        if self.data is None:
+            raise ValueError("data must not be None")
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
+        reference = -1
+        data_pd = self.data.to_pandas()
+        unique_dates = sorted(data_pd[self.date_variable].unique())
+        date_rank = {d: i for i, d in enumerate(unique_dates)}
+        post_dates = data_pd.loc[data_pd["treatment_period"] == 1, self.date_variable]
+        start_rank = date_rank[min(post_dates)]
+        data_pd["relative_period"] = data_pd[self.date_variable].map(lambda d: date_rank[d]) - start_rank
+        event_columns = []
+        for k in sorted(data_pd["relative_period"].unique()):
+            if k == reference:
+                continue
+            column = f"evt_{k}".replace("-", "m")
+            data_pd[column] = ((data_pd["relative_period"] == k) & (data_pd[self.treatment_variable] == 1)).astype(
+                float
+            )
+            event_columns.append((k, column))
+        indexed = data_pd.set_index([self.geo_variable, self.date_variable])
+        formula = (
+            f"{self.y_variable} ~ "
+            + " + ".join(column for _, column in event_columns)
+            + " + EntityEffects + TimeEffects"
+        )
+        event_model = PanelOLS.from_formula(formula, data=indexed).fit(cov_type="clustered", cluster_entity=True)
+        cis = event_model.conf_int(1 - self.alpha)
+        periods = [reference]
+        estimates = [0.0]
+        lowers = [0.0]
+        uppers = [0.0]
+        for k, column in event_columns:
+            periods.append(k)
+            estimates.append(float(event_model.params[column]))
+            lowers.append(float(cis.loc[column, "lower"]))
+            uppers.append(float(cis.loc[column, "upper"]))
+        order = np.argsort(periods)
+        periods = np.asarray(periods)[order]
+        estimates = np.asarray(estimates)[order]
+        lowers = np.asarray(lowers)[order]
+        uppers = np.asarray(uppers)[order]
+        fig = go.Figure(
+            go.Scatter(
+                x=periods,
+                y=estimates,
+                error_y={
+                    "type": "data",
+                    "symmetric": False,
+                    "array": uppers - estimates,
+                    "arrayminus": estimates - lowers,
+                },
+                marker={"color": "purple"},
+                mode="markers+lines",
+                name="Effect",
+            )
+        )
+        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="gray")
+        fig.add_vline(x=-0.5, line_width=1, line_dash="dash", line_color="black")
+        fig.update_layout(
+            title="Event Study (Two-Way Fixed Effects)",
+            xaxis_title="Periods relative to treatment onset",
+            yaxis_title=f"Effect on {self.y_variable}",
+        )
+        fig.show()
 
     def _get_roas(self) -> tuple[float, float, float]:
         if self.results is None:
