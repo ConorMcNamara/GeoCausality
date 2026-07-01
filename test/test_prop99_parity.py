@@ -37,19 +37,16 @@ against gross divergence, not exact equality, since our predictor specification
 and solvers differ from Abadie's exact Prop 99 setup.
 """
 
-from pathlib import Path
-
 import numpy as np
 import polars as pl
 import pytest
 
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
+from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
 from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
-
-DATA_PATH = Path(__file__).parent / "data" / "prop99_smoking.csv"
 
 TREATED = "California"
 PRE_PERIOD = "1988"  # last untreated year
@@ -65,17 +62,6 @@ REF_TERMINAL_GAP = -26.0  # year-2000 gap, packs/capita
 GAP_ABS_TOL = 8.0  # packs -- generous "right ballpark" band
 SC_AVG_ABS_TOL = 4.0  # packs -- tight band for the plain estimator
 SC_TERMINAL_ABS_TOL = 5.0  # packs
-
-
-@pytest.fixture(scope="module")
-def prop99() -> pl.DataFrame:
-    """Load the vendored Prop 99 panel, or skip if it is not present."""
-    if not DATA_PATH.exists():
-        pytest.skip(f"Prop 99 fixture not found at {DATA_PATH}; run test/data/vendor_prop99.py to create it")
-    # The synthetic-control estimators pivot via polars; feed them polars (as the
-    # other SC tests do). Year is read as an integer and cast to a string by the
-    # estimator, so "1988"/"1989" comparisons sort correctly.
-    return pl.read_csv(DATA_PATH).with_columns(pl.col("year").cast(pl.Int64))
 
 
 def _fit(cls, prop99: pl.DataFrame):
@@ -203,6 +189,38 @@ class TestGeneralizedSyntheticControlParity:
 
     @staticmethod
     def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestInteractiveFixedEffectsParity:
+    """InteractiveFixedEffects (Bai 2009 additive two-way FE + interactive factors).
+
+    Estimates the additive unit/time fixed effects and the latent factors from the
+    38 donor states, then projects California's pre-period onto that time structure
+    to build the counterfactual. Distinct from GeneralizedSyntheticControl (which
+    uses a single column-centred SVD): this carries explicit additive two-way fixed
+    effects and the Bai alternating fit. The eigenvalue-ratio criterion selects a
+    single factor on this panel -- the configuration that recovers the effect;
+    forcing more factors over-fits the pre-period and washes it out, the same
+    sensitivity GeneralizedSyntheticControl guards against.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> InteractiveFixedEffects:
+        return _fit(InteractiveFixedEffects, prop99)
+
+    @staticmethod
+    def test_factor_count_selected(fitted: InteractiveFixedEffects) -> None:
+        # Eigenvalue-ratio picks a parsimonious factor count on the Prop 99 donors.
+        assert fitted.n_factors_selected == 1
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: InteractiveFixedEffects) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: InteractiveFixedEffects) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
 

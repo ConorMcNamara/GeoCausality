@@ -1,27 +1,52 @@
-"""Shared fixtures for the econometric estimator tests (Diff-in-Diff, FixedEffects).
+"""Shared fixtures for the estimator tests.
 
-Both estimators fit real regression models (statsmodels / linearmodels) and call
-``.to_pandas()`` internally, so the fixtures hand them **pandas** input (which,
-unlike polars, needs no pyarrow) with a ``datetime`` date column — exactly the
-path ``EconometricEstimator.pre_process`` expects.
+The synthetic ``make_panel`` builder feeds the econometric estimators
+(Diff-in-Diff, FixedEffects) real regression models via ``.to_pandas()``, so it
+hands them **pandas** input (which, unlike polars, needs no pyarrow) with a
+``datetime`` date column — exactly the path ``EconometricEstimator.pre_process``
+expects. The generated panel gives every geo a *shared* time trend and equal
+numbers of test and control geos: that keeps the geo-summed series parallel
+pre-period, so Diff-in-Diff (which sums ``y`` across geos before regressing) can
+recover the treatment effect, while FixedEffects (which works on the full
+geo-level panel) recovers the per-geo effect directly.
 
-The generated panel gives every geo a *shared* time trend and equal numbers of
-test and control geos. That keeps the geo-summed series parallel pre-period, so
-Diff-in-Diff (which sums ``y`` across geos before regressing) can recover the
-treatment effect, while FixedEffects (which works on the full geo-level panel)
-recovers the per-geo effect directly.
+The ``prop99`` fixture loads the canonical Abadie Proposition 99 panel, the
+shared known-answer benchmark for the counterfactual estimators' parity tests.
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import pytest
 
 PRE_PERIOD = "2021-01-30"
 POST_PERIOD = "2021-01-31"
 N_DATES = 40
 EFFECT = 8.0
+
+DATA_DIR = Path(__file__).parent / "data"
+
+
+@pytest.fixture(scope="session")
+def prop99() -> pl.DataFrame:
+    """Load the vendored Abadie Prop 99 tobacco panel (39 states x 1970-2000).
+
+    The canonical single-treated-unit benchmark of the synthetic-control /
+    interactive-fixed-effects literature (California is treated from 1989, the
+    other 38 states are the donor pool). Shared across every parity test that
+    needs a known-answer panel; see ``test/data/prop99_smoking.README.txt`` for
+    provenance. Skips if the CSV has not been vendored.
+
+    Year is read as an integer and cast to a string by the estimators, so
+    "1988"/"1989" comparisons sort correctly.
+    """
+    path = DATA_DIR / "prop99_smoking.csv"
+    if not path.exists():
+        pytest.skip(f"Prop 99 fixture not found at {path}; run test/data/vendor_prop99.py to create it")
+    return pl.read_csv(path).with_columns(pl.col("year").cast(pl.Int64))
 
 
 @dataclass

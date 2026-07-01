@@ -840,7 +840,7 @@ class MLEstimator(Estimator, abc.ABC):
         msrp: float = 0.0,
         spend: float = 0.0,
     ) -> None:
-        """Initialize the ML estimator (abstract base class for GeoX and Synthetic Control).
+        """Initialize the ML estimator (abstract base class for GeoX).
 
         Parameters
         ----------
