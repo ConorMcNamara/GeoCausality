@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/ConorMcNamara/GeoCausality/branch/main/graph/badge.svg)](https://codecov.io/gh/ConorMcNamara/GeoCausality)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across seven estimators — from simple difference-in-differences to augmented synthetic control.
+A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across eight estimators — from simple difference-in-differences to interactive fixed effects and augmented synthetic control.
 
 ---
 
@@ -39,12 +39,13 @@ pip install geocausality
 | `GeoX` | `geox` | Time-based regression matched markets (TBR) |
 | `DiffinDiff` | `diff_in_diff` | Difference-in-differences via OLS |
 | `FixedEffects` | `fixed_effects` | Two-way fixed effects (entity + time) via PanelOLS |
+| `InteractiveFixedEffects` | `interactive_fixed_effects` | Interactive fixed effects / latent factor panel model (Bai) |
 | `SyntheticControl` | `synthetic_control` | Classic synthetic control (constrained weights) |
 | `SyntheticControlV` | `synthetic_control` | Synthetic control with learned V matrix |
 | `PenalizedSyntheticControl` | `penalized_synthetic_control` | Synthetic control with pairwise penalty (Abadie & L'Hour) |
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
-| `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects / latent factor model (Xu) |
+| `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects via control-only latent factors (Xu) |
 
 ### Pre-experiment design
 
@@ -176,6 +177,32 @@ model.pre_process().generate().summarize(lift="incremental")
 model.plot()   # event study: dynamic effect by period relative to treatment onset, with CIs
 ```
 
+### Interactive Fixed Effects
+
+```python
+from GeoCausality import interactive_fixed_effects
+
+model = interactive_fixed_effects.InteractiveFixedEffects(
+    df,
+    test_geos=["geo_A", "geo_B"],
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+    # method="coefficient",  # full-panel Bai treatment coefficient (default is "projection")
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()   # three panels: actual vs. counterfactual, pointwise & cumulative difference
+```
+
+Unlike `FixedEffects` (which assumes a common time shock hitting every geo
+equally), `InteractiveFixedEffects` lets latent time factors load onto each geo
+with a geo-specific weight, so it can absorb confounders that violate parallel
+trends. The default `method="projection"` estimates those factors from the
+control geos and projects the treated geos' pre-period onto them (robust);
+`method="coefficient"` instead estimates the treatment effect as a genuine
+full-panel Bai regression coefficient, jointly with the factors.
+
 ### Synthetic Control
 
 ```python
@@ -231,7 +258,7 @@ method:
 | Estimator | `plot()` shows |
 |---|---|
 | `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`) | Three panels: actual vs. synthetic counterfactual, pointwise difference, and cumulative difference |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`) and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference |
 | `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
 | `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
 
@@ -270,6 +297,11 @@ Every estimator accepts the same core constructor arguments:
 the eigenvalue-ratio criterion; `"cv"` for cross-validation) and `n_factors` to
 fix the latent-factor count directly.
 
+`InteractiveFixedEffects` accepts `n_factors` / `max_factors` (the latent-factor
+count, auto-selected by the eigenvalue-ratio criterion when `n_factors` is
+`None`) and `method` (`"projection"` by default, or `"coefficient"` for the
+full-panel Bai treatment coefficient).
+
 ---
 
 ## Validation
@@ -284,7 +316,7 @@ skips cleanly if its vendored dataset is absent.
 |---|---|---|---|---|
 | Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
 | Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
-| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 |
+| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `InteractiveFixedEffects` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −26.2 |
 
 These tests catch real bugs. The GeoLift parity test caught a level bias in
 augmented synthetic control, and the Proposition 99 parity test surfaced — and we
@@ -320,5 +352,6 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Ahn, Seung C., and Alex R. Horenstein. "Eigenvalue ratio test for the number of factors." *Econometrica* 81.3 (2013): 1203–1227. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA8968)
 - Abadie, Alberto, Alexis Diamond, and Jens Hainmueller. "Synthetic control methods for comparative case studies: Estimating the effect of California's tobacco control program." *Journal of the American Statistical Association* 105.490 (2010): 493–505. [Link](https://www.tandfonline.com/doi/abs/10.1198/jasa.2009.ap08746)
 - Card, David, and Alan B. Krueger. "Minimum wages and employment: A case study of the fast-food industry in New Jersey and Pennsylvania." *American Economic Review* 84.4 (1994): 772–793. [Link](https://www.nber.org/papers/w4509)
+- Bai, Jushan. "Panel data models with interactive fixed effects." *Econometrica* 77.4 (2009): 1229–1279. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA6135)
 - Xu, Yiqing. "Generalized Synthetic Control Method: Causal Inference with Interactive Fixed Effects Models." *Political Analysis* 25.1 (2017): 57–76. [Link](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3)
 - GeoLift (Meta). [Documentation](https://facebookincubator.github.io/GeoLift/)
