@@ -1,6 +1,6 @@
 [project]
 name = "geocausality"
-version = "0.7.1"
+version = "0.8.0"
 description = "Package for analyzing the causal impact of geo-experiments"
 authors = [
     {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
