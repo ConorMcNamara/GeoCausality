@@ -220,9 +220,7 @@ class InteractiveFixedEffects(EconometricEstimator):
         y = pivot.drop(self.date_variable).to_numpy()  # T x N
 
         # Treated-geo mask (column aligned) and the per-date treatment period.
-        treated_geos = set(
-            self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].unique().to_list()
-        )
+        treated_geos = set(self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].unique().to_list())
         treated_mask = np.array([g in treated_geos for g in geos])
         period = (
             self.data.select([self.date_variable, "treatment_period"])
