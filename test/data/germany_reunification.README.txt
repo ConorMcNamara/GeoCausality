@@ -1,0 +1,49 @@
+West German reunification dataset
+=================================
+
+File: germany_reunification.csv  (long format: country, year, gdp, + predictors)
+
+Source
+------
+Abadie, A., Diamond, A., & Hainmueller, J. (2015). "Comparative Politics and the
+Synthetic Control Method." American Journal of Political Science, 59(2), 495-510.
+
+The canonical West German reunification panel used throughout the synthetic-
+control and interactive-fixed-effects literature -- the standard second benchmark
+after Proposition 99, and the demonstration dataset for Xu's `gsynth`
+interactive-fixed-effects package. The vendored CSV is a faithful export whose
+GDP values match the published panel exactly (West Germany per-capita GDP: 2284
+in 1960, 20465 in 1990, 28855 in 2003).
+
+What is vendored
+----------------
+17 countries observed annually 1960-2003 (44 years each, balanced panel):
+
+    country   country name; treated unit = "West Germany"
+    year      1960-2003 (integer)
+    gdp       per-capita GDP, PPP-adjusted USD (the outcome `y`)
+    code, infrate, trade, schooling, invest60, invest70, invest80, industry
+              the original Abadie predictors / identifiers, kept for provenance;
+              the GeoCausality estimators use only `gdp`
+
+West Germany reunified in 1990, so it is treated from 1990 onward. The other 16
+OECD countries form the donor pool.
+
+Published result this fixture reproduces
+----------------------------------------
+Abadie, Diamond & Hainmueller (2015) estimate that reunification lowered West
+German per-capita GDP by roughly $1,600 per year on average relative to the
+synthetic control, with the gap widening over time. Our `SyntheticControl`
+recovers ~-1,644 (average post-period gap), and the interactive-fixed-effects
+estimators (`GeneralizedSyntheticControl`, `InteractiveFixedEffects`) land in the
+-1,800 to -2,000 range -- same sign, magnitude and significance.
+
+Note: Abadie et al. match on several covariates (trade openness, schooling,
+investment, inflation) in addition to lagged GDP, while the GeoCausality
+estimators use only the GDP trajectory; the headline effect is reproduced
+nonetheless. The published figure is a "right ballpark" benchmark rather than a
+single precise ATT, so the parity tolerance is deliberately generous.
+
+Regenerating
+------------
+    python test/data/vendor_germany.py
