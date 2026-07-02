@@ -10,8 +10,9 @@ pre-period, so Diff-in-Diff (which sums ``y`` across geos before regressing) can
 recover the treatment effect, while FixedEffects (which works on the full
 geo-level panel) recovers the per-geo effect directly.
 
-The ``prop99`` fixture loads the canonical Abadie Proposition 99 panel, the
-shared known-answer benchmark for the counterfactual estimators' parity tests.
+The ``prop99`` and ``germany`` fixtures load the canonical Abadie Proposition 99
+and West German reunification panels, the shared known-answer benchmarks for the
+counterfactual estimators' parity tests.
 """
 
 from dataclasses import dataclass, field
@@ -46,6 +47,25 @@ def prop99() -> pl.DataFrame:
     path = DATA_DIR / "prop99_smoking.csv"
     if not path.exists():
         pytest.skip(f"Prop 99 fixture not found at {path}; run test/data/vendor_prop99.py to create it")
+    return pl.read_csv(path).with_columns(pl.col("year").cast(pl.Int64))
+
+
+@pytest.fixture(scope="session")
+def germany() -> pl.DataFrame:
+    """Load the vendored Abadie West German reunification panel (17 countries x 1960-2003).
+
+    The canonical second single-treated-unit benchmark of the synthetic-control /
+    interactive-fixed-effects literature (West Germany is treated from 1990, the
+    other 16 OECD countries are the donor pool). Shared across the counterfactual
+    estimators' parity tests; see ``test/data/germany_reunification.README.txt``
+    for provenance. Skips if the CSV has not been vendored.
+
+    Year is read as an integer and cast to a string by the estimators, so
+    "1989"/"1990" comparisons sort correctly.
+    """
+    path = DATA_DIR / "germany_reunification.csv"
+    if not path.exists():
+        pytest.skip(f"Germany fixture not found at {path}; run test/data/vendor_germany.py to create it")
     return pl.read_csv(path).with_columns(pl.col("year").cast(pl.Int64))
 
 
