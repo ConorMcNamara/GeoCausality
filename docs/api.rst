@@ -32,6 +32,9 @@ Estimators
 .. automodule:: GeoCausality.generalized_synthetic_control
    :members:
 
+.. automodule:: GeoCausality.synthetic_diff_in_diff
+   :members:
+
 GeoLift workflow
 ----------------
 

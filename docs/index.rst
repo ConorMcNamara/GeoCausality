@@ -32,6 +32,7 @@ Every estimator shares the same three-step interface:
    robust_synthetic_control
    augmented_synthetic_control
    generalized_synthetic_control
+   synthetic_diff_in_diff
 
 .. toctree::
    :maxdepth: 1

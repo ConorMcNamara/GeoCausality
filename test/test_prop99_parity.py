@@ -47,6 +47,7 @@ from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
 from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
+from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
 TREATED = "California"
 PRE_PERIOD = "1988"  # last untreated year
@@ -189,6 +190,34 @@ class TestGeneralizedSyntheticControlParity:
 
     @staticmethod
     def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestSyntheticDiffInDiffParity:
+    """SyntheticDiffInDiff (Arkhangelsky et al. 2021 doubly-weighted DID).
+
+    The canonical SDID Prop 99 estimate is about -15 packs per capita on average --
+    mildly attenuated relative to plain synthetic control because the unit fixed
+    effect and L2 penalty trade a little bias for stability. Inference is the
+    placebo variance over the 38 donor states, which is deterministic (no
+    resampling) and finds the effect significant on this pool.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> SyntheticDiffInDiff:
+        return _fit(SyntheticDiffInDiff, prop99)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: SyntheticDiffInDiff) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_terminal_gap_matches_published(fitted: SyntheticDiffInDiff) -> None:
+        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: SyntheticDiffInDiff) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
 
