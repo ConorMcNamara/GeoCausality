@@ -287,7 +287,7 @@ method:
 | Estimator | `plot()` shows |
 |---|---|
 | `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `SyntheticDiffInDiff`) and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `SyntheticDiffInDiff`) and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
 | `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
 | `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
 

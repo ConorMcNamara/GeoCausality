@@ -1,15 +1,12 @@
 """Augmented Synthetic Control method for geo-experiment causal inference."""
 
-from datetime import date as date_cls
 from math import ceil
 from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from plotly.subplots import make_subplots
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -466,86 +463,10 @@ class AugmentedSyntheticControl(EconometricEstimator):
             raise ValueError("prediction_post must not be None")
         if self.dates is None:
             raise ValueError("dates must not be None")
-        total_fig = make_subplots(
-            rows=3,
-            cols=1,
-            subplot_titles=(
-                "Expected vs Counterfactual",
-                "Pointwise Difference",
-                "Cumulative Difference",
-            ),
+        self._plot_counterfactual(
+            self.dates,
+            self.actual_pre[self.y_variable].to_numpy(),
+            self.actual_post[self.y_variable].to_numpy(),
+            self.prediction_pre[self.y_variable].to_numpy(),
+            self.prediction_post[self.y_variable].to_numpy(),
         )
-        top_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=self.dates,
-                    y=np.concatenate(
-                        [
-                            self.actual_pre[self.y_variable].to_numpy(),
-                            self.actual_post[self.y_variable].to_numpy(),
-                        ]
-                    ),
-                    marker={"color": "blue"},
-                    mode="lines",
-                    name="Actual",
-                ),
-                go.Scatter(
-                    x=self.dates,
-                    y=np.concatenate(
-                        [
-                            self.prediction_pre[self.y_variable].to_numpy(),
-                            self.prediction_post[self.y_variable].to_numpy(),
-                        ]
-                    ),
-                    marker={"color": "red"},
-                    mode="lines",
-                    name="Counterfactual",
-                ),
-            ]
-        )
-        residuals = np.concatenate(
-            [self.actual_pre[self.y_variable].to_numpy(), self.actual_post[self.y_variable].to_numpy()]
-        ) - np.concatenate(
-            [
-                self.prediction_pre[self.y_variable].to_numpy(),
-                self.prediction_post[self.y_variable].to_numpy(),
-            ]
-        )
-        middle_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=self.dates,
-                    y=residuals,
-                    marker={"color": "purple"},
-                    mode="lines",
-                    name="Residuals",
-                )
-            ]
-        )
-        cum_resids = self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy()
-        post_period_date = date_cls.fromisoformat(self.post_period)
-        marketing_start = [d for d in self.dates if d >= post_period_date]
-        bottom_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=marketing_start,
-                    y=cum_resids.cumsum(),
-                    marker={"color": "orange"},
-                    mode="lines",
-                    name="Cumulative Incrementality",
-                )
-            ]
-        )
-        figures = [top_fig, middle_fig, bottom_fig]
-        for i, figure in enumerate(figures):
-            for trace_data in figure.data:
-                total_fig.add_trace(trace_data, row=i + 1, col=1)
-                total_fig.add_vline(
-                    x=self.post_period,
-                    line_width=1,
-                    line_dash="dash",
-                    line_color="black",
-                    row=i + 1,
-                    col=1,
-                )
-        total_fig.show()

@@ -1,11 +1,14 @@
 import abc
 from abc import ABC
 from collections.abc import Callable
+from datetime import date as date_cls
 from typing import Any
 
 import narwhals as nw
 import numpy as np
+import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
+from plotly.subplots import make_subplots
 
 
 class Estimator(abc.ABC):
@@ -822,6 +825,180 @@ class EconometricEstimator(Estimator, ABC):
         band = self._jackknife_quantile(pre_resid, alpha)
         p_value = float(np.mean(np.abs(null_samples) >= abs(incr_obs)))
         return lower / t1, upper / t1, band, p_value
+
+    # ------------------------------------------------------------------
+    # Shared counterfactual plot
+    #
+    # Every synthetic-control style estimator draws the same three panels
+    # (actual vs counterfactual, pointwise difference, cumulative difference)
+    # and carries the same inference outputs, so the figure -- including the
+    # confidence bands -- is built once here and each estimator's ``plot()``
+    # just supplies its series as arrays.
+    # ------------------------------------------------------------------
+    def _plot_counterfactual(
+        self,
+        dates: list[Any],
+        actual_pre: np.ndarray,
+        actual_post: np.ndarray,
+        prediction_pre: np.ndarray,
+        prediction_post: np.ndarray,
+    ) -> None:
+        """Build and show the three-panel counterfactual figure with confidence bands.
+
+        The top panel shows the actual and counterfactual series with the pointwise
+        prediction band (``results["conformal_band"]``) shaded around the
+        counterfactual; the middle panel shows the pointwise difference with the
+        same band shaded around zero (points outside it are the significant
+        per-period effects); the bottom panel shows the cumulative post-period
+        difference with a band that grows linearly to the reported incrementality
+        interval, so its endpoint matches ``summarize()``.
+
+        Parameters
+        ----------
+        dates : list
+            The full (pre- then post-period) date axis.
+        actual_pre, actual_post : numpy array
+            Observed outcome over the pre- and post-period.
+        prediction_pre, prediction_post : numpy array
+            Counterfactual outcome over the pre- and post-period.
+        """
+        if self.results is None:
+            raise ValueError("results must not be None")
+        actual_pre = np.asarray(actual_pre, dtype=float).ravel()
+        actual_post = np.asarray(actual_post, dtype=float).ravel()
+        prediction_pre = np.asarray(prediction_pre, dtype=float).ravel()
+        prediction_post = np.asarray(prediction_post, dtype=float).ravel()
+        actual = np.concatenate([actual_pre, actual_post])
+        prediction = np.concatenate([prediction_pre, prediction_post])
+        residuals = actual - prediction
+        t1 = actual_post.shape[0]
+
+        band_value = self.results.get("conformal_band")
+        band = float(band_value) if band_value is not None else 0.0
+        has_band = bool(np.isfinite(band)) and band > 0
+        band_fill = "rgba(68, 68, 68, 0.2)"
+        ci_label = f"{self._get_ci_print()} CI"
+
+        total_fig = make_subplots(
+            rows=3,
+            cols=1,
+            subplot_titles=(
+                "Expected vs Counterfactual",
+                "Pointwise Difference",
+                "Cumulative Difference",
+            ),
+        )
+
+        # Top panel: band around the counterfactual, then the two series on top.
+        if has_band:
+            total_fig.add_trace(
+                go.Scatter(x=dates, y=prediction + band, mode="lines", line={"width": 0}, showlegend=False),
+                row=1,
+                col=1,
+            )
+            total_fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=prediction - band,
+                    mode="lines",
+                    line={"width": 0},
+                    fill="tonexty",
+                    fillcolor=band_fill,
+                    name=ci_label,
+                ),
+                row=1,
+                col=1,
+            )
+        total_fig.add_trace(
+            go.Scatter(x=dates, y=actual, marker={"color": "blue"}, mode="lines", name="Actual"),
+            row=1,
+            col=1,
+        )
+        total_fig.add_trace(
+            go.Scatter(x=dates, y=prediction, marker={"color": "red"}, mode="lines", name="Counterfactual"),
+            row=1,
+            col=1,
+        )
+
+        # Middle panel: the pointwise band around zero (the no-effect region).
+        if has_band:
+            total_fig.add_trace(
+                go.Scatter(x=dates, y=np.full(len(dates), band), mode="lines", line={"width": 0}, showlegend=False),
+                row=2,
+                col=1,
+            )
+            total_fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=np.full(len(dates), -band),
+                    mode="lines",
+                    line={"width": 0},
+                    fill="tonexty",
+                    fillcolor=band_fill,
+                    showlegend=False,
+                ),
+                row=2,
+                col=1,
+            )
+        total_fig.add_trace(
+            go.Scatter(x=dates, y=residuals, marker={"color": "purple"}, mode="lines", name="Difference"),
+            row=2,
+            col=1,
+        )
+
+        # Bottom panel: cumulative post-period difference with a band that grows
+        # linearly to the reported incrementality interval.
+        post_period_date = date_cls.fromisoformat(self.post_period)
+        marketing_start = [d for d in dates if d >= post_period_date]
+        cum_resids = np.cumsum(actual_post - prediction_post)
+        incr = self.results.get("incrementality")
+        incr_lo = self.results.get("incrementality_ci_lower")
+        incr_hi = self.results.get("incrementality_ci_upper")
+        if incr is not None and incr_lo is not None and incr_hi is not None and t1 > 0:
+            frac = np.arange(1, t1 + 1, dtype=float) / t1
+            cum_upper = cum_resids + frac * (float(incr_hi) - float(incr))
+            cum_lower = cum_resids + frac * (float(incr_lo) - float(incr))
+            total_fig.add_trace(
+                go.Scatter(x=marketing_start, y=cum_upper, mode="lines", line={"width": 0}, showlegend=False),
+                row=3,
+                col=1,
+            )
+            total_fig.add_trace(
+                go.Scatter(
+                    x=marketing_start,
+                    y=cum_lower,
+                    mode="lines",
+                    line={"width": 0},
+                    fill="tonexty",
+                    fillcolor="rgba(255, 165, 0, 0.2)",
+                    name=ci_label,
+                    showlegend=False,
+                ),
+                row=3,
+                col=1,
+            )
+        total_fig.add_trace(
+            go.Scatter(
+                x=marketing_start,
+                y=cum_resids,
+                marker={"color": "orange"},
+                mode="lines",
+                name="Cumulative Incrementality",
+            ),
+            row=3,
+            col=1,
+        )
+
+        for row in (1, 2, 3):
+            total_fig.add_vline(
+                x=self.post_period,
+                line_width=1,
+                line_dash="dash",
+                line_color="black",
+                row=row,
+                col=1,
+            )
+        total_fig.show()
 
 
 class MLEstimator(Estimator, abc.ABC):
