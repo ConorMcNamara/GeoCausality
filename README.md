@@ -46,6 +46,7 @@ pip install geocausality
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
 | `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects via control-only latent factors (Xu) |
+| `SyntheticDiffInDiff` | `synthetic_diff_in_diff` | Doubly-weighted (unit + time) difference-in-differences (Arkhangelsky et al.) |
 
 ### Pre-experiment design
 
@@ -219,6 +220,34 @@ model = synthetic_control.SyntheticControl(
 model.pre_process().generate().summarize(lift="roas")
 ```
 
+### Synthetic Difference-in-Differences
+
+```python
+from GeoCausality import synthetic_diff_in_diff
+
+model = synthetic_diff_in_diff.SyntheticDiffInDiff(
+    df,
+    test_geos=["geo_A", "geo_B"],
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+)
+model.pre_process().generate().summarize(lift="incremental")
+```
+
+`SyntheticDiffInDiff` (Arkhangelsky et al., 2021) sits between difference-in-differences
+and synthetic control: it fits non-negative, L2-penalized **unit** weights against the
+treated *trend* (a unit fixed effect absorbs the level gap, so donors need only move
+parallel to the treated series, not match its level) plus non-negative **time** weights
+that focus the pre-period comparison on the periods most predictive of the post-period.
+The estimand is the scalar average treatment effect on the treated — the doubly-weighted
+DID. Unlike the rest of the synthetic-control family, inference is the **placebo variance**
+of Arkhangelsky et al. (each donor is treated as a pseudo-treated unit against the
+remaining donors), reported in `results["standard_error"]` with `results["method"] ==
+"placebo"`. The `zeta` argument sets the unit-weight penalty and defaults to the paper's
+rule (`n_post ** 0.25 * sd(first-differences of the donor outcomes)`).
+
 ### `summarize` lift options
 
 | Value | Description |
@@ -258,7 +287,7 @@ method:
 | Estimator | `plot()` shows |
 |---|---|
 | `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`) and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `SyntheticDiffInDiff`) and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference |
 | `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
 | `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
 
@@ -316,7 +345,7 @@ skips cleanly if its vendored dataset is absent.
 |---|---|---|---|---|
 | Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
 | Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
-| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `InteractiveFixedEffects` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −26.2 |
+| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −26.2 / −15.6 |
 
 These tests catch real bugs. The GeoLift parity test caught a level bias in
 augmented synthetic control, and the Proposition 99 parity test surfaced — and we

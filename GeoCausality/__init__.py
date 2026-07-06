@@ -16,6 +16,7 @@ from GeoCausality import (
     power,
     robust_synthetic_control,
     synthetic_control,
+    synthetic_diff_in_diff,
 )
 
 __all__: list[str] = [
@@ -24,6 +25,7 @@ __all__: list[str] = [
     "interactive_fixed_effects",
     "geox",
     "synthetic_control",
+    "synthetic_diff_in_diff",
     "penalized_synthetic_control",
     "robust_synthetic_control",
     "augmented_synthetic_control",

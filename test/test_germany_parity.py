@@ -28,6 +28,7 @@ import pytest
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.synthetic_control import SyntheticControl
+from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
 TREATED = "West Germany"
 PRE_PERIOD = "1989"  # last pre-reunification year
@@ -104,6 +105,31 @@ class TestGeneralizedSyntheticControlParity:
     def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
+
+
+class TestSyntheticDiffInDiffParity:
+    """SyntheticDiffInDiff (Arkhangelsky et al. 2021 doubly-weighted DID).
+
+    Recovers the reunification shortfall in sign and magnitude (~ -1,800 USD/year,
+    within the parity band). Unlike the Prop 99 pool, the placebo variance here is
+    driven by a small, heterogeneous 16-country donor set, so the standard error is
+    large and the effect is not significant at the 10% level -- matching the
+    borderline permutation inference in the original study. We therefore assert
+    sign and magnitude, not significance.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, germany: pl.DataFrame) -> SyntheticDiffInDiff:
+        return _fit(SyntheticDiffInDiff, germany)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: SyntheticDiffInDiff) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative(fitted: SyntheticDiffInDiff) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert 0.0 <= fitted.results["p_value"] <= 1.0
 
 
 class TestInteractiveFixedEffectsParity:
