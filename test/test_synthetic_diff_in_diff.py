@@ -211,6 +211,20 @@ class TestPlot:
         _model(effect_data).pre_process().generate().plot()
         assert shown.get("ok") is True
 
+    @staticmethod
+    def test_plot_renders_confidence_bands(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = {}
+        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
+        model = _model(effect_data).pre_process().generate()
+        model.plot()
+        fig = captured["fig"]
+        # One shaded band per panel (top, middle, cumulative) via `fill="tonexty"`.
+        band_traces = [t for t in fig.data if t.fill == "tonexty"]
+        assert len(band_traces) == 3
+        # The cumulative band's final point matches the reported incrementality CI.
+        cumulative_lower = band_traces[-1]
+        assert float(cumulative_lower.y[-1]) == pytest.approx(model.results["incrementality_ci_lower"], rel=1e-6)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
