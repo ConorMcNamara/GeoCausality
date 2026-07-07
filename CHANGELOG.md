@@ -5,6 +5,118 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-07
+
+Adds the `CausalImpact` estimator — a Bayesian structural time-series
+counterfactual — and wires up the documentation bibliography.
+
+### Added
+
+- **`CausalImpact`** (`causal_impact`) — a Bayesian structural time-series
+  counterfactual built on statsmodels' `UnobservedComponents` (time-varying
+  level/trend, optional seasonality, and a regression on the donor geos), fit on
+  the pre-period and forecast forward over the post-period. It shares the
+  `pre_process() → generate() → summarize()/plot()` lifecycle and result contract
+  with the synthetic-control family, so the shared three-panel counterfactual plot
+  works unchanged.
+- **Native posterior inference** for `CausalImpact` — draws counterfactual
+  post-period paths from the fitted state posterior via `simulate()` (seeded,
+  reproducible) and reports the percentile interval of the cumulative-effect
+  distribution with a two-sided posterior tail-area p-value
+  (`method == "structural-ts"`). The conformal / jackknife path remains available
+  via `inference_method`.
+- Validation tests against CausalImpact's canonical simulated example (AR(1)
+  control, `y = 1.2·x1 + noise`, known post-period effect), plus a null-effect
+  false-positive guard and seed-reproducibility checks.
+- **Documentation bibliography** — enabled `sphinxcontrib-bibtex` with a
+  `references.bib` covering all previously-dangling `:cite:` keys, a References
+  page, and a `CausalImpact` estimator page.
+
+### Changed
+
+- Documented `CausalImpact` in the README methods and plotting tables, with a
+  quick-start snippet.
+- Docs build moved to `sphinxcontrib-bibtex>=2.6` (the prior `<2.0.0` pin could
+  not import on Python 3.10+).
+
+## [0.9.2] - 2026-07-07
+
+### Changed
+
+- CI test matrix is now derived from the `Programming Language :: Python :: X.Y`
+  trove classifiers in `pyproject.toml` (via
+  `hynek/build-and-inspect-python-package`) instead of a hardcoded list. Adding or
+  dropping a supported Python version is now a one-line classifier edit.
+- `lint`, `docs`, and the Codecov upload now target the lowest supported version,
+  computed with a version-aware sort.
+
+## [0.9.1] - 2026-07-06
+
+### Added
+
+- Confidence bands on `plot()` across the whole synthetic-control family
+  (`SyntheticControl`, `SyntheticControlV`, `AugmentedSyntheticControl`,
+  `PenalizedSyntheticControl`, `RobustSyntheticControl`,
+  `GeneralizedSyntheticControl`, `SyntheticDiffInDiff`). The top panel shades the
+  pointwise prediction band around the counterfactual, the middle panel shades it
+  around zero (excursions are the significant per-period effects), and the
+  cumulative panel's band grows to the reported incrementality interval, matching
+  `summarize()`. Bands are derived from the inference already in `results` — no new
+  computation.
+
+### Changed
+
+- Factored the duplicated three-panel counterfactual figure into a single shared
+  `EconometricEstimator._plot_counterfactual` helper; each estimator's `plot()` is
+  now a one-line delegate.
+
+## [0.9.0] - 2026-07-06
+
+### Added
+
+- **`SyntheticDiffInDiff`** — synthetic difference-in-differences (Arkhangelsky,
+  Athey, Hirshberg, Imbens & Wager, 2021). Fits L2-penalized non-negative unit
+  weights against the treated trend (a unit fixed effect absorbs the level gap, so
+  donors need only move parallel to the treated series) plus non-negative time
+  weights, and reports the scalar doubly-weighted DID average treatment effect with
+  placebo-variance inference (`results["standard_error"]`, `method == "placebo"`).
+  Recovers the canonical benchmarks: Prop 99 avg gap −15.6, West German
+  reunification −1473/year.
+- West German reunification parity test (Abadie, Diamond & Hainmueller 2015) across
+  the synthetic-control and interactive-fixed-effects family.
+
+### Documentation
+
+- Documented `InteractiveFixedEffects` in the README.
+
+## [0.8.0] - 2026-07-01
+
+Adds a standalone interactive fixed effects estimator, completing the panel-model
+family alongside `FixedEffects` and the synthetic-control estimators.
+
+### Added
+
+- **`InteractiveFixedEffects`** — the Bai (2009) interactive fixed effects model,
+  `Y_it = delta*D_it + alpha_i + xi_t + lambda_i'f_t + eps_it`, where a small
+  number of latent time factors load onto each geo with a geo-specific weight. This
+  relaxes the parallel-trends assumption of two-way fixed effects (to which it
+  reduces when the factor count is zero) and models heterogeneous responses to
+  common shocks. The additive two-way fixed effects and factors are estimated via
+  the Bai alternating algorithm; the factor count is auto-selected by the
+  eigenvalue-ratio criterion (Ahn & Horenstein, 2013). Two estimation modes via
+  `method`: `"projection"` (default) estimates the fixed effects and factors from
+  the control geos alone, then projects the treated geos' pre-period onto that time
+  structure (Xu, 2017); `"coefficient"` is the full-panel Bai model where the
+  treatment effect is a coefficient estimated jointly with the factors (opt-in,
+  weakly identified with few treated geos).
+
+### Validated
+
+- Parity test against the Abadie Proposition 99 benchmark: projection mode recovers
+  an average post-period gap of ~-26 packs/capita (published ~-19.5, within the
+  parity band) with a single auto-selected factor. The Prop 99 loader is promoted
+  to a shared test fixture.
+
 ## [0.7.1] - 2026-07-01
 
 A plotting release: the two econometric estimators gain the visual diagnostics
@@ -155,6 +267,11 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.10.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.10.0
+[0.9.2]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.2
+[0.9.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.1
+[0.9.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.0
+[0.8.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.8.0
 [0.7.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.7.1
 [0.7.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.7.0
 [0.6.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.6.0
