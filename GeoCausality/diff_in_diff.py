@@ -3,7 +3,6 @@
 from math import ceil
 
 import narwhals as nw
-import numpy as np
 import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 from narwhals.typing import IntoDataFrame
@@ -280,14 +279,3 @@ class DiffinDiff(EconometricEstimator):
             yaxis_title=self.y_variable,
         )
         fig.show()
-
-    def _get_roas(self) -> tuple[float, float, float]:
-        if self.results is None:
-            raise ValueError("results must not be None")
-        lift = ceil(self.results["incrementality"])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["incrementality_ci_upper"])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["incrementality_ci_lower"])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
-        return roas_lift, roas_ci_lower, roas_ci_upper
