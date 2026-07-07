@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The `summarize` and `_get_roas` methods are now defined once on the shared
+  `EconometricEstimator` base instead of being duplicated across the
+  synthetic-control family (`SyntheticControl`, `SyntheticControlV`,
+  `AugmentedSyntheticControl`, `PenalizedSyntheticControl`,
+  `RobustSyntheticControl`, `GeneralizedSyntheticControl`,
+  `InteractiveFixedEffects`, `SyntheticDiffInDiff`, `CausalImpact`). `DiffinDiff`,
+  `FixedEffects` and `GeoX` keep their own bespoke summaries. Net −640 lines.
+- `results["test"]` and `results["counterfactual"]` are now consistently numpy
+  arrays of the post-period outcome across the whole synthetic-control family.
+  Previously some estimators stored them as narwhals DataFrames and others as
+  arrays; the shared `summarize` relies on the uniform contract. Code that read
+  these keys as a DataFrame (e.g. `results["counterfactual"][y].sum()`) should use
+  `np.sum(results["counterfactual"])`.
+- The `summarize(lift="revenue")` and `summarize(lift="roas")` tables now format
+  the Variant/Baseline columns as currency (dollar revenue and cost-per,
+  respectively) for **all** synthetic-control estimators. Previously
+  `SyntheticControl`, `SyntheticDiffInDiff` and `CausalImpact` showed raw unit
+  counts in those two columns while the rest showed currency; the output is now
+  uniform.
+
 ## [0.10.0] - 2026-07-07
 
 Adds the `CausalImpact` estimator — a Bayesian structural time-series
@@ -267,6 +291,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[Unreleased]: https://github.com/ConorMcNamara/GeoCausality/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.10.0
 [0.9.2]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.2
 [0.9.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.1

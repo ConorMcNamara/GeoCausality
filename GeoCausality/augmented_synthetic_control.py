@@ -1,13 +1,11 @@
 """Augmented Synthetic Control method for geo-experiment causal inference."""
 
-from math import ceil
 from typing import Any
 
 import narwhals as nw
 import numpy as np
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 
@@ -213,8 +211,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
             eager_only=True,
         )
         self.results = {
-            "test": self.actual_post,
-            "counterfactual": self.prediction_post,
+            "test": self.actual_post[self.y_variable].to_numpy(),
+            "counterfactual": self.prediction_post[self.y_variable].to_numpy(),
             "lift": self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy(),
         }
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
@@ -228,87 +226,6 @@ class AugmentedSyntheticControl(EconometricEstimator):
             )
         )
         return self
-
-    def summarize(self, lift: str) -> None:
-        """Print a tabulated summary of the augmented synthetic control results.
-
-        Parameters
-        ----------
-        lift : str
-            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
-        """
-        if self.results is None:
-            raise ValueError("results must not be None")
-        lift = lift.casefold()
-        if lift not in [
-            "absolute",
-            "relative",
-            "incremental",
-            "cost-per",
-            "revenue",
-            "roas",
-        ]:
-            raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
-            )
-        ci_alpha = self._get_ci_print()
-        baseline = self.results["counterfactual"][self.y_variable].sum()
-        if lift in ["incremental", "absolute"]:
-            table_dict = {
-                "Variant": [self.results["test"][self.y_variable].sum()],
-                "Baseline": [baseline],
-                "Metric": [self.y_variable],
-                "Lift Type ": ["Incremental"],
-                "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
-                f"{ci_alpha} Lower CI": [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""],
-                f"{ci_alpha} Upper CI": [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""],
-            }
-        elif lift == "relative":
-            table_dict = {
-                "Variant": [self.results["test"][self.y_variable].sum()],
-                "Baseline": [baseline],
-                "Metric": [self.y_variable],
-                "Lift Type": ["Relative"],
-                "Lift": [f"""{round(float(self.results["incrementality"]) * 100 / baseline, 2)}%"""],
-                f"{ci_alpha} Lower CI": [f"""{round(self.results["incrementality_ci_lower"] * 100 / baseline, 2)}%"""],
-                f"{ci_alpha} Upper CI": [f"""{round(self.results["incrementality_ci_upper"] * 100 / baseline, 2)}%"""],
-            }
-        elif lift == "revenue":
-            table_dict = {
-                "Variant": [f"""${round(self.results["test"][self.y_variable].sum() * self.msrp, 2):,}"""],
-                "Baseline": [f"""${round(baseline * self.msrp, 2):,}"""],
-                "Metric": ["Revenue"],
-                "Lift Type ": ["Incremental"],
-                "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
-                f"{ci_alpha} Lower CI": [f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""],
-                f"{ci_alpha} Upper CI": [f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""],
-            }
-        else:
-            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
-            table_dict = {
-                "Variant": [f"""${round(self.spend / self.results["test"][self.y_variable].sum(), 2)}"""],
-                "Baseline": [f"""${round(self.spend / baseline, 2)}"""],
-                "Metric": ["ROAS"],
-                "Lift Type": ["Incremental"],
-                "Lift": [f"${round(roas_lift, 2)}"],
-                f"{ci_alpha} Lower CI": [f"${round(roas_ci_lower, 2)}"],
-                f"{ci_alpha} Upper CI": [f"${round(roas_ci_upper, 2)}"],
-            }
-        table_dict["p_value"] = [self.results["p_value"]]
-        print(tabulate(table_dict, headers="keys", tablefmt="grid"))
-
-    def _get_roas(self) -> tuple[float, float, float]:
-        if self.results is None:
-            raise ValueError("results must not be None")
-        lift = ceil(self.results["incrementality"])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["incrementality_ci_upper"])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["incrementality_ci_lower"])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
-        return roas_lift, roas_ci_lower, roas_ci_upper
 
     def _create_model(self) -> np.ndarray:
         if self.daily_x is None:

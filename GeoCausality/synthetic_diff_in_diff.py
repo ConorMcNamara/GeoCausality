@@ -1,6 +1,5 @@
 """Synthetic Difference-in-Differences (Arkhangelsky et al. 2021) for geo-experiment causal inference."""
 
-from math import ceil
 from typing import Any
 
 import narwhals as nw
@@ -8,7 +7,6 @@ import numpy as np
 from narwhals.typing import IntoDataFrame
 from scipy.optimize import Bounds, LinearConstraint, minimize
 from scipy.stats import norm
-from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
 
@@ -435,83 +433,6 @@ class SyntheticDiffInDiff(EconometricEstimator):
         zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_eval.shape[0])
         intercept, weights = self._solve_weights(x_train, y_train, zeta)
         return x_eval @ weights + intercept
-
-    def summarize(self, lift: str) -> None:
-        """Print a tabulated summary of the synthetic difference-in-differences results.
-
-        Parameters
-        ----------
-        lift : str
-            The kind of lift to report. One of ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"cost-per"``, ``"revenue"`` or ``"roas"``.
-        """
-        if self.results is None:
-            raise ValueError("results must not be None")
-        lift = lift.casefold()
-        if lift not in [
-            "absolute",
-            "relative",
-            "incremental",
-            "cost-per",
-            "revenue",
-            "roas",
-        ]:
-            raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
-            )
-        table_dict: dict[str, list[Any]] = {
-            "Variant": [np.sum(self.results["test"])],
-            "Baseline": [np.sum(self.results["counterfactual"])],
-        }
-        ci_alpha = self._get_ci_print()
-        baseline = np.sum(self.results["counterfactual"])
-        if lift in ["incremental", "absolute"]:
-            table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
-        elif lift == "relative":
-            table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type"] = ["Relative"]
-            table_dict["Lift"] = [f"""{round(float(self.results["incrementality"]) * 100 / baseline, 2)}%"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{round(self.results["incrementality_ci_lower"] * 100 / baseline, 2)}%"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{round(self.results["incrementality_ci_upper"] * 100 / baseline, 2)}%"""
-            ]
-        elif lift == "revenue":
-            table_dict["Metric"] = ["Revenue"]
-            table_dict["Lift Type "] = ["Incremental"]
-            table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""
-            ]
-        else:
-            table_dict["Metric"] = ["ROAS"]
-            table_dict["Lift Type "] = ["Incremental"]
-            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
-            table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"${round(roas_ci_upper, 2)}"]
-        table_dict["p_value"] = [self.results["p_value"]]
-        print(tabulate(table_dict, headers="keys", tablefmt="grid"))
-
-    def _get_roas(self) -> tuple[float, float, float]:
-        if self.results is None:
-            raise ValueError("results must not be None")
-        lift = ceil(self.results["incrementality"])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["incrementality_ci_upper"])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["incrementality_ci_lower"])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
-        return roas_lift, roas_ci_lower, roas_ci_upper
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.

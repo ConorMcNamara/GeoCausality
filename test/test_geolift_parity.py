@@ -24,6 +24,7 @@ and drop it at ``test/data/geolift_test.csv``. Until then this test skips.
 
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -83,7 +84,7 @@ class TestGeoLiftParity:
     @staticmethod
     def test_percent_lift_matches_published(fitted: GeoLift) -> None:
         results = fitted.results
-        baseline = float(results["counterfactual"]["Y"].sum())
+        baseline = float(np.sum(results["counterfactual"]))
         percent_lift = 100.0 * results["incrementality"] / baseline
         assert percent_lift == pytest.approx(REF_PERCENT_LIFT, abs=PERCENT_LIFT_ABS_TOL)
 
@@ -95,7 +96,7 @@ class TestGeoLiftParity:
     def test_counterfactual_level_matches_published(fitted: GeoLift) -> None:
         # The most direct check that the #20 level bias is fixed: GeoLift's
         # counterfactual is ~5,734/day for Chicago + Portland over 15 days.
-        baseline_per_day = float(fitted.results["counterfactual"]["Y"].sum()) / 15
+        baseline_per_day = float(np.sum(fitted.results["counterfactual"])) / 15
         assert baseline_per_day == pytest.approx(5734, rel=0.10)
 
     @staticmethod
