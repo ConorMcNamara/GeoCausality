@@ -1,6 +1,6 @@
 """Testing Statistical Hypotheses through Geo Experiments."""
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 
 from GeoCausality import (

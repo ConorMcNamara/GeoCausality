@@ -9,6 +9,7 @@ on:
 jobs:
   lint:
     name: Lint and Format Check
+    needs: python-versions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ needs.python-versions.outputs.min-version }}
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -41,17 +42,41 @@ jobs:
       - name: Run zuban type checking
         run: zuban check GeoCausality
 
+  python-versions:
+    name: Derive supported Python versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.baipp.outputs.supported_python_classifiers_json_array }}
+      min-version: ${{ steps.min.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Reads the "Programming Language :: Python :: X.Y" trove classifiers from
+      # pyproject.toml and emits them as a JSON array, so the test matrix stays in
+      # sync with the single source of truth. Update the classifiers to add/drop a version.
+      - name: Inspect package for supported Python versions
+        id: baipp
+        uses: hynek/build-and-inspect-python-package@v2
+
+      # Lowest supported version (version-aware sort so 3.9 < 3.10), used to pin
+      # a single coverage upload without hardcoding a version number.
+      - name: Determine lowest supported Python version
+        id: min
+        run: |
+          version=$(echo '${{ steps.baipp.outputs.supported_python_classifiers_json_array }}' \
+            | jq -r '.[]' | sort -V | head -n1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   test:
     name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    needs: python-versions
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.13", "3.14"]
-        include:
-          - python-version: "3.14"
-            allow-prereleases: true
+        python-version: ${{ fromJSON(needs.python-versions.outputs.versions) }}
 
     steps:
       - name: Checkout code
@@ -61,7 +86,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          allow-prereleases: ${{ matrix.allow-prereleases || false }}
+          # Harmless for stable releases; lets the newest classifier build before its final release.
+          allow-prereleases: true
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -80,7 +106,7 @@ jobs:
         run: pytest --cov=GeoCausality --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.python-versions.outputs.min-version
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
@@ -90,6 +116,7 @@ jobs:
 
   docs:
     name: Build docs
+    needs: python-versions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -98,7 +125,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ needs.python-versions.outputs.min-version }}
 
       - name: Install package and docs dependencies
         run: |
