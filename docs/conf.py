@@ -29,8 +29,9 @@ extensions = [
     "sphinxcontrib.bibtex",
 ]
 
-# sphinxcontrib-bibtex is pinned <2.0.0, whose ``.. bibliography::`` directive
-# takes the .bib file as its argument (``bibtex_bibfiles`` is a 2.0+ setting).
+# sphinxcontrib-bibtex 2.x: the bib file is declared here and the
+# ``.. bibliography::`` directive takes no file argument.
+bibtex_bibfiles = ["references.bib"]
 
 latex_elements = {"preamble": r"\usepackage{mathtools}"}
 
