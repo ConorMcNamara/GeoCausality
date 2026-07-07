@@ -33,6 +33,7 @@ Every estimator shares the same three-step interface:
    augmented_synthetic_control
    generalized_synthetic_control
    synthetic_diff_in_diff
+   causal_impact
 
 .. toctree::
    :maxdepth: 1
@@ -48,6 +49,7 @@ Every estimator shares the same three-step interface:
    :caption: Reference
 
    api
+   references
 
 Indices and tables
 ------------------

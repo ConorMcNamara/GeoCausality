@@ -11,8 +11,8 @@ project = "GeoCausality"
 copyright = "2025, Conor McNamara"
 author = "Conor McNamara"
 
-release = "0.7.0"
-version = "0.7.0"
+release = "0.10.0"
+version = "0.10.0"
 
 # -- General configuration
 
@@ -26,7 +26,12 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx_copybutton",
+    "sphinxcontrib.bibtex",
 ]
+
+# sphinxcontrib-bibtex 2.x: the bib file is declared here and the
+# ``.. bibliography::`` directive takes no file argument.
+bibtex_bibfiles = ["references.bib"]
 
 latex_elements = {"preamble": r"\usepackage{mathtools}"}
 
