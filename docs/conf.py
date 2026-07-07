@@ -11,8 +11,8 @@ project = "GeoCausality"
 copyright = "2025, Conor McNamara"
 author = "Conor McNamara"
 
-release = "0.10.0"
-version = "0.10.0"
+release = "0.10.1"
+version = "0.10.1"
 
 # -- General configuration
 
