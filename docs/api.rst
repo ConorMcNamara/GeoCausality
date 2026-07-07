@@ -35,6 +35,9 @@ Estimators
 .. automodule:: GeoCausality.synthetic_diff_in_diff
    :members:
 
+.. automodule:: GeoCausality.causal_impact
+   :members:
+
 GeoLift workflow
 ----------------
 
