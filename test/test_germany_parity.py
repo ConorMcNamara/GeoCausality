@@ -27,6 +27,8 @@ import pytest
 
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
+from GeoCausality.kernel_synthetic_control import KernelSyntheticControl
+from GeoCausality.nonlinear_synthetic_control import NonlinearSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl
 from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
@@ -163,6 +165,49 @@ class TestInteractiveFixedEffectsParity:
         mode: str, projection: InteractiveFixedEffects, coefficient: InteractiveFixedEffects
     ) -> None:
         fitted = projection if mode == "projection" else coefficient
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestNonlinearSyntheticControlParity:
+    """NonlinearSyntheticControl (Tian 2023 NSC).
+
+    A linear-in-weights estimator (affine signed weights + distance-L1 + ridge),
+    so it tracks the GDP trend and recovers the reunification shortfall in the same
+    band as the rest of the family. This is the check that distinguishes NSC from
+    the kernel-map estimator, which does not reproduce the trending-panel level.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, germany: pl.DataFrame) -> NonlinearSyntheticControl:
+        return _fit(NonlinearSyntheticControl, germany)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: NonlinearSyntheticControl) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: NonlinearSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestKernelSyntheticControlParity:
+    """KernelSyntheticControl (kernel-ridge nonlinear-map SC).
+
+    Kernel ridge learns a nonlinear map of the donor outcomes rather than a
+    level-matching weighted combination, so on a strongly trending single-unit
+    panel it is not expected to reproduce the *magnitude* of the published ATT (it
+    attenuates toward the pre-period level). The composite linear+RBF kernel does
+    keep the effect the right sign and significant, which is what we assert here.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, germany: pl.DataFrame) -> KernelSyntheticControl:
+        return _fit(KernelSyntheticControl, germany)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: KernelSyntheticControl) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
 

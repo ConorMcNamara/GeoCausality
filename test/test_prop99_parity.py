@@ -44,6 +44,8 @@ import pytest
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
+from GeoCausality.kernel_synthetic_control import KernelSyntheticControl
+from GeoCausality.nonlinear_synthetic_control import NonlinearSyntheticControl
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
 from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
@@ -312,6 +314,56 @@ class TestRobustSyntheticControlParity:
         model.pre_process().generate()
         assert _avg_gap(model) < 0.0
         assert model.results["p_value"] <= 0.1
+
+
+class TestNonlinearSyntheticControlParity:
+    """NonlinearSyntheticControl (Tian 2023 NSC).
+
+    The reference implementation (``mlsynth``) reproduces the canonical Prop 99
+    result with this method; Tian (2023) reports an ATT of about -19.1. Our
+    rolling-origin, predict-to-horizon cross-validation lands at ~-20.2 (average) /
+    ~-27.8 (year 2000) -- essentially the published figure. Being linear-in-weights,
+    it tracks the trend and reproduces the effect, unlike the kernel-map estimator
+    below.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> NonlinearSyntheticControl:
+        return _fit(NonlinearSyntheticControl, prop99)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: NonlinearSyntheticControl) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_weights_are_affine(fitted: NonlinearSyntheticControl) -> None:
+        # Signed weights that sum to one (Tian drops the non-negativity constraint).
+        assert float(np.sum(fitted.model)) == pytest.approx(1.0, abs=1e-3)
+        assert float(np.min(fitted.model)) < 0.0
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: NonlinearSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestKernelSyntheticControlParity:
+    """KernelSyntheticControl (kernel-ridge nonlinear-map SC).
+
+    A nonlinear map of the donor outcomes rather than a level-matching combination,
+    so it is not expected to reproduce the exact published magnitude on this
+    trending panel (it attenuates toward the pre-period level); the composite
+    linear+RBF kernel keeps the effect negative and significant, which is asserted.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> KernelSyntheticControl:
+        return _fit(KernelSyntheticControl, prop99)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: KernelSyntheticControl) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
 
 
 if __name__ == "__main__":
