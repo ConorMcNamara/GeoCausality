@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-14
+
+Adds two nonlinear-outcome synthetic-control estimators and documents them across
+the README and Sphinx docs.
+
+### Added
+
+- **`NonlinearSyntheticControl`** (`nonlinear_synthetic_control`) — Tian's (2023)
+  synthetic control for strictly monotonic nonlinear outcomes. Because the link is
+  monotonic, matching observed pre-period outcomes still matches the latent index,
+  so the counterfactual stays a linear-in-weights combination of donor outcomes
+  with no link function specified. Weights are **affine** (sum to one, may be
+  negative), with a **distance-weighted L1** penalty `a` that concentrates weight
+  on nearby donors and an **L2 ridge** `b` that spreads it out; both default to
+  values chosen by rolling-origin, predict-to-horizon cross-validation. Shares the
+  `pre_process() → generate() → summarize()/plot()` lifecycle and result contract
+  with the synthetic-control family.
+- **`KernelSyntheticControl`** (`kernel_synthetic_control`) — kernel-ridge
+  synthetic control that learns a nonlinear *map* of the donor outcomes via a
+  composite **linear + RBF** kernel (linear backbone for trend extrapolation, RBF
+  term for local nonlinear flexibility; treated series centred so its level rides
+  on an intercept). `bandwidth` defaults to the median-pairwise-distance heuristic
+  and `lambda_` to the one-standard-error rule over a leave-one-out grid (both
+  pinnable); `linear_weight` trades off the two kernels.
+- **Parity tests** for both estimators against the Prop 99 (`test_prop99_parity`)
+  and German reunification (`test_germany_parity`) benchmarks.
+  `NonlinearSyntheticControl` reproduces the published magnitude (Prop 99 avg gap
+  ~−20.2); `KernelSyntheticControl` is checked for sign and significance, since a
+  nonlinear map attenuates toward the pre-period level on strongly trending panels.
+
+### Documentation
+
+- README: new Available Methods rows, Quick Start sections, plotting-family and
+  validation-table entries for both estimators, plus the Tian (2023) reference.
+- Sphinx docs: new `nonlinear_synthetic_control` and `kernel_synthetic_control`
+  pages, wired into the estimators toctree and the API reference, with the Tian
+  (2023) bibliography entry.
+
 ## [0.10.1] - 2026-07-07
 
 ### Changed

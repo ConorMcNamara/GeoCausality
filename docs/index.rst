@@ -32,6 +32,8 @@ Every estimator shares the same three-step interface:
    robust_synthetic_control
    augmented_synthetic_control
    generalized_synthetic_control
+   nonlinear_synthetic_control
+   kernel_synthetic_control
    synthetic_diff_in_diff
    causal_impact
 
