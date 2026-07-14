@@ -303,7 +303,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _solve_nsc(y: np.ndarray, x: np.ndarray, a: float, b: float) -> np.ndarray:
+    def _solve_nsc(y: np.ndarray, x: np.ndarray, a: float, b: float) -> tuple[np.ndarray, bool]:
         """Solve the NSC quadratic program.
 
         Minimises ``||y - x w||^2 + a sum_j d_j |w_j| + b ||w||^2`` subject to
@@ -449,7 +449,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
 
     def _cv_score(
         self, a: float, b: float, y_pre: np.ndarray, pre_mat: np.ndarray, min_train_fraction: float = 0.6
-    ) -> float:
+    ) -> tuple[float, bool]:
         """Rolling-origin, predict-to-horizon validation error for a candidate ``(a, b)``.
 
         Over expanding windows -- training on the first ``k`` pre-periods -- for
