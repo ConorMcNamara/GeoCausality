@@ -22,7 +22,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
     implicitly matches the latent index -- so the counterfactual is still the
     familiar linear-in-weights ``sum_j w_j y_jt`` and no link function has to be
     specified. The "nonlinear" adaptation is entirely in how the weights are
-    solved for (Tian 2023, eq. 7):
+    solved for (Tian 2023, eq. 7)::
 
         min_w  ||z_1 - sum_j w_j z_j||^2
                + a * sum_j |w_j| * ||z_1 - z_j||          (distance-weighted L1)
@@ -299,7 +299,8 @@ class NonlinearSyntheticControl(EconometricEstimator):
         """
         a = self._fit_a if self._fit_a is not None else 0.0
         b = self._fit_b if self._fit_b is not None else 0.0
-        return self._solve_nsc(np.asarray(y, dtype=float).ravel(), np.asarray(x, dtype=float), a, b)
+        weights, _converged = self._solve_nsc(np.asarray(y, dtype=float).ravel(), np.asarray(x, dtype=float), a, b)
+        return weights
 
     @staticmethod
     def _solve_nsc(y: np.ndarray, x: np.ndarray, a: float, b: float) -> np.ndarray:
@@ -324,7 +325,13 @@ class NonlinearSyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        The donor weight vector, shape (n_donors,).
+        weights : numpy array, shape (n_donors,)
+            The donor weight vector.
+        converged : bool
+            Whether SLSQP reached a genuine optimum. When it does not (an
+            ill-conditioned or over-penalised cell), the solver falls back toward
+            the uniform-weight ``x0``; the caller uses this flag to keep the
+            cross-validated penalty search off those degenerate cells.
         """
         n_donors = x.shape[1]
         distance = np.linalg.norm(y.reshape(-1, 1) - x, axis=0)
@@ -356,7 +363,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
             options={"maxiter": 500, "ftol": 1e-10},
         )
         solution = res["x"]
-        return solution[:n_donors] - solution[n_donors:]
+        return solution[:n_donors] - solution[n_donors:], bool(res.success)
 
     def _select_penalties(self, y_pre: np.ndarray, pre_mat: np.ndarray) -> tuple[float, float]:
         """Choose ``(a, b)`` by a full 2-D grid, rolling-origin cross-validation.
@@ -394,17 +401,25 @@ class NonlinearSyntheticControl(EconometricEstimator):
         eigvals = np.sort(np.linalg.eigvalsh(pre_mat.T @ pre_mat))
         n_donors = pre_mat.shape[1]
         grid = np.round(np.arange(0.0, 1.0 + 1e-9, self.cv_grid_step), 4)
-        best_score = np.inf
-        best: tuple[float, float] = (0.0, 0.0)
+        # Prefer the best *converged* cell. Cells where SLSQP fails to reach an
+        # optimum collapse toward uniform weights; their CV score is not only
+        # meaningless but also platform-dependent (the exact stuck point varies
+        # with the BLAS backend), so the raw argmin over all cells is not
+        # reproducible across machines. Restricting the choice to converged cells
+        # keeps the selection stable and off the degenerate fallback; ``best_any``
+        # is a defensive fallback for the (unobserved) case where nothing converges.
+        best_conv_score, best_conv = np.inf, None
+        best_any_score, best_any = np.inf, (0.0, 0.0)
         for b_star in grid:
             b = self._scale_penalty(float(b_star), eigvals, n_donors)
             for a_star in grid:
                 a = self._scale_penalty(float(a_star), eigvals, n_donors, shift=b)
-                score = self._cv_score(a, b, y_pre, pre_mat)
-                if score < best_score:
-                    best_score = score
-                    best = (a, b)
-        return best
+                score, converged = self._cv_score(a, b, y_pre, pre_mat)
+                if converged and score < best_conv_score:
+                    best_conv_score, best_conv = score, (a, b)
+                if score < best_any_score:
+                    best_any_score, best_any = score, (a, b)
+        return best_conv if best_conv is not None else best_any
 
     @staticmethod
     def _scale_penalty(star: float, eigvals: np.ndarray, n_donors: int, shift: float = 0.0) -> float:
@@ -460,19 +475,25 @@ class NonlinearSyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        The mean multi-step forecast squared error over the rolling origins.
+        score : float
+            The mean multi-step forecast squared error over the rolling origins.
+        converged : bool
+            Whether SLSQP converged on *every* rolling-origin fit. A candidate is
+            only trusted for selection when all its folds reach a genuine optimum.
         """
         y_pre = np.asarray(y_pre, dtype=float).ravel()
         n_pre = y_pre.shape[0]
         if n_pre < 2:
-            weights = self._solve_nsc(y_pre, pre_mat, a, b)
-            return float(np.mean((y_pre - pre_mat @ weights) ** 2))
+            weights, converged = self._solve_nsc(y_pre, pre_mat, a, b)
+            return float(np.mean((y_pre - pre_mat @ weights) ** 2)), converged
         start = min(max(int(round(n_pre * min_train_fraction)), 2), n_pre - 1)
         errors = np.empty(n_pre - start)
+        all_converged = True
         for k in range(start, n_pre):
-            weights = self._solve_nsc(y_pre[:k], pre_mat[:k], a, b)
+            weights, converged = self._solve_nsc(y_pre[:k], pre_mat[:k], a, b)
+            all_converged = all_converged and converged
             errors[k - start] = float(np.mean((y_pre[k:] - pre_mat[k:] @ weights) ** 2))
-        return float(np.mean(errors))
+        return float(np.mean(errors)), all_converged
 
     def plot(self) -> None:
         """Plot the actual results, the counterfactual, and the pointwise and cumulative differences.

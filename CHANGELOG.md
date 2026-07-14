@@ -35,13 +35,25 @@ the README and Sphinx docs.
   ~−20.2); `KernelSyntheticControl` is checked for sign and significance, since a
   nonlinear map attenuates toward the pre-period level on strongly trending panels.
 
+### Fixed
+
+- **`NonlinearSyntheticControl`** penalty cross-validation is now
+  platform-reproducible. `_solve_nsc` reports SLSQP convergence, and
+  `_select_penalties` restricts the grid search to *converged* `(a, b)` cells.
+  Non-converged cells collapse toward uniform weights and their objective value
+  is BLAS-backend dependent, so the previous raw argmin could pick a degenerate
+  cell on some platforms (e.g. the German reunification panel returned ~−855 on
+  Python 3.14/Linux versus ~−1,500 elsewhere); the selection now stays on the
+  stable region across platforms.
+
 ### Documentation
 
 - README: new Available Methods rows, Quick Start sections, plotting-family and
   validation-table entries for both estimators, plus the Tian (2023) reference.
 - Sphinx docs: new `nonlinear_synthetic_control` and `kernel_synthetic_control`
   pages, wired into the estimators toctree and the API reference, with the Tian
-  (2023) bibliography entry.
+  (2023) bibliography entry. Fixed the `NonlinearSyntheticControl` docstring math
+  block (now a literal block) so the API docs build cleanly under `-W`.
 
 ## [0.10.1] - 2026-07-07
 
