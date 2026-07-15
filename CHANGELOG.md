@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-07-15
+
+### Changed
+
+- Simplified the test suite by pruning redundant tests: **225 → 164 test
+  functions** (~330 → 220 runtime cases, wall-clock roughly halved), with **no
+  change to library source** and no loss of behavioral coverage. The cuts target
+  pure redundancy — the shared conformal/jackknife/bootstrap inference machinery
+  in `_base.py` is verified once rather than re-swept across every estimator;
+  per-estimator parity assertions (avg-gap + significance) are merged into one
+  check while the Prop 99, Germany, Card-Krueger and GeoLift benchmarks are all
+  retained; and generic results-contract / plot-smoke checks already covered by
+  the shared inference tests are removed. Estimator-specific behavior (factor
+  selection, affine weights, ATT identities, structural-ts inference,
+  market-selection ranking, power curves) is kept.
+
 ## [0.12.0] - 2026-07-15
 
 Adds the `MatrixCompletion` estimator — a nuclear-norm matrix-completion
