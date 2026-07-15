@@ -32,6 +32,12 @@ Estimators
 .. automodule:: GeoCausality.generalized_synthetic_control
    :members:
 
+.. automodule:: GeoCausality.nonlinear_synthetic_control
+   :members:
+
+.. automodule:: GeoCausality.kernel_synthetic_control
+   :members:
+
 .. automodule:: GeoCausality.synthetic_diff_in_diff
    :members:
 

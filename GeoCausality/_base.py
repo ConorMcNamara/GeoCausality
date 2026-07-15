@@ -1105,6 +1105,144 @@ class EconometricEstimator(Estimator, ABC):
         total_fig.show()
 
 
+class NonLinearEstimator(EconometricEstimator, ABC):
+    """Abstract base for synthetic control with a nonlinear counterfactual.
+
+    The linear synthetic-control family (``SyntheticControl``,
+    ``AugmentedSyntheticControl``, ``RobustSyntheticControl`` ...) -- and Tian's
+    ``NonlinearSyntheticControl``, which stays linear-in-weights -- builds the
+    counterfactual as a combination of donor outcomes. This base drops that
+    restriction: a subclass fits an arbitrary predictor ``f`` on the pre-period
+    and the counterfactual is ``f(donor_matrix)`` (see ``KernelSyntheticControl``).
+    This can track a treated unit that relates to the donors nonlinearly, at the
+    cost of the interpretable weight vector -- ``self.model`` holds the fitted
+    predictor callable, not a set of weights.
+
+    A subclass only has to implement ``_fit_model(x, y)``, which trains on a
+    pre-period ``(donor_matrix, treated_series)`` and returns a callable mapping a
+    donor matrix to its counterfactual. Everything else is inherited from
+    ``EconometricEstimator``: the shared lift table (``summarize``), the
+    return-on-ad-spend (``_get_roas``), conformal p-values/intervals, the faithful
+    jackknife+ leave-one-out loop and the parametric bootstrap. Those inference
+    tools are model-agnostic -- they drive the refit through
+    ``_fit_predict_weights``, which this base routes to ``_fit_model`` -- so a
+    nonlinear counterfactual gets the same distribution-free inference as the
+    linear family for free.
+    """
+
+    def __init__(
+        self,
+        data: IntoDataFrame,
+        geo_variable: str = "geo",
+        test_geos: list[str] | None = None,
+        control_geos: list[str] | None = None,
+        treatment_variable: str | None = "is_treatment",
+        date_variable: str = "date",
+        pre_period: str = "2021-01-01",
+        post_period: str = "2021-01-02",
+        y_variable: str = "y",
+        alpha: float = 0.1,
+        msrp: float = 0.0,
+        spend: float = 0.0,
+        conformal_q: float = 1.0,
+    ) -> None:
+        """Initialize the nonlinear estimator (abstract base for kernel/ML counterfactuals).
+
+        Parameters
+        ----------
+        data : pandas or polars data frame
+            Our geo-based time-series data
+        geo_variable : str
+            The name of the variable representing our geo-data
+        test_geos : list, optional
+            The geos that were assigned treatment. If not provided, rely on treatment variable
+        control_geos : list, optional
+            The geos that were withheld from treatment. If not provided, rely on treatment variable
+        treatment_variable : str, optional
+            If test and control geos are not provided, the column denoting which is test and control. Assumes that
+            1 is coded as "treatment" and 0 is coded as "control"
+        date_variable : str
+            The name of the variable representing our dates
+        pre_period : str
+            The time period used to train our models. Starts from the first date in our data to pre_period.
+        post_period : str
+            The time period used to evaluate our performance. Starts from post_period to the last date in our data
+        y_variable : str
+            The name of the variable representing the results of our data
+        alpha : float, default=0.1
+            The alpha level for our experiment
+        msrp : float, default=0.0
+            The average MSRP of our sale. Used to calculate incremental revenue.
+        spend : float, default=0.0
+            The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
+             or cost-per-acquisition.
+        conformal_q : float, default=1.0
+            The exponent of the moving-block test statistic used for conformal
+            inference (p-values and confidence intervals).
+        """
+        super().__init__(
+            data,
+            geo_variable,
+            test_geos,
+            control_geos,
+            treatment_variable,
+            date_variable,
+            pre_period,
+            post_period,
+            y_variable,
+            alpha,
+            msrp,
+            spend,
+        )
+        self.dates: list[Any] | None = None
+        self.actual_pre: Any = None
+        self.actual_post: Any = None
+        self.prediction_pre: Any = None
+        self.prediction_post: Any = None
+        self.conformal_q = conformal_q
+
+    @abc.abstractmethod
+    def _fit_model(self, x: np.ndarray, y: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
+        """Fit the nonlinear counterfactual on a pre-period subset.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_periods, n_donors)
+            Donor outcome matrix (one row per time period, one column per donor geo).
+        y : numpy array, shape (n_periods,)
+            Treated (aggregated) outcome on the same rows.
+
+        Returns
+        -------
+        A callable mapping a donor matrix of shape ``(m, n_donors)`` to the
+        counterfactual of shape ``(m,)``.
+        """
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the nonlinear model on a subset and predict.
+
+        Overrides the linear family's weight-fitting hook so the inherited
+        jackknife+ (``_block_loo``) and parametric bootstrap (``_bootstrap_refit``)
+        drive a full model refit instead of a linear re-solve. The donor-column
+        order matches the cached ``_jk_x_*`` matrices.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit.
+        y_train : numpy array, shape (n_train,)
+            Treated pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict the counterfactual for.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row.
+        """
+        predictor = self._fit_model(np.asarray(x_train, dtype=float), np.asarray(y_train, dtype=float).ravel())
+        return np.asarray(predictor(np.asarray(x_eval, dtype=float)), dtype=float)
+
+
 class MLEstimator(Estimator, abc.ABC):
     def __init__(
         self,
