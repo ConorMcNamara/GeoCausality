@@ -28,6 +28,7 @@ import pytest
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.kernel_synthetic_control import KernelSyntheticControl
+from GeoCausality.matrix_completion import MatrixCompletion
 from GeoCausality.nonlinear_synthetic_control import NonlinearSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl
 from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
@@ -42,6 +43,10 @@ REF_AVG_GAP = -1600.0  # USD/year
 # Reimplementation band: confirm sign + magnitude, not equality. ~44% of the
 # reference, matching the generosity of the Prop 99 parity band.
 GAP_ABS_TOL = 700.0
+# Matrix completion attenuates more on this short, heterogeneous panel (the
+# nuclear-norm penalty shrinks the counterfactual gap), so it gets a wider band
+# than the linear family -- same sign and order of magnitude, not the same size.
+MC_GAP_ABS_TOL = 1100.0
 
 
 def _fit(cls, germany: pl.DataFrame, **overrides: object):
@@ -132,6 +137,32 @@ class TestSyntheticDiffInDiffParity:
     def test_effect_is_negative(fitted: SyntheticDiffInDiff) -> None:
         assert _avg_gap(fitted) < 0.0
         assert 0.0 <= fitted.results["p_value"] <= 1.0
+
+
+class TestMatrixCompletionParity:
+    """MatrixCompletion (Athey et al. 2021 MC-NNM nuclear-norm completion).
+
+    Masks West Germany's post-1989 cells and completes the 17-country panel with
+    two-way fixed effects plus a cross-validated low-rank term. It recovers the
+    reunification shortfall in sign and order of magnitude, but attenuated toward
+    zero relative to the linear family: the nuclear-norm penalty shrinks the
+    counterfactual gap, and this short, heterogeneous panel gives it less to work
+    with than the 39-state Prop 99 pool (where it matches closely). We therefore
+    assert sign and a wider magnitude band, plus significance.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, germany: pl.DataFrame) -> MatrixCompletion:
+        return _fit(MatrixCompletion, germany)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: MatrixCompletion) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=MC_GAP_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: MatrixCompletion) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
 
 
 class TestInteractiveFixedEffectsParity:

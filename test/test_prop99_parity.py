@@ -45,6 +45,7 @@ from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.kernel_synthetic_control import KernelSyntheticControl
+from GeoCausality.matrix_completion import MatrixCompletion
 from GeoCausality.nonlinear_synthetic_control import NonlinearSyntheticControl
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
 from GeoCausality.robust_synthetic_control import RobustSyntheticControl
@@ -252,6 +253,34 @@ class TestInteractiveFixedEffectsParity:
 
     @staticmethod
     def test_effect_is_negative_and_significant(fitted: InteractiveFixedEffects) -> None:
+        assert _avg_gap(fitted) < 0.0
+        assert fitted.results["p_value"] <= 0.1
+
+
+class TestMatrixCompletionParity:
+    """MatrixCompletion (Athey et al. 2021 MC-NNM nuclear-norm completion).
+
+    Stacks the 39 states into one panel, masks California's post-1988 cells, and
+    completes the matrix with two-way fixed effects plus a cross-validated
+    low-rank term. On the well-populated Prop 99 donor pool it recovers the
+    published gap closely -- average ~-20 packs, year-2000 ~-30 -- with no rank
+    or penalty tuning (unlike RobustSyntheticControl, which pins its rank here).
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> MatrixCompletion:
+        return _fit(MatrixCompletion, prop99)
+
+    @staticmethod
+    def test_avg_gap_matches_published(fitted: MatrixCompletion) -> None:
+        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+
+    @staticmethod
+    def test_terminal_gap_matches_published(fitted: MatrixCompletion) -> None:
+        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
+
+    @staticmethod
+    def test_effect_is_negative_and_significant(fitted: MatrixCompletion) -> None:
         assert _avg_gap(fitted) < 0.0
         assert fitted.results["p_value"] <= 0.1
 

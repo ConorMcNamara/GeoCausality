@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-07-15
+
+Adds the `MatrixCompletion` estimator — a nuclear-norm matrix-completion
+counterfactual (MC-NNM) — to the synthetic-control family.
+
+### Added
+
+- **`MatrixCompletion`** (`matrix_completion`) — the MC-NNM estimator of Athey,
+  Bayati, Doudchenko, Imbens & Khosravi (2021). Rather than regressing the
+  treated series on a weighted combination of donors, it stacks every unit into
+  one panel matrix, masks the treated unit's post-period cells, and completes the
+  matrix under a nuclear-norm penalty (two-way fixed effects plus a low-rank term,
+  solved by soft-impute with a cross-validated penalty). The treated geos are
+  aggregated into a single row, matching the estimand and `summarize` contract of
+  the rest of the synthetic-control family. Reuses the shared conformal p-values
+  and confidence intervals, with the residual-only jackknife+ fallback for short
+  pre-periods; it has no donor-weight vector, so the weight-based faithful
+  jackknife+ and parametric bootstrap do not apply. Pure numpy — no new
+  dependency.
+- Parity coverage for `MatrixCompletion` on the Proposition 99 (matches the
+  published ~−20 packs closely) and West German reunification (right sign and
+  order of magnitude, attenuated by the nuclear-norm penalty) benchmarks, plus a
+  dedicated `test_matrix_completion` suite.
+
 ## [0.11.0] - 2026-07-14
 
 Adds two nonlinear-outcome synthetic-control estimators and documents them across

@@ -26,6 +26,9 @@ Estimators
 .. automodule:: GeoCausality.robust_synthetic_control
    :members:
 
+.. automodule:: GeoCausality.matrix_completion
+   :members:
+
 .. automodule:: GeoCausality.augmented_synthetic_control
    :members:
 
