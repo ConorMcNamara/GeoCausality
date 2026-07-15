@@ -149,29 +149,16 @@ def _run(name: str, df: pl.DataFrame):
 class TestConformalInference:
     @staticmethod
     @pytest.mark.parametrize("name", MODEL_NAMES)
-    def test_results_contain_conformal_keys(name: str, effect_data: pl.DataFrame) -> None:
+    def test_conformal_contract_and_significance(name: str, effect_data: pl.DataFrame) -> None:
+        # Every SC estimator wires into the shared conformal path: the keys are
+        # present and well-formed, the interval brackets the point estimate, and a
+        # strong positive effect is detected (small p, interval above zero).
         results = _run(name, effect_data).results
         for key in CONFORMAL_KEYS:
             assert key in results, f"{name} missing conformal key {key!r}"
-        assert 0.0 <= results["p_value"] <= 1.0
+        assert 0.0 <= results["p_value"] <= 0.1, f"{name} failed to detect a strong effect"
         assert results["conformal_band"] >= 0.0
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    @pytest.mark.parametrize("name", MODEL_NAMES)
-    def test_point_estimate_within_interval(name: str, effect_data: pl.DataFrame) -> None:
-        # The interval is centred on the observed mean lift, so the point estimate
-        # is inside it by construction.
-        results = _run(name, effect_data).results
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    @pytest.mark.parametrize("name", MODEL_NAMES)
-    def test_strong_effect_is_significant(name: str, effect_data: pl.DataFrame) -> None:
-        # A large positive effect should reject the no-effect null, so zero falls
-        # below the confidence interval and the p-value is small.
-        results = _run(name, effect_data).results
-        assert results["p_value"] <= 0.1, f"{name} failed to detect a strong effect"
         assert results["incrementality_ci_lower"] > 0.0
 
     @staticmethod
@@ -182,10 +169,11 @@ class TestConformalInference:
         assert p_effect <= p_null, f"{name}: effect p={p_effect} should be <= null p={p_null}"
 
     @staticmethod
-    @pytest.mark.parametrize("name", MODEL_NAMES)
     @pytest.mark.parametrize("lift", LIFT_TYPES)
-    def test_summarize_runs_for_all_lift_types(name: str, lift: str, effect_data: pl.DataFrame) -> None:
-        model = _run(name, effect_data)
+    def test_summarize_runs_for_all_lift_types(lift: str, effect_data: pl.DataFrame) -> None:
+        # summarize() is shared on the base class, so one representative estimator
+        # exercises every lift-type format; per-estimator coverage is redundant.
+        model = _run("SyntheticControl", effect_data)
         with redirect_stdout(io.StringIO()) as buffer:
             model.summarize(lift)
         out = buffer.getvalue()

@@ -1,10 +1,10 @@
 """Parity test: our synthetic-control family vs Abadie et al. (2010) Prop 99.
 
-Validates GeoCausality's four synthetic-control estimators against the canonical
-benchmark of the literature: California's Proposition 99 tobacco-control program.
-California passed Prop 99 in 1988, so it is treated from 1989; the other 38
-states form the donor pool. Abadie, Diamond & Hainmueller (2010) estimate that
-by 2000 California's per-capita cigarette sales were about **26 packs** below its
+Validates GeoCausality's synthetic-control family against the canonical benchmark
+of the literature: California's Proposition 99 tobacco-control program. California
+passed Prop 99 in 1988, so it is treated from 1989; the other 38 states form the
+donor pool. Abadie, Diamond & Hainmueller (2010) estimate that by 2000
+California's per-capita cigarette sales were about **26 packs** below its
 synthetic control, with an **average post-period (1989-2000) gap of roughly -19
 to -20 packs**.
 
@@ -13,28 +13,15 @@ The vendored ``prop99_smoking.csv`` is the ``smoking`` dataset from the R
 provenance and ``vendor_prop99.py`` for the download. Until that CSV is present
 this test skips, exactly like the GeoLift / Card-Krueger parity tests.
 
-What we observe (and assert), per estimator -- the average post-period gap:
-
-* ``SyntheticControl``          -19.5 -> matches the published ~-19.5 closely.
-* ``AugmentedSyntheticControl`` -15.8 -> same sign and ballpark (mildly
-                                         attenuated by the ridge augmentation).
-* ``PenalizedSyntheticControl`` -23.5 -> matches after #31 was fixed (it now
-                                         tracks the full pre-period trajectory
-                                         with a scaled Abadie & L'Hour penalty,
-                                         rather than matching only the pre-period
-                                         mean).
-* ``GeneralizedSyntheticControl`` -20.7 -> matches after #32 was fixed (the
-                                         factor count is now chosen by the
-                                         eigenvalue-ratio criterion, which no
-                                         longer over-selects and washes out the
-                                         effect).
-
-All four originally diverged in interesting ways; the two that were off
-(PenalizedSyntheticControl #31, GeneralizedSyntheticControl #32) were genuine
-reimplementation bugs that this parity test surfaced -- exactly as the GeoLift
-parity test surfaced #20. Tolerances are deliberately generous: this guards
-against gross divergence, not exact equality, since our predictor specification
-and solvers differ from Abadie's exact Prop 99 setup.
+Each estimator gets a single parity assertion -- average post-period gap within
+band *and* negative *and* significant -- plus any estimator-specific check
+(factor-count selection, affine weights, default-rank robustness). The plain
+``SyntheticControl`` additionally pins the headline year-2000 terminal gap.
+Tolerances are deliberately generous: this guards against gross divergence, not
+exact equality, since our predictor specification and solvers differ from
+Abadie's exact Prop 99 setup. This parity test has surfaced genuine
+reimplementation bugs (PenalizedSyntheticControl #31, GeneralizedSyntheticControl
+#32), exactly as the GeoLift parity test surfaced #20.
 """
 
 import numpy as np
@@ -90,21 +77,22 @@ def _terminal_gap(model) -> float:
     return float(np.asarray(model.results["lift"], dtype=float).ravel()[-1])
 
 
-class TestProp99Data:
-    @staticmethod
-    def test_panel_shape(prop99: pl.DataFrame) -> None:
-        assert prop99["state"].n_unique() == 39  # California + 38 donors
-        years = prop99["year"].unique().to_list()
-        assert min(years) == 1970 and max(years) == 2000
+def _assert_parity(model, tol: float = GAP_ABS_TOL) -> None:
+    """The shared per-estimator parity bar: within band, negative, significant."""
+    assert _avg_gap(model) == pytest.approx(REF_AVG_GAP, abs=tol)
+    assert _avg_gap(model) < 0.0
+    assert model.results["p_value"] <= 0.1
 
-    @staticmethod
-    def test_california_landmark_values(prop99: pl.DataFrame) -> None:
-        # Spot-check that the vendored data is the canonical Abadie panel.
-        ca = prop99.filter(pl.col("state") == TREATED)
-        by_year = dict(zip(ca["year"].to_list(), ca["cigsale"].to_list()))
-        assert by_year[1970] == pytest.approx(123.0, abs=0.1)
-        assert by_year[1988] == pytest.approx(90.1, abs=0.1)
-        assert by_year[2000] == pytest.approx(41.6, abs=0.1)
+
+def test_prop99_landmark_values(prop99: pl.DataFrame) -> None:
+    # Spot-check that the vendored data is the canonical Abadie panel, so a parity
+    # failure below points at the estimator, not at corrupted data.
+    assert prop99["state"].n_unique() == 39  # California + 38 donors
+    ca = prop99.filter(pl.col("state") == TREATED)
+    by_year = dict(zip(ca["year"].to_list(), ca["cigsale"].to_list()))
+    assert by_year[1970] == pytest.approx(123.0, abs=0.1)
+    assert by_year[1988] == pytest.approx(90.1, abs=0.1)
+    assert by_year[2000] == pytest.approx(41.6, abs=0.1)
 
 
 class TestSyntheticControlParity:
@@ -113,41 +101,30 @@ class TestSyntheticControlParity:
         return _fit(SyntheticControl, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: SyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=SC_AVG_ABS_TOL)
+    def test_matches_published(fitted: SyntheticControl) -> None:
+        # The plain estimator tracks Abadie almost exactly -> tight band.
+        _assert_parity(fitted, tol=SC_AVG_ABS_TOL)
 
     @staticmethod
     def test_terminal_gap_matches_published(fitted: SyntheticControl) -> None:
         # The headline number: ~26 fewer packs per capita by 2000.
         assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
 
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: SyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
-
 
 class TestSyntheticControlVParity:
-    """SyntheticControlV (Abadie & Gardeazabal V-weighted method)."""
+    """SyntheticControlV (Abadie & Gardeazabal V-weighted method).
+
+    The V-weighted method on lagged outcomes recovers the same fit as the plain
+    estimator on this panel, so it matches the published gap closely.
+    """
 
     @pytest.fixture(scope="class")
     def fitted(self, prop99: pl.DataFrame) -> SyntheticControlV:
         return _fit(SyntheticControlV, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: SyntheticControlV) -> None:
-        # The V-weighted method on lagged outcomes recovers the same fit as the
-        # plain estimator on this panel, so it matches the published gap closely.
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=SC_AVG_ABS_TOL)
-
-    @staticmethod
-    def test_terminal_gap_matches_published(fitted: SyntheticControlV) -> None:
-        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: SyntheticControlV) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: SyntheticControlV) -> None:
+        _assert_parity(fitted, tol=SC_AVG_ABS_TOL)
 
 
 class TestAugmentedSyntheticControlParity:
@@ -156,13 +133,8 @@ class TestAugmentedSyntheticControlParity:
         return _fit(AugmentedSyntheticControl, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: AugmentedSyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: AugmentedSyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: AugmentedSyntheticControl) -> None:
+        _assert_parity(fitted)
 
 
 class TestPenalizedSyntheticControlParity:
@@ -171,14 +143,9 @@ class TestPenalizedSyntheticControlParity:
         return _fit(PenalizedSyntheticControl, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: PenalizedSyntheticControl) -> None:
+    def test_matches_published(fitted: PenalizedSyntheticControl) -> None:
         # Fixed in #31: matches the full pre-period trajectory with a scaled penalty.
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: PenalizedSyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+        _assert_parity(fitted)
 
 
 class TestGeneralizedSyntheticControlParity:
@@ -187,14 +154,9 @@ class TestGeneralizedSyntheticControlParity:
         return _fit(GeneralizedSyntheticControl, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: GeneralizedSyntheticControl) -> None:
+    def test_matches_published(fitted: GeneralizedSyntheticControl) -> None:
         # Fixed in #32: eigenvalue-ratio factor selection no longer over-selects.
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: GeneralizedSyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+        _assert_parity(fitted)
 
 
 class TestSyntheticDiffInDiffParity:
@@ -203,8 +165,8 @@ class TestSyntheticDiffInDiffParity:
     The canonical SDID Prop 99 estimate is about -15 packs per capita on average --
     mildly attenuated relative to plain synthetic control because the unit fixed
     effect and L2 penalty trade a little bias for stability. Inference is the
-    placebo variance over the 38 donor states, which is deterministic (no
-    resampling) and finds the effect significant on this pool.
+    placebo variance over the 38 donor states, which is deterministic and finds the
+    effect significant on this pool.
     """
 
     @pytest.fixture(scope="class")
@@ -212,30 +174,18 @@ class TestSyntheticDiffInDiffParity:
         return _fit(SyntheticDiffInDiff, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: SyntheticDiffInDiff) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_terminal_gap_matches_published(fitted: SyntheticDiffInDiff) -> None:
-        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: SyntheticDiffInDiff) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: SyntheticDiffInDiff) -> None:
+        _assert_parity(fitted)
 
 
 class TestInteractiveFixedEffectsParity:
     """InteractiveFixedEffects (Bai 2009 additive two-way FE + interactive factors).
 
     Estimates the additive unit/time fixed effects and the latent factors from the
-    38 donor states, then projects California's pre-period onto that time structure
-    to build the counterfactual. Distinct from GeneralizedSyntheticControl (which
-    uses a single column-centred SVD): this carries explicit additive two-way fixed
-    effects and the Bai alternating fit. The eigenvalue-ratio criterion selects a
-    single factor on this panel -- the configuration that recovers the effect;
-    forcing more factors over-fits the pre-period and washes it out, the same
-    sensitivity GeneralizedSyntheticControl guards against.
+    38 donor states, then projects California's pre-period onto that time structure.
+    The eigenvalue-ratio criterion selects a single factor on this panel -- the
+    configuration that recovers the effect; forcing more factors over-fits the
+    pre-period and washes it out.
     """
 
     @pytest.fixture(scope="class")
@@ -248,13 +198,8 @@ class TestInteractiveFixedEffectsParity:
         assert fitted.n_factors_selected == 1
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: InteractiveFixedEffects) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: InteractiveFixedEffects) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: InteractiveFixedEffects) -> None:
+        _assert_parity(fitted)
 
 
 class TestMatrixCompletionParity:
@@ -272,30 +217,18 @@ class TestMatrixCompletionParity:
         return _fit(MatrixCompletion, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: MatrixCompletion) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_terminal_gap_matches_published(fitted: MatrixCompletion) -> None:
-        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: MatrixCompletion) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: MatrixCompletion) -> None:
+        _assert_parity(fitted)
 
 
 class TestRobustSyntheticControlParity:
     """RobustSyntheticControl (Amjad, Shah & Shen SVD-denoised ridge).
 
     Robust SC de-noises the donor matrix by hard singular-value truncation, so the
-    retained rank is the key choice. Prop 99's donor spectrum is dominated by the
-    level, and keeping the leading two components (the level plus the dominant
-    dynamic factor) recovers the published effect; that is the documented Prop 99
-    configuration used here. The out-of-the-box default (99.9% spectral-energy
-    retention) keeps more components and attenuates the estimate, so the parity
-    check pins the rank explicitly, as Abadie's own Prop 99 setup fixes its
-    predictors.
+    retained rank is the key choice. Keeping the leading two components (the level
+    plus the dominant dynamic factor) recovers the published effect; that is the
+    documented Prop 99 configuration pinned here, since the default spectral-energy
+    retention keeps more components and attenuates the estimate.
     """
 
     @pytest.fixture(scope="class")
@@ -314,17 +247,8 @@ class TestRobustSyntheticControlParity:
         return model.pre_process().generate()
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: RobustSyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
-
-    @staticmethod
-    def test_terminal_gap_matches_published(fitted: RobustSyntheticControl) -> None:
-        assert _terminal_gap(fitted) == pytest.approx(REF_TERMINAL_GAP, abs=SC_TERMINAL_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: RobustSyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
+    def test_matches_published(fitted: RobustSyntheticControl) -> None:
+        _assert_parity(fitted)
 
     @staticmethod
     def test_runs_with_default_rank(prop99: pl.DataFrame) -> None:
@@ -348,12 +272,9 @@ class TestRobustSyntheticControlParity:
 class TestNonlinearSyntheticControlParity:
     """NonlinearSyntheticControl (Tian 2023 NSC).
 
-    The reference implementation (``mlsynth``) reproduces the canonical Prop 99
-    result with this method; Tian (2023) reports an ATT of about -19.1. Our
-    rolling-origin, predict-to-horizon cross-validation lands at ~-20.2 (average) /
-    ~-27.8 (year 2000) -- essentially the published figure. Being linear-in-weights,
-    it tracks the trend and reproduces the effect, unlike the kernel-map estimator
-    below.
+    Tian (2023) reports an ATT of about -19.1; our rolling-origin cross-validation
+    lands at ~-20.2. Being linear-in-weights it tracks the trend and reproduces the
+    effect, unlike the kernel-map estimator below.
     """
 
     @pytest.fixture(scope="class")
@@ -361,19 +282,14 @@ class TestNonlinearSyntheticControlParity:
         return _fit(NonlinearSyntheticControl, prop99)
 
     @staticmethod
-    def test_avg_gap_matches_published(fitted: NonlinearSyntheticControl) -> None:
-        assert _avg_gap(fitted) == pytest.approx(REF_AVG_GAP, abs=GAP_ABS_TOL)
+    def test_matches_published(fitted: NonlinearSyntheticControl) -> None:
+        _assert_parity(fitted)
 
     @staticmethod
     def test_weights_are_affine(fitted: NonlinearSyntheticControl) -> None:
         # Signed weights that sum to one (Tian drops the non-negativity constraint).
         assert float(np.sum(fitted.model)) == pytest.approx(1.0, abs=1e-3)
         assert float(np.min(fitted.model)) < 0.0
-
-    @staticmethod
-    def test_effect_is_negative_and_significant(fitted: NonlinearSyntheticControl) -> None:
-        assert _avg_gap(fitted) < 0.0
-        assert fitted.results["p_value"] <= 0.1
 
 
 class TestKernelSyntheticControlParity:

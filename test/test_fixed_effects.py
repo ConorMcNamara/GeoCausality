@@ -43,22 +43,13 @@ class TestFixedEffects:
         assert model.results["incrementality_ci_upper"] == pytest.approx(model.results["lift_ci_upper"] * scale)
 
     @staticmethod
-    def test_confidence_interval_brackets_estimate(effect_panel) -> None:
-        results = _fit(effect_panel).results
-        assert results["lift_ci_lower"] <= results["lift"] <= results["lift_ci_upper"]
-        assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_strong_effect_is_significant(effect_panel) -> None:
-        results = _fit(effect_panel).results
-        assert results["p_value"] < 0.05
-        assert results["incrementality_ci_lower"] > 0.0
-
-    @staticmethod
-    def test_effect_more_significant_than_null(effect_panel, null_panel) -> None:
-        p_effect = _fit(effect_panel).results["p_value"]
+    def test_effect_vs_null_significance(effect_panel, null_panel) -> None:
+        # A clear effect is significant with a positive interval; the null is not.
+        effect_results = _fit(effect_panel).results
         p_null = _fit(null_panel).results["p_value"]
-        assert p_effect < p_null
+        assert effect_results["p_value"] < 0.05
+        assert effect_results["incrementality_ci_lower"] > 0.0
+        assert effect_results["p_value"] < p_null
         assert p_null > 0.1
 
     @staticmethod

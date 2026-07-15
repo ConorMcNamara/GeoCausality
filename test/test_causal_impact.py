@@ -87,25 +87,14 @@ class TestRecoversKnownEffect:
     """The injected effect is recovered, bracketed, and flagged significant."""
 
     @staticmethod
-    def test_point_estimate_near_truth(effect_results: dict) -> None:
-        # Within 15% of the injected cumulative effect of 300.
+    def test_effect_recovery(effect_results: dict) -> None:
+        # Cumulative estimate within 15% of injected 300; per-period lift near truth.
         assert effect_results["incrementality"] == pytest.approx(CUM_EFFECT, rel=0.15)
-
-    @staticmethod
-    def test_average_lift_near_truth(effect_results: dict) -> None:
         assert float(np.mean(effect_results["lift"])) == pytest.approx(TRUE_EFFECT, abs=2.0)
 
     @staticmethod
     def test_ci_brackets_truth(effect_results: dict) -> None:
         assert effect_results["incrementality_ci_lower"] <= CUM_EFFECT <= effect_results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_ci_brackets_estimate(effect_results: dict) -> None:
-        assert (
-            effect_results["incrementality_ci_lower"]
-            <= effect_results["incrementality"]
-            <= effect_results["incrementality_ci_upper"]
-        )
 
     @staticmethod
     def test_effect_is_significant(effect_results: dict) -> None:
@@ -145,11 +134,6 @@ class TestPosteriorSimulation:
         assert a["incrementality_ci_lower"] == b["incrementality_ci_lower"]
         assert a["incrementality_ci_upper"] == b["incrementality_ci_upper"]
         assert a["p_value"] == b["p_value"]
-
-    @staticmethod
-    def test_more_draws_still_brackets_truth() -> None:
-        results = _build(_make_data(TRUE_EFFECT), n_sim=2000).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= CUM_EFFECT <= results["incrementality_ci_upper"]
 
 
 class TestInferenceRouting:

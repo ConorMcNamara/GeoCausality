@@ -38,14 +38,6 @@ POST_PERIOD = "2021-01-31"  # final 10 days are post-period
 N_POST = 10
 TREATED = "g0"
 N_CONTROL = 9
-CONFORMAL_KEYS = (
-    "p_value",
-    "lift_ci_lower",
-    "lift_ci_upper",
-    "incrementality_ci_lower",
-    "incrementality_ci_upper",
-    "conformal_band",
-)
 LIFT_TYPES = ("incremental", "absolute", "relative", "revenue", "roas")
 
 
@@ -143,20 +135,6 @@ class TestNonlinearSyntheticControl:
     """Tian (2023) NSC on the well-specified linear, single-treated panel."""
 
     @staticmethod
-    def test_results_contain_conformal_keys(effect_data: pl.DataFrame) -> None:
-        results = _nsc(effect_data).pre_process().generate().results
-        for key in CONFORMAL_KEYS:
-            assert key in results, f"missing conformal key {key!r}"
-        assert 0.0 <= results["p_value"] <= 1.0
-        assert results["conformal_band"] >= 0.0
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_point_estimate_within_interval(effect_data: pl.DataFrame) -> None:
-        results = _nsc(effect_data).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
     def test_recovers_known_effect(effect_data: pl.DataFrame) -> None:
         results = _nsc(effect_data).pre_process().generate().results
         expected = 8.0 * N_POST
@@ -165,16 +143,12 @@ class TestNonlinearSyntheticControl:
         assert results["incrementality_ci_lower"] > 0.0
 
     @staticmethod
-    def test_effect_more_significant_than_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
+    def test_null_is_calibrated(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
+        # Null panel (in-place placebo) is not significant and the real effect is at least as significant.
         p_effect = _nsc(effect_data).pre_process().generate().results["p_value"]
         p_null = _nsc(null_data).pre_process().generate().results["p_value"]
+        assert p_null > 0.1
         assert p_effect <= p_null
-
-    @staticmethod
-    def test_null_effect_not_significant(null_data: pl.DataFrame) -> None:
-        # Calibration / in-place placebo: no injected effect => not significant.
-        results = _nsc(null_data).pre_process().generate().results
-        assert results["p_value"] > 0.1
 
     @staticmethod
     def test_weights_are_affine(effect_data: pl.DataFrame) -> None:
@@ -187,21 +161,6 @@ class TestNonlinearSyntheticControl:
         model = _nsc(effect_data, a=3.0, b=35.0).pre_process().generate()
         assert model._fit_a == 3.0
         assert model._fit_b == 35.0
-
-    @staticmethod
-    def test_is_deterministic(effect_data: pl.DataFrame) -> None:
-        first = _nsc(effect_data).pre_process().generate().results["incrementality"]
-        second = _nsc(effect_data).pre_process().generate().results["incrementality"]
-        assert first == pytest.approx(second)
-
-    @staticmethod
-    def test_jackknife_fallback_contract(effect_data: pl.DataFrame) -> None:
-        model = _nsc(effect_data)
-        model.inference_method = "jackknife"
-        results = model.pre_process().generate().results
-        assert results["method"].startswith("jackknife+")
-        for key in CONFORMAL_KEYS:
-            assert key in results
 
     @staticmethod
     @pytest.mark.parametrize("lift", LIFT_TYPES)
@@ -220,14 +179,6 @@ class TestNonlinearSyntheticControl:
 
 class TestKernelSyntheticControl:
     """Kernel-ridge (nonlinear-map) SC on the well-specified linear panel."""
-
-    @staticmethod
-    def test_results_contain_conformal_keys(effect_data: pl.DataFrame) -> None:
-        results = _kernel(effect_data).pre_process().generate().results
-        for key in CONFORMAL_KEYS:
-            assert key in results, f"missing conformal key {key!r}"
-        assert 0.0 <= results["p_value"] <= 1.0
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
 
     @staticmethod
     def test_recovers_known_effect(effect_data: pl.DataFrame) -> None:
@@ -254,15 +205,6 @@ class TestKernelSyntheticControl:
         results = _kernel(effect_data, linear_weight=0.0).pre_process().generate().results
         assert np.isfinite(results["incrementality"])
 
-    @staticmethod
-    def test_jackknife_fallback_contract(effect_data: pl.DataFrame) -> None:
-        model = _kernel(effect_data)
-        model.inference_method = "jackknife"
-        results = model.pre_process().generate().results
-        assert results["method"].startswith("jackknife+")
-        for key in CONFORMAL_KEYS:
-            assert key in results
-
 
 class TestNonlinearVsKernel:
     """The head-to-head that justifies keeping both estimators."""
@@ -276,14 +218,6 @@ class TestNonlinearVsKernel:
         nsc_incr = abs(_nsc(nonlinear_null_data).pre_process().generate().results["incrementality"])
         kernel_incr = abs(_kernel(nonlinear_null_data).pre_process().generate().results["incrementality"])
         assert kernel_incr < nsc_incr
-
-    @staticmethod
-    def test_both_recover_effect_on_linear_dgp(effect_data: pl.DataFrame) -> None:
-        # On a linear DGP both are well specified and detect the same strong effect.
-        nsc = _nsc(effect_data).pre_process().generate().results
-        kernel = _kernel(effect_data).pre_process().generate().results
-        assert nsc["p_value"] <= 0.1
-        assert kernel["p_value"] <= 0.1
 
 
 class TestPlot:

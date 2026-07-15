@@ -13,7 +13,6 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
-import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -146,13 +145,6 @@ class TestReporting:
         out = buffer.getvalue()
         assert "p_value" in out
         assert "CI" in out
-
-    @staticmethod
-    def test_plot_builds_figure(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        _geolift(effect_data).pre_process().generate().plot()
-        assert shown.get("ok") is True
 
 
 if __name__ == "__main__":

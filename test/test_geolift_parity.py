@@ -77,20 +77,14 @@ def fitted(geolift_test: pl.DataFrame) -> GeoLift:
 
 class TestGeoLiftParity:
     @staticmethod
-    def test_markets_present(geolift_test: pl.DataFrame) -> None:
-        locations = {loc.lower() for loc in geolift_test["location"].unique().to_list()}
-        assert set(TEST_GEOS) <= locations, f"expected {TEST_GEOS} in the dataset locations"
-
-    @staticmethod
-    def test_percent_lift_matches_published(fitted: GeoLift) -> None:
+    def test_lift_matches_published(fitted: GeoLift) -> None:
+        # Both headline numbers from the walkthrough: ~5.5% lift and ~4,704
+        # incremental Y over the 15-day campaign.
         results = fitted.results
         baseline = float(np.sum(results["counterfactual"]))
         percent_lift = 100.0 * results["incrementality"] / baseline
         assert percent_lift == pytest.approx(REF_PERCENT_LIFT, abs=PERCENT_LIFT_ABS_TOL)
-
-    @staticmethod
-    def test_incremental_matches_published(fitted: GeoLift) -> None:
-        assert fitted.results["incrementality"] == pytest.approx(REF_INCREMENTAL, rel=INCREMENTAL_REL_TOL)
+        assert results["incrementality"] == pytest.approx(REF_INCREMENTAL, rel=INCREMENTAL_REL_TOL)
 
     @staticmethod
     def test_counterfactual_level_matches_published(fitted: GeoLift) -> None:

@@ -24,14 +24,6 @@ N_DATES = 40
 PRE_PERIOD = "2021-01-30"  # first 30 days are pre-period
 POST_PERIOD = "2021-01-31"  # final 10 days are post-period
 TEST_GEOS = ("g0", "g1")
-CONFORMAL_KEYS = (
-    "p_value",
-    "lift_ci_lower",
-    "lift_ci_upper",
-    "incrementality_ci_lower",
-    "incrementality_ci_upper",
-    "conformal_band",
-)
 LIFT_TYPES = ("incremental", "absolute", "relative", "revenue", "roas")
 
 
@@ -124,30 +116,13 @@ def null_data() -> pl.DataFrame:
 
 class TestConformalInference:
     @staticmethod
-    def test_results_contain_conformal_keys(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        for key in CONFORMAL_KEYS:
-            assert key in results, f"missing conformal key {key!r}"
-        assert 0.0 <= results["p_value"] <= 1.0
-        assert results["conformal_band"] >= 0.0
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_point_estimate_within_interval(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_strong_effect_is_significant(effect_data: pl.DataFrame) -> None:
+    def test_effect_detected_and_beats_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
+        # Strong effect is significant (p<=0.1, CI>0) and at least as significant as the null panel.
         results = _model(effect_data).pre_process().generate().results
         assert results["p_value"] <= 0.1, "failed to detect a strong effect"
         assert results["incrementality_ci_lower"] > 0.0
-
-    @staticmethod
-    def test_effect_more_significant_than_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
-        p_effect = _model(effect_data).pre_process().generate().results["p_value"]
         p_null = _model(null_data).pre_process().generate().results["p_value"]
-        assert p_effect <= p_null
+        assert results["p_value"] <= p_null
 
     @staticmethod
     @pytest.mark.parametrize("lift", LIFT_TYPES)
@@ -217,7 +192,9 @@ class TestParallelTrendsReduction:
 
 class TestMethods:
     @staticmethod
-    def test_invalid_method_raises(effect_data: pl.DataFrame) -> None:
+    def test_method_param_contract(effect_data: pl.DataFrame) -> None:
+        # Default mode is projection; an unknown method raises.
+        assert _model(effect_data).method == "projection"
         with pytest.raises(ValueError, match="method"):
             _model(effect_data, method="bogus")
 
@@ -230,10 +207,6 @@ class TestMethods:
         results = _model(effect_data, method=method).pre_process().generate().results
         assert results["incrementality"] == pytest.approx(1000.0, rel=0.2)
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_coefficient_defaults_off(effect_data: pl.DataFrame) -> None:
-        assert _model(effect_data).method == "projection"
 
     @staticmethod
     def test_coefficient_mode_uses_treated_in_factors(effect_data: pl.DataFrame) -> None:
