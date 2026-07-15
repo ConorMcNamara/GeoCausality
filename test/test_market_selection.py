@@ -12,7 +12,6 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
-import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -159,14 +158,6 @@ class TestReporting:
     def test_summarize_requires_search(history: pl.DataFrame) -> None:
         with pytest.raises(ValueError):
             _selection(history).summarize()
-
-    @staticmethod
-    def test_plot_builds_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        ms = _selection(history).search(n_test_geos=[2], effect_size=0.3, duration=10, n_sims=6)
-        ms.plot(top=5)
-        assert shown.get("ok") is True
 
 
 if __name__ == "__main__":

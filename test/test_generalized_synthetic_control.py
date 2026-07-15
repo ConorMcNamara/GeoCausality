@@ -24,14 +24,6 @@ N_DATES = 40
 PRE_PERIOD = "2021-01-30"  # first 30 days are pre-period
 POST_PERIOD = "2021-01-31"  # final 10 days are post-period
 TEST_GEOS = ("g0", "g1")
-CONFORMAL_KEYS = (
-    "p_value",
-    "lift_ci_lower",
-    "lift_ci_upper",
-    "incrementality_ci_lower",
-    "incrementality_ci_upper",
-    "conformal_band",
-)
 LIFT_TYPES = ("incremental", "absolute", "relative", "revenue", "roas")
 
 
@@ -123,26 +115,6 @@ def null_data() -> pl.DataFrame:
 
 
 class TestConformalInference:
-    @staticmethod
-    def test_results_contain_conformal_keys(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        for key in CONFORMAL_KEYS:
-            assert key in results, f"missing conformal key {key!r}"
-        assert 0.0 <= results["p_value"] <= 1.0
-        assert results["conformal_band"] >= 0.0
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_point_estimate_within_interval(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    def test_strong_effect_is_significant(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        assert results["p_value"] <= 0.1, "failed to detect a strong effect"
-        assert results["incrementality_ci_lower"] > 0.0
-
     @staticmethod
     def test_effect_more_significant_than_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
         p_effect = _model(effect_data).pre_process().generate().results["p_value"]

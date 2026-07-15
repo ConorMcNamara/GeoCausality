@@ -77,29 +77,21 @@ MODEL_IDS = [c.__name__ for c in MODELS]
 class TestFaithfulJackknife:
     @staticmethod
     @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_short_pre_uses_faithful_jackknife(cls) -> None:
-        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
-        results = _build(cls, df, pre, post).pre_process().generate().results
-        assert results["method"] == "jackknife+", f"{cls.__name__} did not use faithful jackknife+"
-
-    @staticmethod
-    @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_loo_counterfactual_shapes(cls) -> None:
+    def test_short_pre_faithful_jackknife(cls) -> None:
+        # On a short pre-period each estimator's weight hook drives the faithful
+        # refit-based jackknife+: correct method, well-shaped leave-one-out arrays,
+        # and an interval that brackets the estimate. (The mechanism itself is
+        # covered in depth by test_jackknife_fallback.py.)
         df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
         model = _build(cls, df, pre, post).pre_process().generate()
+        results = model.results
+        assert results["method"] == "jackknife+", f"{cls.__name__} did not use faithful jackknife+"
         loo = model._loo_counterfactuals()
         assert loo is not None
         loo_resid, loo_post = loo
         assert loo_resid.shape == (SHORT_PRE,)
         assert loo_post.shape == (SHORT_PRE, SHORT_POST)
         assert np.all(np.isfinite(loo_resid)) and np.all(np.isfinite(loo_post))
-
-    @staticmethod
-    @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_interval_brackets_estimate(cls) -> None:
-        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
-        results = _build(cls, df, pre, post).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
 
     @staticmethod

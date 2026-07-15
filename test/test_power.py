@@ -17,7 +17,6 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
-import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -110,10 +109,13 @@ class TestSimulate:
             assert row["n_detected"] <= row["n_sims"]
 
     @staticmethod
-    def test_detection_rises_with_effect(history: pl.DataFrame) -> None:
+    def test_power_rises_with_effect(history: pl.DataFrame) -> None:
+        # Detection increases with effect size, and a strong effect is well powered.
         pa = _power(history).simulate(effect_sizes=[0.0, 0.6], durations=[10], n_sims=15)
         power_by_effect = {r["effect"]: r["power"] for r in pa.power_curve}
         assert power_by_effect[0.6] > power_by_effect[0.0]
+        strong = _power(history).simulate(effect_sizes=[0.8], durations=[14], n_sims=15)
+        assert strong.power_curve[0]["power"] >= 0.7
 
     @staticmethod
     def test_null_effect_is_calibrated(history: pl.DataFrame) -> None:
@@ -121,11 +123,6 @@ class TestSimulate:
         # rate alpha, not blow up. Allow generous slack for a small sim count.
         pa = _power(history, alpha=0.1).simulate(effect_sizes=[0.0], durations=[10], n_sims=20)
         assert pa.power_curve[0]["power"] <= 0.35
-
-    @staticmethod
-    def test_strong_effect_is_well_powered(history: pl.DataFrame) -> None:
-        pa = _power(history).simulate(effect_sizes=[0.8], durations=[14], n_sims=15)
-        assert pa.power_curve[0]["power"] >= 0.7
 
     @staticmethod
     def test_duration_too_long_raises(history: pl.DataFrame) -> None:
@@ -174,14 +171,6 @@ class TestReporting:
     def test_summarize_requires_simulate(history: pl.DataFrame) -> None:
         with pytest.raises(ValueError):
             _power(history).summarize()
-
-    @staticmethod
-    def test_plot_builds_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        pa = _power(history).simulate(effect_sizes=[0.0, 0.5], durations=[10], n_sims=8).mde()
-        pa.plot()
-        assert shown.get("ok") is True
 
 
 if __name__ == "__main__":

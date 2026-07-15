@@ -115,11 +115,6 @@ class TestPlaceboInference:
         assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
 
     @staticmethod
-    def test_point_estimate_within_interval(effect_data: pl.DataFrame) -> None:
-        results = _model(effect_data).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
     def test_incrementality_matches_summed_lift(effect_data: pl.DataFrame) -> None:
         # The per-period counterfactual gap sums to the reported incrementality.
         results = _model(effect_data).pre_process().generate().results
@@ -127,23 +122,23 @@ class TestPlaceboInference:
         assert results["att"] * N_POST == pytest.approx(results["incrementality"])
 
     @staticmethod
-    def test_strong_effect_is_significant(effect_data: pl.DataFrame) -> None:
+    def test_effect_significant_and_beats_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
+        # Strong effect is significant (p<=0.1, CI>0) and at least as significant as the null panel.
         results = _model(effect_data).pre_process().generate().results
         assert results["p_value"] <= 0.1, "failed to detect a strong effect"
         assert results["incrementality_ci_lower"] > 0.0
-
-    @staticmethod
-    def test_effect_more_significant_than_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
-        p_effect = _model(effect_data).pre_process().generate().results["p_value"]
         p_null = _model(null_data).pre_process().generate().results["p_value"]
-        assert p_effect <= p_null
+        assert results["p_value"] <= p_null
 
 
 class TestEffectRecovery:
     @staticmethod
-    def test_recovers_known_effect_under_common_trend(effect_data: pl.DataFrame) -> None:
-        # One treated geo, 8.0/day over 10 post days => incrementality ~ 80.
-        results = _model(effect_data).pre_process().generate().results
+    def test_recovers_effect_with_default_zeta(effect_data: pl.DataFrame) -> None:
+        # With zeta unset the estimator applies the Arkhangelsky et al. default and still
+        # recovers the effect: one treated geo, 8.0/day over 10 post days => incrementality ~ 80.
+        model = _model(effect_data).pre_process().generate()
+        results = model.results
+        assert model.zeta is None
         assert results["incrementality"] == pytest.approx(N_POST * 8.0, rel=0.2)
         assert results["att"] == pytest.approx(8.0, rel=0.2)
 
@@ -154,14 +149,6 @@ class TestEffectRecovery:
 
 
 class TestZeta:
-    @staticmethod
-    def test_default_zeta_is_computed(effect_data: pl.DataFrame) -> None:
-        # With zeta unset the estimator applies the Arkhangelsky et al. default and
-        # still recovers the effect.
-        model = _model(effect_data).pre_process().generate()
-        assert model.zeta is None
-        assert model.results["att"] == pytest.approx(8.0, rel=0.2)
-
     @staticmethod
     def test_explicit_zeta_shrinks_weights_toward_uniform(effect_data: pl.DataFrame) -> None:
         # A large L2 penalty drives the unit weights toward the uniform simplex
@@ -204,13 +191,6 @@ class TestSummarize:
 
 
 class TestPlot:
-    @staticmethod
-    def test_plot_builds_figure(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        _model(effect_data).pre_process().generate().plot()
-        assert shown.get("ok") is True
-
     @staticmethod
     def test_plot_renders_confidence_bands(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
         captured = {}

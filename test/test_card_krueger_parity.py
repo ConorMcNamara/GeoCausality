@@ -85,21 +85,17 @@ def _state_means(df: pd.DataFrame) -> pd.DataFrame:
     return df.groupby(["state", "date"], as_index=False)["y"].mean().rename(columns={"state": "geo"})
 
 
-class TestCardKruegerData:
-    @staticmethod
-    def test_states_and_waves_present(card_krueger: pd.DataFrame) -> None:
-        assert set(card_krueger["state"].unique()) == {"NJ", "PA"}
-        assert set(card_krueger["date"].dt.strftime("%Y-%m-%d")) == {WAVE1, WAVE2}
-
-    @staticmethod
-    def test_cell_means_match_published(card_krueger: pd.DataFrame) -> None:
-        # Sanity-check that the vendored microdata reproduces Table 3, so a parity
-        # failure below points at the estimator, not at corrupted data.
-        means = card_krueger.copy()
-        means["date"] = means["date"].dt.strftime("%Y-%m-%d")
-        cell = means.groupby(["state", "date"])["y"].mean()
-        for (state, date), expected in REF_CELL_MEANS.items():
-            assert cell[(state, date)] == pytest.approx(expected, abs=CELL_MEAN_ABS_TOL)
+def test_cell_means_match_published(card_krueger: pd.DataFrame) -> None:
+    # Sanity-check that the vendored microdata reproduces Table 3 (states, waves,
+    # and per-cell means), so a parity failure below points at the estimator, not
+    # at corrupted data.
+    assert set(card_krueger["state"].unique()) == {"NJ", "PA"}
+    assert set(card_krueger["date"].dt.strftime("%Y-%m-%d")) == {WAVE1, WAVE2}
+    means = card_krueger.copy()
+    means["date"] = means["date"].dt.strftime("%Y-%m-%d")
+    cell = means.groupby(["state", "date"])["y"].mean()
+    for (state, date), expected in REF_CELL_MEANS.items():
+        assert cell[(state, date)] == pytest.approx(expected, abs=CELL_MEAN_ABS_TOL)
 
 
 class TestFixedEffectsParity:
@@ -121,11 +117,8 @@ class TestFixedEffectsParity:
 
     @staticmethod
     def test_did_matches_published(fitted: FixedEffects) -> None:
+        # The headline finding: employment rose (+2.76 FTE) in NJ relative to PA.
         assert fitted.results["lift"] == pytest.approx(REF_DID, abs=DID_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_positive(fitted: FixedEffects) -> None:
-        # The headline finding: employment rose in NJ relative to PA.
         assert fitted.results["lift"] > 0.0
 
     @staticmethod
@@ -158,12 +151,10 @@ class TestDiffinDiffParity:
 
     @staticmethod
     def test_did_matches_published(fitted: DiffinDiff) -> None:
-        # A saturated 2x2 recovers the published per-restaurant DiD exactly; only
-        # the point estimate is meaningful (no residual df for inference).
+        # A saturated 2x2 recovers the published per-restaurant DiD exactly (and
+        # positive); only the point estimate is meaningful (no residual df for
+        # inference).
         assert fitted.results["lift"] == pytest.approx(REF_DID, abs=DID_ABS_TOL)
-
-    @staticmethod
-    def test_effect_is_positive(fitted: DiffinDiff) -> None:
         assert fitted.results["lift"] > 0.0
 
     @staticmethod

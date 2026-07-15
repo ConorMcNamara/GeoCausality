@@ -87,38 +87,13 @@ def effect_data() -> pl.DataFrame:
 class TestBootstrapAcrossEstimators:
     @staticmethod
     @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_method_is_bootstrap(cls, effect_data: pl.DataFrame) -> None:
-        results = _build(cls, effect_data).pre_process().generate().results
-        assert results["method"] == "bootstrap", f"{cls.__name__} did not use the bootstrap"
-
-    @staticmethod
-    @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_ci_brackets_estimate(cls, effect_data: pl.DataFrame) -> None:
+    def test_bootstrap_path_and_ci(cls, effect_data: pl.DataFrame) -> None:
+        # Each estimator's weight hook drives the parametric bootstrap: the method
+        # activates and its interval brackets the estimate. Reproducibility and the
+        # default "auto" behaviour are covered by test_parametric_bootstrap.py.
         results = _build(cls, effect_data, n_boot=300).pre_process().generate().results
-        assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
+        assert results["method"] == "bootstrap", f"{cls.__name__} did not use the bootstrap"
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
-
-    @staticmethod
-    @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_reproducible(cls, effect_data: pl.DataFrame) -> None:
-        a = _build(cls, effect_data, bootstrap_seed=3).pre_process().generate().results
-        b = _build(cls, effect_data, bootstrap_seed=3).pre_process().generate().results
-        assert a["p_value"] == b["p_value"]
-        assert a["incrementality_ci_lower"] == b["incrementality_ci_lower"]
-
-    @staticmethod
-    @pytest.mark.parametrize("cls", MODELS, ids=MODEL_IDS)
-    def test_default_auto_is_conformal(cls, effect_data: pl.DataFrame) -> None:
-        kwargs = {
-            "treatment_variable": "is_treatment",
-            "pre_period": PRE_PERIOD,
-            "post_period": POST_PERIOD,
-            "y_variable": "y",
-        }
-        if cls is RobustSyntheticControl:
-            kwargs["sv_count"] = 3
-        results = cls(effect_data, **kwargs).pre_process().generate().results
-        assert results["method"] == "conformal"
 
 
 if __name__ == "__main__":
