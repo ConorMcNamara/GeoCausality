@@ -496,7 +496,7 @@ class SyntheticControlV(EconometricEstimator):
         p = x.T @ v @ x
         q = y.T @ v @ x
         res = minimize(
-            fun=lambda a: self._loss_w(a, p, q),
+            fun=lambda a: self._quadratic_loss_w(a, p, q),
             x0=x0,
             bounds=bounds,
             constraints=constraints,
@@ -506,13 +506,13 @@ class SyntheticControlV(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
-        """Calculate the loss function for our model weights matrix.
+    def _quadratic_loss_w(w: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
+        """Calculate the V-weighted quadratic loss for a candidate donor-weight vector.
 
         Parameters
         ----------
-        x : numpy array
-            Our predictors
+        w : numpy array
+            The donor-weight vector being optimised.
         p : numpy array
             x.T * v * x
         q : numpy array
@@ -520,9 +520,9 @@ class SyntheticControlV(EconometricEstimator):
 
         Returns
         -------
-        The loss function for our model weights matrix
+        The V-weighted least-squares loss at ``w``.
         """
-        return float(0.5 * x.T @ p @ x - q.T @ x)
+        return float(0.5 * w.T @ p @ w - q.T @ w)
 
     def _create_v(self, daily_x: np.ndarray, daily_y: np.ndarray) -> "SyntheticControlV":
         """Scale the pre-period predictors and fit the V matrix and donor weights.

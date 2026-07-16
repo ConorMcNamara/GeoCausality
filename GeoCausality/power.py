@@ -35,6 +35,9 @@ from tabulate import tabulate  # type: ignore
 from GeoCausality._base import Estimator
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 
+# Conventional target power for the minimum-detectable-effect search.
+DEFAULT_TARGET_POWER = 0.8
+
 
 class PowerAnalysis:
     """Simulate placebo experiments to estimate power and the Minimum Detectable Effect."""
@@ -293,7 +296,7 @@ class PowerAnalysis:
         self.results = {"power_curve": curve}
         return self
 
-    def mde(self, target_power: float = 0.8) -> "PowerAnalysis":
+    def mde(self, target_power: float = DEFAULT_TARGET_POWER) -> "PowerAnalysis":
         """Compute the Minimum Detectable Effect per duration at a target power.
 
         For each duration the MDE is the smallest effect whose power reaches
@@ -375,7 +378,7 @@ class PowerAnalysis:
         print(tabulate(power_table, headers="keys", tablefmt="grid"))
 
         if self.mde_table is not None:
-            target = self.results.get("target_power", 0.8) if self.results else 0.8
+            target = self.results.get("target_power", DEFAULT_TARGET_POWER) if self.results else DEFAULT_TARGET_POWER
             mde_table = {
                 "Duration": [r["duration"] for r in self.mde_table],
                 f"MDE @ {target:.0%} power": ["n/a" if r["mde"] is None else f"{r['mde']:.3f}" for r in self.mde_table],
@@ -407,7 +410,7 @@ class PowerAnalysis:
                     name=f"{duration} periods",
                 )
             )
-        target = self.results.get("target_power", 0.8) if self.results else 0.8
+        target = self.results.get("target_power", DEFAULT_TARGET_POWER) if self.results else DEFAULT_TARGET_POWER
         fig.add_hline(y=target, line_dash="dash", annotation_text=f"target {target:.0%}")
         unit = "multiplicative" if self.injection == "multiplicative" else "additive"
         fig.update_layout(
