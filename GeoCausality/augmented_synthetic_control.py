@@ -210,20 +210,12 @@ class AugmentedSyntheticControl(EconometricEstimator):
             ),
             eager_only=True,
         )
-        self.results = {
-            "test": self.actual_post[self.y_variable].to_numpy(),
-            "counterfactual": self.prediction_post[self.y_variable].to_numpy(),
-            "lift": self.actual_post[self.y_variable].to_numpy() - self.prediction_post[self.y_variable].to_numpy(),
-        }
-        self.results["incrementality"] = float(np.sum(self.results["lift"]))
-        self.results.update(
-            self._conformal_inference(
-                self.actual_pre[self.y_variable].to_numpy(),
-                self.prediction_pre[self.y_variable].to_numpy(),
-                self.actual_post[self.y_variable].to_numpy(),
-                self.prediction_post[self.y_variable].to_numpy(),
-                q=self.conformal_q,
-            )
+        self.results = self._finalize_counterfactual_results(
+            self.actual_pre,
+            self.prediction_pre,
+            self.actual_post,
+            self.prediction_post,
+            q=self.conformal_q,
         )
         return self
 

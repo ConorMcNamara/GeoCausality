@@ -224,20 +224,12 @@ class MatrixCompletion(EconometricEstimator):
 
         actual_post = treated[n_pre:]
         counterfactual_post = prediction[n_pre:]
-        self.results = {
-            "test": actual_post,
-            "counterfactual": counterfactual_post,
-            "lift": actual_post - counterfactual_post,
-        }
-        self.results["incrementality"] = float(np.sum(self.results["lift"]))
-        self.results.update(
-            self._conformal_inference(
-                treated[:n_pre],
-                prediction[:n_pre],
-                actual_post,
-                counterfactual_post,
-                q=self.conformal_q,
-            )
+        self.results = self._finalize_counterfactual_results(
+            treated[:n_pre],
+            prediction[:n_pre],
+            actual_post,
+            counterfactual_post,
+            q=self.conformal_q,
         )
         return self
 
