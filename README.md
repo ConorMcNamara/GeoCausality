@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/ConorMcNamara/GeoCausality/branch/main/graph/badge.svg)](https://codecov.io/gh/ConorMcNamara/GeoCausality)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across a family of estimators — from simple difference-in-differences to interactive fixed effects and linear, nonlinear, kernel, and matrix-completion synthetic control.
+A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across a family of estimators — from simple difference-in-differences to interactive fixed effects and linear, nonlinear, kernel, matrix-completion, and elastic-net synthetic control.
 
 ---
 
@@ -45,6 +45,7 @@ pip install geocausality
 | `PenalizedSyntheticControl` | `penalized_synthetic_control` | Synthetic control with pairwise penalty (Abadie & L'Hour) |
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
+| `ElasticNetSyntheticControl` | `elastic_net_synthetic_control` | Elastic-net / intercept-shifted synthesis of SC, DiD & regression (Doudchenko & Imbens) |
 | `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects via control-only latent factors (Xu) |
 | `MatrixCompletion` | `matrix_completion` | Nuclear-norm matrix completion of the masked panel / MC-NNM (Athey et al.) |
 | `NonlinearSyntheticControl` | `nonlinear_synthetic_control` | Nonlinear-outcome synthetic control: affine weights + distance-L1 + ridge (Tian 2023) |
@@ -223,6 +224,40 @@ model = synthetic_control.SyntheticControl(
 )
 model.pre_process().generate().summarize(lift="roas")
 ```
+
+### Elastic-Net Synthetic Control
+
+```python
+from GeoCausality import elastic_net_synthetic_control
+
+model = elastic_net_synthetic_control.ElasticNetSyntheticControl(
+    df,
+    test_geos=["geo_A", "geo_B"],
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+    # intercept=True, l1_ratio=0.5, lambda_=None,  # None -> cross-validated
+    # non_negative=False,                          # drop the simplex constraints
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()
+```
+
+`ElasticNetSyntheticControl` (Doudchenko & Imbens, 2016) is the *synthesis*
+estimator: it unifies synthetic control, difference-in-differences, and
+constrained regression as one penalized regression, `mu + donor_matrix @ w`, fit
+on the pre-period by **elastic net**. It relaxes classic synthetic control's three
+restrictions via explicit switches — an `intercept` (a level shift, so the
+synthetic unit can track a treated unit outside the donor convex hull), dropping
+the `sum_to_one` / `non_negative` weight constraints, and elastic-net
+regularisation (`l1_ratio` mixes ridge vs. lasso, `lambda_` is cross-validated by
+default). Special cases recover the rest of the family: classic SC
+(`intercept=False, non_negative=True, sum_to_one=True, lambda_=0`), a
+ridge-augmented fit (`l1_ratio=0`), matched-market OLS (`lambda_=0`), and DiD. The
+`sum_to_one` constrained regime is not yet implemented (it raises
+`NotImplementedError`); for a dedicated pure-ridge fit prefer
+`AugmentedSyntheticControl`.
 
 ### Matrix Completion
 
@@ -415,7 +450,7 @@ method:
 | Estimator | `plot()` shows |
 |---|---|
 | `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `KernelSyntheticControl`, `SyntheticDiffInDiff`), `CausalImpact`, and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `KernelSyntheticControl`, `SyntheticDiffInDiff`), `CausalImpact`, and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
 | `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
 | `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
 
@@ -473,7 +508,7 @@ skips cleanly if its vendored dataset is absent.
 |---|---|---|---|---|
 | Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
 | Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
-| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −20.0 / −20.2 / −26.2 / −15.6 |
+| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −15.2 / −23.5 / −20.7 / −20.0 / −20.2 / −26.2 / −15.6 |
 
 `KernelSyntheticControl` is validated against both panels for sign and
 significance rather than magnitude: as a nonlinear *map* of the donor outcomes it
@@ -512,6 +547,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
 - Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
 - Athey, Susan, Mohsen Bayati, Nikolay Doudchenko, Guido Imbens, and Khashayar Khosravi. "Matrix completion methods for causal panel data models." *Journal of the American Statistical Association* 116.536 (2021): 1716–1730. [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1891924)
+- Doudchenko, Nikolay, and Guido W. Imbens. "Balancing, Regression, Difference-in-Differences and Synthetic Control Methods: A Synthesis." *NBER Working Paper No. 22791* (2016). [Link](https://www.nber.org/papers/w22791)
 - Tian, Wei. "The Synthetic Control Method with Nonlinear Outcomes." *arXiv preprint arXiv:2306.01967* (2023). [Link](https://arxiv.org/abs/2306.01967)
 - Barber, Rina Foygel, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. "Predictive inference with the jackknife+." *Annals of Statistics* 49.1 (2021): 486–507. [Link](https://projecteuclid.org/journals/annals-of-statistics/volume-49/issue-1/Predictive-inference-with-the-jackknife/10.1214/20-AOS1965.full)
 - Ahn, Seung C., and Alex R. Horenstein. "Eigenvalue ratio test for the number of factors." *Econometrica* 81.3 (2013): 1203–1227. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA8968)
