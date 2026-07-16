@@ -8,6 +8,10 @@ from narwhals.typing import IntoDataFrame
 
 from GeoCausality._base import EconometricEstimator
 
+# Floor added to the previous iterate's Frobenius norm so the relative
+# convergence check never divides by zero (e.g. on an all-zero panel).
+_CONVERGENCE_NORM_EPS = 1e-12
+
 
 class MatrixCompletion(EconometricEstimator):
     """Run matrix-completion (nuclear-norm) synthetic control for our geo-test.
@@ -317,7 +321,7 @@ class MatrixCompletion(EconometricEstimator):
             low_rank = self._soft_impute(obs - np.where(mask, fe, 0.0), mask, lambda_, low_rank)
             fitted = low_rank + fe
             if prev is not None:
-                denom = np.linalg.norm(prev) + 1e-12
+                denom = np.linalg.norm(prev) + _CONVERGENCE_NORM_EPS
                 if np.linalg.norm(fitted - prev) / denom < self.tol:
                     break
             prev = fitted
@@ -350,7 +354,7 @@ class MatrixCompletion(EconometricEstimator):
             s_thresh = np.maximum(s - lambda_, 0.0)
             low_rank = (u * s_thresh) @ vt
             if prev is not None:
-                denom = np.linalg.norm(prev) + 1e-12
+                denom = np.linalg.norm(prev) + _CONVERGENCE_NORM_EPS
                 if np.linalg.norm(low_rank - prev) / denom < self.tol:
                     break
             prev = low_rank
