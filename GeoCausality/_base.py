@@ -334,6 +334,53 @@ class EconometricEstimator(Estimator, ABC):
         roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
         return roas_lift, roas_ci_lower, roas_ci_upper
 
+    def _finalize_counterfactual_results(
+        self,
+        actual_pre: Any,
+        prediction_pre: Any,
+        actual_post: Any,
+        prediction_post: Any,
+        q: float = 1.0,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        """Assemble the shared counterfactual ``results`` dict with conformal inference.
+
+        Every synthetic-control style ``generate`` ends the same way: normalise the
+        four actual/counterfactual series to arrays, record the ``test`` /
+        ``counterfactual`` / ``lift`` / ``incrementality`` fields, then merge the
+        conformal p-value, confidence intervals and prediction band. This builds
+        that dict once. Estimators with extra fields (e.g. ``n_factors``, ``att``)
+        pass them as keyword arguments in ``extra``.
+
+        Parameters
+        ----------
+        actual_pre, prediction_pre : numpy array or narwhals frame
+            Observed and counterfactual values over the pre-period.
+        actual_post, prediction_post : numpy array or narwhals frame
+            Observed and counterfactual values over the post-period.
+        q : float, default=1.0
+            The exponent of the moving-block test statistic.
+        **extra : Any
+            Estimator-specific fields to add to the results dict.
+
+        Returns
+        -------
+        The populated ``results`` dictionary.
+        """
+        actual_pre = self._counterfactual_series(actual_pre)
+        prediction_pre = self._counterfactual_series(prediction_pre)
+        actual_post = self._counterfactual_series(actual_post)
+        prediction_post = self._counterfactual_series(prediction_post)
+        results: dict[str, Any] = {
+            "test": actual_post,
+            "counterfactual": prediction_post,
+            "lift": actual_post - prediction_post,
+            **extra,
+        }
+        results["incrementality"] = float(np.sum(results["lift"]))
+        results.update(self._conformal_inference(actual_pre, prediction_pre, actual_post, prediction_post, q=q))
+        return results
+
     # ------------------------------------------------------------------
     # Conformal inference
     #
