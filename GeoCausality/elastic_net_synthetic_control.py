@@ -343,7 +343,7 @@ class ElasticNetSyntheticControl(EconometricEstimator):
             Treated pre-period series.
         n_alphas : int, default=100
             Number of penalties on the path.
-        ratio : float, default=1e-4
+        ratio : float, default=1e-3
             Smallest penalty as a fraction of ``alpha_max``.
 
         Returns

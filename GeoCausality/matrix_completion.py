@@ -4,7 +4,6 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import polars as pl
 from narwhals.typing import IntoDataFrame
 
 from GeoCausality._base import EconometricEstimator
@@ -218,10 +217,10 @@ class MatrixCompletion(EconometricEstimator):
 
         pre_dates = date_list[:n_pre]
         post_dates = date_list[n_pre:]
-        self.actual_pre = self._frame(pre_dates, treated[:n_pre])
-        self.actual_post = self._frame(post_dates, treated[n_pre:])
-        self.prediction_pre = self._frame(pre_dates, prediction[:n_pre])
-        self.prediction_post = self._frame(post_dates, prediction[n_pre:])
+        self.actual_pre = self._series_frame(pre_dates, treated[:n_pre])
+        self.actual_post = self._series_frame(post_dates, treated[n_pre:])
+        self.prediction_pre = self._series_frame(pre_dates, prediction[:n_pre])
+        self.prediction_post = self._series_frame(post_dates, prediction[n_pre:])
 
         actual_post = treated[n_pre:]
         counterfactual_post = prediction[n_pre:]
@@ -241,13 +240,6 @@ class MatrixCompletion(EconometricEstimator):
             )
         )
         return self
-
-    def _frame(self, dates: list[Any], values: np.ndarray) -> nw.DataFrame:
-        """Wrap a date axis and value array as a narwhals frame for plotting/inference."""
-        return nw.from_native(
-            pl.DataFrame({self.date_variable: dates, self.y_variable: np.asarray(values, dtype=float)}),
-            eager_only=True,
-        )
 
     def _solve(self, panel: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Complete the masked panel via MC-NNM and return the fitted matrix.

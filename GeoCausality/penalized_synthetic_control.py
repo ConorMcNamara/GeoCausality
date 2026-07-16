@@ -163,7 +163,7 @@ class PenalizedSyntheticControl(EconometricEstimator):
         # Fit the penalized weights against the full pre-period trajectory (not a
         # single pre-period mean), so the synthetic control tracks the treated
         # unit's path the way the unpenalized estimator does.
-        self.model = self._create_model(self.actual_pre[self.y_variable].to_numpy(), control_pre_mat)
+        self.model = self._create_model(control_pre_mat, self.actual_pre[self.y_variable].to_numpy())
 
         prediction_pre_arr = control_pre_mat @ self.model
         prediction_post_arr = control_post_mat @ self.model
@@ -219,9 +219,9 @@ class PenalizedSyntheticControl(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        return x_eval @ self._create_model(y_train, x_train)
+        return x_eval @ self._create_model(x_train, y_train)
 
-    def _create_model(self, y: np.ndarray, x: np.ndarray) -> np.ndarray:
+    def _create_model(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Fit the penalized synthetic-control weights over the pre-period.
 
         Minimises the Abadie & L'Hour (2021) penalized objective
@@ -238,10 +238,10 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        y : numpy array, shape (n_pre,)
-            The treated unit's pre-period series.
         x : numpy array, shape (n_pre, n_donors)
             The donor pre-period matrix (rows = dates, cols = donor geos).
+        y : numpy array, shape (n_pre,)
+            The treated unit's pre-period series.
 
         Returns
         -------

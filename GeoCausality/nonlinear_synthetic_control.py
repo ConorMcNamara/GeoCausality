@@ -222,7 +222,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
         else:
             self._fit_a, self._fit_b = self._select_penalties(self._jk_y_pre, control_pre_mat)
 
-        self.model = self._create_model(self._jk_y_pre, control_pre_mat)
+        self.model = self._create_model(control_pre_mat, self._jk_y_pre)
         prediction_pre_arr = control_pre_mat @ self.model
         prediction_post_arr = control_post_mat @ self.model
 
@@ -261,7 +261,7 @@ class NonlinearSyntheticControl(EconometricEstimator):
         )
         return self
 
-    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray:
         """Refit the NSC weights on a pre-period subset and predict.
 
         The penalties ``(self._fit_a, self._fit_b)`` are held at their full-fit
@@ -281,17 +281,17 @@ class NonlinearSyntheticControl(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        return x_eval @ self._create_model(y_train, x_train)
+        return x_eval @ self._create_model(x_train, y_train)
 
-    def _create_model(self, y: np.ndarray, x: np.ndarray) -> np.ndarray:
+    def _create_model(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Solve the Tian (2023) NSC weights over the pre-period.
 
         Parameters
         ----------
-        y : numpy array, shape (n_pre,)
-            The treated unit's pre-period trajectory (``z_1``).
         x : numpy array, shape (n_pre, n_donors)
             The donor pre-period matrix (rows = dates, cols = donor geos).
+        y : numpy array, shape (n_pre,)
+            The treated unit's pre-period trajectory (``z_1``).
 
         Returns
         -------

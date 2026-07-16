@@ -5,7 +5,6 @@ from datetime import date as date_cls
 import narwhals as nw
 import numpy as np
 import plotly.graph_objects as go
-import polars as pl
 from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 
@@ -435,25 +434,6 @@ class InteractiveFixedEffects(EconometricEstimator):
         unit_effect = w.mean(axis=0) - grand  # N
         means = grand + time_effect[:, None] + unit_effect[None, :]
         return w - means, time_effect
-
-    def _series_frame(self, dates: list, values: np.ndarray) -> nw.DataFrame:
-        """Wrap a date axis and value array into a narwhals frame.
-
-        Parameters
-        ----------
-        dates : list
-            The date axis.
-        values : numpy array
-            The values aligned to ``dates``.
-
-        Returns
-        -------
-        A narwhals data frame with the date and outcome columns.
-        """
-        return nw.from_native(
-            pl.DataFrame({self.date_variable: dates, self.y_variable: values}),
-            eager_only=True,
-        )
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.

@@ -60,8 +60,8 @@ class AugmentedSyntheticControl(EconometricEstimator):
         spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
-        lambda_ : float, default=0.1
-            Ridge parameter to use. If not specified, then it is calculated through cross-validation
+        lambda_ : float, optional
+            Ridge parameter to use. When ``None`` (default) it is calculated through cross-validation.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).
@@ -347,10 +347,10 @@ class AugmentedSyntheticControl(EconometricEstimator):
 
         Parameters
         ----------
-        X : pandas DataFrame
-            A dataframe containing the values of our training data
+        X : numpy array
+            The pre-period donor matrix used to scale the penalty path.
         lambda_min_ratio : float, default=1e-08
-            The scaling factor
+            The smallest lambda as a fraction of the largest on the path.
         n_lambda : int, default=20
             The number of lambdas we wish to return
 

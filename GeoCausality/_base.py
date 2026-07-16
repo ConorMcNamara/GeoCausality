@@ -8,6 +8,7 @@ from typing import Any
 import narwhals as nw
 import numpy as np
 import plotly.graph_objects as go
+import polars as pl
 from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 from tabulate import tabulate  # type: ignore
@@ -1187,6 +1188,25 @@ class EconometricEstimator(Estimator, ABC):
         if hasattr(series, "columns"):
             return series[self.y_variable].to_numpy()
         return np.asarray(series)
+
+    def _series_frame(self, dates: list[Any], values: np.ndarray) -> nw.DataFrame:
+        """Wrap a date axis and value array into a narwhals frame.
+
+        Parameters
+        ----------
+        dates : list
+            The date axis.
+        values : numpy array
+            The values aligned to ``dates``.
+
+        Returns
+        -------
+        A narwhals data frame with the date and outcome columns.
+        """
+        return nw.from_native(
+            pl.DataFrame({self.date_variable: dates, self.y_variable: np.asarray(values, dtype=float)}),
+            eager_only=True,
+        )
 
     def plot(self) -> None:
         """Plot the actual series, counterfactual, and pointwise and cumulative differences.
