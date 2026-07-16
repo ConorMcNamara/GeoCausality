@@ -931,6 +931,69 @@ class EconometricEstimator(Estimator, ABC):
         return lower / t1, upper / t1, band, p_value
 
     # ------------------------------------------------------------------
+    # Shared factor-model helpers
+    #
+    # The factor-based estimators (``GeneralizedSyntheticControl`` and
+    # ``InteractiveFixedEffects``) both solve least squares against a fitted
+    # factor design and both pick the factor count from the control panel's
+    # spectrum, so those two operations live here rather than being duplicated.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ols(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Least-squares solution, robust to rank deficiency.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n, p)
+            Design matrix.
+        y : numpy array, shape (n,)
+            Target vector.
+
+        Returns
+        -------
+        The coefficient vector of shape (p,).
+        """
+        beta, *_ = np.linalg.lstsq(x, y, rcond=None)
+        return beta
+
+    @staticmethod
+    def _eigenvalue_ratio_factors(singular_values: np.ndarray, max_r: int) -> int:
+        """Choose the factor count by the eigenvalue-ratio criterion.
+
+        Selects the number of latent factors from the control panel's own spectrum
+        (Ahn & Horenstein, 2013): with eigenvalues ``mu_k`` (the squared singular
+        values of the centred control matrix in descending order), the estimated
+        factor count is the ``k`` in ``1..max_r`` that maximises the adjacent
+        ratio ``mu_k / mu_{k+1}``. A genuine factor leaves a large gap before the
+        noise eigenvalues, so the ratio spikes at the true count.
+
+        This deliberately replaces a treated-pre-period cross-validation: minimising
+        held-out *treated* error rewards ever-richer factor subspaces that fit the
+        pre-period but overfit the counterfactual (they reconstruct the treated
+        unit's post-period and wash out the effect). The factor *count* is a
+        property of the donor panel's covariance, so we estimate it there instead.
+
+        Parameters
+        ----------
+        singular_values : numpy array
+            Singular values of the centred control matrix, descending.
+        max_r : int
+            The largest factor count to consider.
+
+        Returns
+        -------
+        The selected factor count, in ``0..max_r``.
+        """
+        if max_r < 1:
+            return 0
+        eig = np.asarray(singular_values, dtype=float)[: max_r + 1] ** 2
+        if eig.shape[0] < 2:
+            return min(1, max_r)
+        denom = np.where(eig[1:] <= 0.0, np.finfo(float).tiny, eig[1:])
+        ratios = eig[:-1] / denom  # ratios[k-1] = mu_k / mu_{k+1} for k = 1..len
+        return int(np.argmax(ratios)) + 1
+
+    # ------------------------------------------------------------------
     # Shared counterfactual plot
     #
     # Every synthetic-control style estimator draws the same three panels
