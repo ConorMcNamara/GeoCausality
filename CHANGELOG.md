@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-16
+
+Adds the `ElasticNetSyntheticControl` estimator (elastic-net / intercept-shifted
+synthetic control — the Doudchenko-Imbens synthesis).
+
+### Added
+
+- **`ElasticNetSyntheticControl`** (`elastic_net_synthetic_control`) — the synthesis
+  estimator of Doudchenko & Imbens (2016), which unifies synthetic control,
+  difference-in-differences and constrained regression as one penalized
+  regression. The counterfactual is `mu + donor_matrix @ w`, fit on the pre-period
+  by elastic net, relaxing classic synthetic control's three restrictions via
+  explicit switches: an `intercept` (level shift), dropping the `sum_to_one` /
+  `non_negative` weight constraints, and elastic-net regularisation (`l1_ratio`,
+  `lambda_`, cross-validated by default). This MVP implements the unconstrained
+  regime (the Doudchenko-Imbens default) on scikit-learn's elastic net; the
+  sum-to-one constrained regime raises `NotImplementedError` pending a constrained
+  solver. Because it produces donor weights, it supports the full shared inference
+  stack — conformal, faithful jackknife+, and parametric bootstrap. Special cases
+  reproduce classic SC, ridge-augmented SC, matched-market OLS, and DiD.
+
 ## [0.12.1] - 2026-07-15
 
 ### Changed

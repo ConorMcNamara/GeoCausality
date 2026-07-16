@@ -29,6 +29,7 @@ import polars as pl
 import pytest
 
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
+from GeoCausality.elastic_net_synthetic_control import ElasticNetSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 from GeoCausality.interactive_fixed_effects import InteractiveFixedEffects
 from GeoCausality.kernel_synthetic_control import KernelSyntheticControl
@@ -134,6 +135,23 @@ class TestAugmentedSyntheticControlParity:
 
     @staticmethod
     def test_matches_published(fitted: AugmentedSyntheticControl) -> None:
+        _assert_parity(fitted)
+
+
+class TestElasticNetSyntheticControlParity:
+    """ElasticNetSyntheticControl (2016 synthesis: elastic-net / intercept-shifted SC).
+
+    The unconstrained elastic-net regime with an intercept lands in the published
+    Prop 99 band (average gap ~-15, mildly attenuated by the elastic-net
+    shrinkage), negative and significant.
+    """
+
+    @pytest.fixture(scope="class")
+    def fitted(self, prop99: pl.DataFrame) -> ElasticNetSyntheticControl:
+        return _fit(ElasticNetSyntheticControl, prop99)
+
+    @staticmethod
+    def test_matches_published(fitted: ElasticNetSyntheticControl) -> None:
         _assert_parity(fitted)
 
 

@@ -32,6 +32,9 @@ Estimators
 .. automodule:: GeoCausality.augmented_synthetic_control
    :members:
 
+.. automodule:: GeoCausality.elastic_net_synthetic_control
+   :members:
+
 .. automodule:: GeoCausality.generalized_synthetic_control
    :members:
 
