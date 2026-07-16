@@ -248,22 +248,14 @@ class InteractiveFixedEffects(EconometricEstimator):
         n_post = len(post_dates)
         # Per treated-cell average treatment effect on the treated.
         self.att = float(np.sum(lift) / (n_treated * n_post)) if n_treated * n_post > 0 else 0.0
-        self.results = {
-            "test": self.actual_post[self.y_variable].to_numpy(),
-            "counterfactual": self.prediction_post[self.y_variable].to_numpy(),
-            "lift": lift,
-            "att": self.att,
-            "n_factors": r,
-        }
-        self.results["incrementality"] = float(np.sum(self.results["lift"]))
-        self.results.update(
-            self._conformal_inference(
-                actual[:n_pre],
-                predicted[:n_pre],
-                actual[n_pre:],
-                predicted[n_pre:],
-                q=self.conformal_q,
-            )
+        self.results = self._finalize_counterfactual_results(
+            actual[:n_pre],
+            predicted[:n_pre],
+            actual[n_pre:],
+            predicted[n_pre:],
+            q=self.conformal_q,
+            att=self.att,
+            n_factors=r,
         )
         return self
 
