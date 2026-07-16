@@ -155,7 +155,7 @@ class SyntheticControl(EconometricEstimator):
         self.actual_pre = self.synthetic_control_df[self.y_variable].to_numpy()
         test_x = self.synthetic_test_df.drop([self.date_variable, self.y_variable])
         self.actual_post = self.synthetic_test_df[self.y_variable].to_numpy()
-        self.model = self._create_model(self.actual_pre, train_x.to_numpy())
+        self.model = self._create_model(train_x.to_numpy(), self.actual_pre)
         self.prediction_pre = train_x.to_numpy() @ self.model
         self.prediction_post = test_x.to_numpy() @ self.model
         # Cache the donor matrices for the shared faithful jackknife+ loop.
@@ -180,7 +180,7 @@ class SyntheticControl(EconometricEstimator):
         return self
 
     @staticmethod
-    def loss_square(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def loss_square(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Loss function being the sum of squared distances.
 
         Parameters
@@ -194,12 +194,12 @@ class SyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        An array minimizing the squared distance between x and y with our weights applied
+        The squared distance between x and y with our weights applied.
         """
-        return (y - x @ w).T @ (y - x @ w)
+        return float((y - x @ w).T @ (y - x @ w))
 
     @staticmethod
-    def loss_root(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def loss_root(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Loss function being the root of the sum of squared distances.
 
         Parameters
@@ -213,19 +213,19 @@ class SyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        An array minimizing the root of the squared distance between x and y with our weights applied
+        The root of the squared distance between x and y with our weights applied.
         """
-        return np.sqrt((y - x @ w).T @ (y - x @ w))
+        return float(np.sqrt((y - x @ w).T @ (y - x @ w)))
 
-    def _create_model(self, y: Any, x: Any) -> np.ndarray:
+    def _create_model(self, x: Any, y: Any) -> np.ndarray:
         """Create our OLS model for synthetic control, constraining the weights to sum to 1.
 
         Parameters
         ----------
-        y : numpy array
-            An array containing the values we are trying to predict
         x : numpy array
             A multidimensional array containing the geos in our control group
+        y : numpy array
+            An array containing the values we are trying to predict
 
         Returns
         -------
@@ -270,7 +270,7 @@ class SyntheticControl(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        return x_eval @ self._create_model(y_train, x_train)
+        return x_eval @ self._create_model(x_train, y_train)
 
 
 class SyntheticControlV(EconometricEstimator):
@@ -506,7 +506,7 @@ class SyntheticControlV(EconometricEstimator):
         return weights
 
     @staticmethod
-    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
+    def _loss_w(x: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
         """Calculate the loss function for our model weights matrix.
 
         Parameters
@@ -522,7 +522,7 @@ class SyntheticControlV(EconometricEstimator):
         -------
         The loss function for our model weights matrix
         """
-        return 0.5 * x.T @ p @ x - q.T @ x
+        return float(0.5 * x.T @ p @ x - q.T @ x)
 
     def _create_v(self, daily_x: np.ndarray, daily_y: np.ndarray) -> "SyntheticControlV":
         """Scale the pre-period predictors and fit the V matrix and donor weights.
@@ -647,7 +647,7 @@ class SyntheticControlV(EconometricEstimator):
         x1_pred: np.ndarray,
         z0: np.ndarray,
         z1: np.ndarray,
-    ) -> np.ndarray:
+    ) -> float:
         """Score a candidate V by the pre-period outcome fit of its implied weights.
 
         Parameters
@@ -675,7 +675,7 @@ class SyntheticControlV(EconometricEstimator):
         return loss_V
 
     @staticmethod
-    def calc_loss_v(W: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def calc_loss_v(W: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
         """Calculate the V loss.
 
         Parameters
@@ -695,4 +695,4 @@ class SyntheticControlV(EconometricEstimator):
         V loss.
         """
         loss_V = (y - x @ W).T @ (y - x @ W) / len(x)
-        return loss_V
+        return float(loss_V)
