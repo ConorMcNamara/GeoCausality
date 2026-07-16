@@ -275,7 +275,7 @@ class EconometricEstimator(Estimator, ABC):
                 "Variant": [variant],
                 "Baseline": [baseline],
                 "Metric": [self.y_variable],
-                "Lift Type ": ["Incremental"],
+                "Lift Type": ["Incremental"],
                 "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
                 f"{ci_alpha} Lower CI": [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""],
                 f"{ci_alpha} Upper CI": [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""],
@@ -295,7 +295,7 @@ class EconometricEstimator(Estimator, ABC):
                 "Variant": [f"""${round(variant * self.msrp, 2):,}"""],
                 "Baseline": [f"""${round(baseline * self.msrp, 2):,}"""],
                 "Metric": ["Revenue"],
-                "Lift Type ": ["Incremental"],
+                "Lift Type": ["Incremental"],
                 "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
                 f"{ci_alpha} Lower CI": [f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""],
                 f"{ci_alpha} Upper CI": [f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""],
@@ -1103,6 +1103,59 @@ class EconometricEstimator(Estimator, ABC):
                 col=1,
             )
         total_fig.show()
+
+    def _counterfactual_series(self, series: Any) -> np.ndarray:
+        """Coerce a cached actual/counterfactual series to a flat numpy array.
+
+        Synthetic-control style estimators cache these series either as numpy
+        arrays (``SyntheticControl``, ``CausalImpact``, ``SyntheticDiffInDiff``)
+        or as narwhals frames with a single outcome column (the V-weighted,
+        penalised and factor estimators). This returns a 1-D array for either.
+
+        Parameters
+        ----------
+        series : numpy array or narwhals frame
+            A cached actual or counterfactual series.
+
+        Returns
+        -------
+        The series as a flat numpy array.
+        """
+        if hasattr(series, "columns"):
+            return series[self.y_variable].to_numpy()
+        return np.asarray(series)
+
+    def plot(self) -> None:
+        """Plot the actual series, counterfactual, and pointwise and cumulative differences.
+
+        Draws the shared three-panel counterfactual figure (see
+        ``_plot_counterfactual``) from the ``actual_*``/``prediction_*`` series
+        each synthetic-control style estimator caches in ``generate``.
+        """
+        # Read via getattr: these series are declared and cached on the concrete
+        # synthetic-control subclasses, not on this base.
+        dates = getattr(self, "dates", None)
+        actual_pre = getattr(self, "actual_pre", None)
+        actual_post = getattr(self, "actual_post", None)
+        prediction_pre = getattr(self, "prediction_pre", None)
+        prediction_post = getattr(self, "prediction_post", None)
+        if actual_pre is None:
+            raise ValueError("actual_pre must not be None")
+        if actual_post is None:
+            raise ValueError("actual_post must not be None")
+        if prediction_pre is None:
+            raise ValueError("prediction_pre must not be None")
+        if prediction_post is None:
+            raise ValueError("prediction_post must not be None")
+        if dates is None:
+            raise ValueError("dates must not be None")
+        self._plot_counterfactual(
+            dates,
+            self._counterfactual_series(actual_pre),
+            self._counterfactual_series(actual_post),
+            self._counterfactual_series(prediction_pre),
+            self._counterfactual_series(prediction_post),
+        )
 
 
 class NonLinearEstimator(EconometricEstimator, ABC):

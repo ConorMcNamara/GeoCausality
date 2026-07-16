@@ -160,19 +160,19 @@ class FixedEffects(EconometricEstimator):
         ci_alpha = self._get_ci_print()
         if lift == "incremental":
             table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
             table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
         elif lift == "absolute":
             table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Absolute"]
+            table_dict["Lift Type"] = ["Absolute"]
             table_dict["Lift"] = [f"""{ceil(self.results["lift"]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["lift_ci_lower"]):,}"""]
             table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["lift_ci_upper"]):,}"""]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
@@ -182,7 +182,7 @@ class FixedEffects(EconometricEstimator):
             ]
         else:
             table_dict["Metric"] = ["ROAS"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
             table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
             table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]
@@ -270,14 +270,3 @@ class FixedEffects(EconometricEstimator):
             yaxis_title=f"Effect on {self.y_variable}",
         )
         fig.show()
-
-    def _get_roas(self) -> tuple[float, float, float]:
-        if self.results is None:
-            raise ValueError("self.results must not be None")
-        lift = ceil(self.results["incrementality"])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["incrementality_ci_upper"])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["incrementality_ci_lower"])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
-        return roas_lift, roas_ci_lower, roas_ci_upper

@@ -395,28 +395,3 @@ class KernelSyntheticControl(NonLinearEstimator):
         j_min = int(np.argmin(mean_err))
         within = np.flatnonzero(mean_err <= mean_err[j_min] + se[j_min])
         return float(lambdas[within[-1]])
-
-    def plot(self) -> None:
-        """Plot the actual results, the counterfactual, and the pointwise and cumulative differences.
-
-        Returns
-        -------
-        Our three plots determining the results
-        """
-        if self.actual_pre is None:
-            raise ValueError("actual_pre must not be None")
-        if self.actual_post is None:
-            raise ValueError("actual_post must not be None")
-        if self.prediction_pre is None:
-            raise ValueError("prediction_pre must not be None")
-        if self.prediction_post is None:
-            raise ValueError("prediction_post must not be None")
-        if self.dates is None:
-            raise ValueError("dates must not be None")
-        self._plot_counterfactual(
-            self.dates,
-            self.actual_pre[self.y_variable].to_numpy(),
-            self.actual_post[self.y_variable].to_numpy(),
-            self.prediction_pre[self.y_variable].to_numpy(),
-            self.prediction_post[self.y_variable].to_numpy(),
-        )
