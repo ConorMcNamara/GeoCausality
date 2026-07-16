@@ -1,7 +1,5 @@
 """Difference-in-differences method for geo-experiment causal inference."""
 
-from math import ceil
-
 import narwhals as nw
 import plotly.graph_objects as go
 import statsmodels.formula.api as smf
@@ -147,69 +145,42 @@ class DiffinDiff(EconometricEstimator):
             raise ValueError("results must not be None")
         if self.n_dates is None:
             raise ValueError("n_dates must not be None")
-        lift = lift.casefold()
-        if lift not in [
-            "absolute",
-            "relative",
-            "incremental",
-            "cost-per",
-            "revenue",
-            "roas",
-        ]:
-            raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
-            )
-        table_dict = {
-            "Variant": [self.results["control"] * self.n_dates + self.results["incrementality"]],
-            "Baseline": [self.results["control"] * self.n_dates],
-        }
+        lift = self._validate_lift(lift)
         ci_alpha = self._get_ci_print()
+        lo_key, hi_key = f"{ci_alpha} Lower CI", f"{ci_alpha} Upper CI"
+        base_level = self.results["control"] * self.n_dates
+        incrementality = (
+            self.results["incrementality"],
+            self.results["incrementality_ci_lower"],
+            self.results["incrementality_ci_upper"],
+        )
+        table_dict = {
+            "Variant": [base_level + self.results["incrementality"]],
+            "Baseline": [base_level],
+        }
         if lift == "incremental":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Incremental"]
-            table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
+            cells = self._format_lift_cells(lift, *incrementality)
         elif lift == "absolute":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Absolute"]
-            table_dict["Lift"] = [f"""{ceil(self.results["lift"]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["lift_ci_lower"]):,}"""]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["lift_ci_upper"]):,}"""]
+            cells = self._format_lift_cells(
+                lift, self.results["lift"], self.results["lift_ci_lower"], self.results["lift_ci_upper"]
+            )
         elif lift == "relative":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Relative"]
-            table_dict["Lift"] = [
-                f"""{round(self.results["incrementality"] * 100 / (self.results["control"] * self.n_dates), 2)}%"""
-            ]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{
-                    round(self.results["incrementality_ci_lower"] * 100 / (self.results["control"] * self.n_dates), 2)
-                }%"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{
-                    round(self.results["incrementality_ci_upper"] * 100 / (self.results["control"] * self.n_dates), 2)
-                }%"""
-            ]
+            cells = self._format_lift_cells(lift, *incrementality, relative_divisor=base_level)
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type"] = ["Incremental"]
-            table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""
-            ]
+            cells = self._format_lift_cells(lift, *incrementality)
         else:
             table_dict["Metric"] = ["ROAS"]
             table_dict["Lift Type"] = ["Incremental"]
-            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
-            table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"${round(roas_ci_upper, 2)}"]
+            cells = self._format_lift_cells(lift, *self._get_roas())
+        table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 

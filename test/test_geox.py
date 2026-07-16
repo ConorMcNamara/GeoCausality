@@ -69,11 +69,7 @@ class TestGeoX:
             spend=500_000,
         )
         geo_x.pre_process().generate()
-        with pytest.raises(
-            ValueError,
-            match="Cannot measure blarg. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-            "or `roas`",
-        ):
+        with pytest.raises(ValueError, match="Cannot measure blarg"):
             geo_x.summarize(lift="blarg")
 
 
