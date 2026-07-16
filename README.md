@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/ConorMcNamara/GeoCausality/branch/main/graph/badge.svg)](https://codecov.io/gh/ConorMcNamara/GeoCausality)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across a family of estimators — from simple difference-in-differences to interactive fixed effects and linear, nonlinear, and kernel synthetic control.
+A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across a family of estimators — from simple difference-in-differences to interactive fixed effects and linear, nonlinear, kernel, and matrix-completion synthetic control.
 
 ---
 
@@ -46,6 +46,7 @@ pip install geocausality
 | `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
 | `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
 | `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects via control-only latent factors (Xu) |
+| `MatrixCompletion` | `matrix_completion` | Nuclear-norm matrix completion of the masked panel / MC-NNM (Athey et al.) |
 | `NonlinearSyntheticControl` | `nonlinear_synthetic_control` | Nonlinear-outcome synthetic control: affine weights + distance-L1 + ridge (Tian 2023) |
 | `KernelSyntheticControl` | `kernel_synthetic_control` | Kernel-ridge nonlinear-map synthetic control (composite linear + RBF kernel) |
 | `SyntheticDiffInDiff` | `synthetic_diff_in_diff` | Doubly-weighted (unit + time) difference-in-differences (Arkhangelsky et al.) |
@@ -223,6 +224,38 @@ model = synthetic_control.SyntheticControl(
 model.pre_process().generate().summarize(lift="roas")
 ```
 
+### Matrix Completion
+
+```python
+from GeoCausality import matrix_completion
+
+model = matrix_completion.MatrixCompletion(
+    df,
+    test_geos=["geo_A", "geo_B"],
+    date_variable="date",
+    pre_period="2022-06-30",
+    post_period="2022-07-01",
+    y_variable="orders",
+    # lambda_=...,  # nuclear-norm penalty (cross-validated by default)
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()
+```
+
+`MatrixCompletion` (Athey et al., 2021) — the MC-NNM estimator — takes a different
+route from the rest of the family: instead of regressing the treated series on a
+weighted combination of donors, it stacks **every** unit into one panel matrix,
+masks the treated unit's post-period cells as missing, and completes the whole
+matrix under a low-rank (**nuclear-norm**) penalty. The imputed treated
+post-period cells are the counterfactual. It fits two-way fixed effects plus a
+low-rank term by soft-impute, with the penalty chosen by cross-validation, so it
+runs with no rank or penalty tuning. Because there is no donor-weight vector, the
+weight-based faithful jackknife+ and parametric bootstrap do not apply; it reuses
+the shared conformal inference with the residual-only jackknife+ fallback on short
+pre-periods. It recovers the canonical Prop 99 magnitude closely and, like the
+kernel map, attenuates toward the pre-period level on the shorter, single-unit
+reunification panel.
+
 ### Nonlinear Synthetic Control
 
 ```python
@@ -382,7 +415,7 @@ method:
 | Estimator | `plot()` shows |
 |---|---|
 | `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `NonlinearSyntheticControl`, `KernelSyntheticControl`, `SyntheticDiffInDiff`), `CausalImpact`, and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
+| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `KernelSyntheticControl`, `SyntheticDiffInDiff`), `CausalImpact`, and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
 | `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
 | `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
 
@@ -440,7 +473,7 @@ skips cleanly if its vendored dataset is absent.
 |---|---|---|---|---|
 | Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
 | Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
-| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `NonlinearSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −20.2 / −26.2 / −15.6 |
+| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −23.5 / −20.7 / −20.0 / −20.2 / −26.2 / −15.6 |
 
 `KernelSyntheticControl` is validated against both panels for sign and
 significance rather than magnitude: as a nonlinear *map* of the donor outcomes it
@@ -478,6 +511,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 - Abadie, Alberto, and Jérémy L'Hour. "A penalized synthetic control estimator for disaggregated data." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1971535)
 - Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
 - Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
+- Athey, Susan, Mohsen Bayati, Nikolay Doudchenko, Guido Imbens, and Khashayar Khosravi. "Matrix completion methods for causal panel data models." *Journal of the American Statistical Association* 116.536 (2021): 1716–1730. [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1891924)
 - Tian, Wei. "The Synthetic Control Method with Nonlinear Outcomes." *arXiv preprint arXiv:2306.01967* (2023). [Link](https://arxiv.org/abs/2306.01967)
 - Barber, Rina Foygel, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. "Predictive inference with the jackknife+." *Annals of Statistics* 49.1 (2021): 486–507. [Link](https://projecteuclid.org/journals/annals-of-statistics/volume-49/issue-1/Predictive-inference-with-the-jackknife/10.1214/20-AOS1965.full)
 - Ahn, Seung C., and Alex R. Horenstein. "Eigenvalue ratio test for the number of factors." *Econometrica* 81.3 (2013): 1203–1227. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA8968)
