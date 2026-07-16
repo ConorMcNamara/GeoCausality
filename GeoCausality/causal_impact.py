@@ -335,28 +335,3 @@ class CausalImpact(EconometricEstimator):
                 dtype=float,
             ).ravel()
         return sims
-
-    def plot(self) -> None:
-        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
-
-        Returns
-        -------
-        Our three plots determining the results
-        """
-        if self.actual_pre is None:
-            raise ValueError("actual_pre must not be None")
-        if self.actual_post is None:
-            raise ValueError("actual_post must not be None")
-        if self.prediction_pre is None:
-            raise ValueError("prediction_pre must not be None")
-        if self.prediction_post is None:
-            raise ValueError("prediction_post must not be None")
-        if self.dates is None:
-            raise ValueError("dates must not be None")
-        self._plot_counterfactual(
-            self.dates,
-            self.actual_pre,
-            self.actual_post,
-            self.prediction_pre,
-            self.prediction_post,
-        )

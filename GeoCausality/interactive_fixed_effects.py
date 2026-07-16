@@ -436,54 +436,6 @@ class InteractiveFixedEffects(EconometricEstimator):
         means = grand + time_effect[:, None] + unit_effect[None, :]
         return w - means, time_effect
 
-    @staticmethod
-    def _ols(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Least-squares solution, robust to rank deficiency.
-
-        Parameters
-        ----------
-        x : numpy array, shape (n, p)
-            Design matrix.
-        y : numpy array, shape (n,)
-            Target vector.
-
-        Returns
-        -------
-        The coefficient vector of shape (p,).
-        """
-        beta, *_ = np.linalg.lstsq(x, y, rcond=None)
-        return beta
-
-    @staticmethod
-    def _eigenvalue_ratio_factors(singular_values: np.ndarray, max_r: int) -> int:
-        """Choose the factor count by the eigenvalue-ratio criterion.
-
-        With eigenvalues ``mu_k`` (the squared singular values of the demeaned
-        panel in descending order), the estimated factor count is the ``k`` in
-        ``1..max_r`` that maximises the adjacent ratio ``mu_k / mu_{k+1}`` (Ahn &
-        Horenstein, 2013): a genuine factor leaves a large gap before the noise
-        eigenvalues, so the ratio spikes at the true count.
-
-        Parameters
-        ----------
-        singular_values : numpy array
-            Singular values of the demeaned panel, descending.
-        max_r : int
-            The largest factor count to consider.
-
-        Returns
-        -------
-        The selected factor count, in ``0..max_r``.
-        """
-        if max_r < 1:
-            return 0
-        eig = np.asarray(singular_values, dtype=float)[: max_r + 1] ** 2
-        if eig.shape[0] < 2:
-            return min(1, max_r)
-        denom = np.where(eig[1:] <= 0.0, np.finfo(float).tiny, eig[1:])
-        ratios = eig[:-1] / denom  # ratios[k-1] = mu_k / mu_{k+1} for k = 1..len
-        return int(np.argmax(ratios)) + 1
-
     def _series_frame(self, dates: list, values: np.ndarray) -> nw.DataFrame:
         """Wrap a date axis and value array into a narwhals frame.
 

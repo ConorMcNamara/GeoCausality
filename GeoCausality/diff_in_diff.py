@@ -167,13 +167,13 @@ class DiffinDiff(EconometricEstimator):
         ci_alpha = self._get_ci_print()
         if lift == "incremental":
             table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""{ceil(self.results["incrementality"]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""]
             table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""]
         elif lift == "absolute":
             table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Absolute"]
+            table_dict["Lift Type"] = ["Absolute"]
             table_dict["Lift"] = [f"""{ceil(self.results["lift"]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [f"""{ceil(self.results["lift_ci_lower"]):,}"""]
             table_dict[f"{ci_alpha} Upper CI"] = [f"""{ceil(self.results["lift_ci_upper"]):,}"""]
@@ -195,7 +195,7 @@ class DiffinDiff(EconometricEstimator):
             ]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""
@@ -205,7 +205,7 @@ class DiffinDiff(EconometricEstimator):
             ]
         else:
             table_dict["Metric"] = ["ROAS"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
             table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
             table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]
