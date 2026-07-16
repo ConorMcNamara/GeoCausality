@@ -169,7 +169,7 @@ class GeoX(MLEstimator):
         ci_alpha = self._get_ci_print()
         if lift in ["incremental", "absolute"]:
             table_dict["Metric"] = [self.y_variable]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""{ceil(self.results["cumulative_incrementality"][-1]):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""{ceil(self.results["cumulative_incrementality_ci_lower"][-1]):,}"""
@@ -212,7 +212,7 @@ class GeoX(MLEstimator):
             ]
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             table_dict["Lift"] = [f"""${round(self.results["cumulative_incrementality"][-1] * self.msrp, 2):,}"""]
             table_dict[f"{ci_alpha} Lower CI"] = [
                 f"""${round(self.results["cumulative_incrementality_ci_lower"][-1] * self.msrp, 2):,}"""
@@ -222,7 +222,7 @@ class GeoX(MLEstimator):
             ]
         else:
             table_dict["Metric"] = ["ROAS"]
-            table_dict["Lift Type "] = ["Incremental"]
+            table_dict["Lift Type"] = ["Incremental"]
             roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
             table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
             table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]

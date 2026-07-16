@@ -433,28 +433,3 @@ class SyntheticDiffInDiff(EconometricEstimator):
         zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_eval.shape[0])
         intercept, weights = self._solve_weights(x_train, y_train, zeta)
         return x_eval @ weights + intercept
-
-    def plot(self) -> None:
-        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
-
-        Returns
-        -------
-        Our three plots determining the results
-        """
-        if self.actual_pre is None:
-            raise ValueError("actual_pre must not be None")
-        if self.actual_post is None:
-            raise ValueError("actual_post must not be None")
-        if self.prediction_pre is None:
-            raise ValueError("prediction_pre must not be None")
-        if self.prediction_post is None:
-            raise ValueError("prediction_post must not be None")
-        if self.dates is None:
-            raise ValueError("dates must not be None")
-        self._plot_counterfactual(
-            self.dates,
-            self.actual_pre,
-            self.actual_post,
-            self.prediction_pre,
-            self.prediction_post,
-        )

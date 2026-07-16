@@ -329,28 +329,3 @@ class RobustSyntheticControl(EconometricEstimator):
         p_hat = max(np.count_nonzero(groupby_x_transposed) / (r * c), 1 / (r * c))
         M_hat = (1 / p_hat) * (u @ s_res @ v)
         return M_hat
-
-    def plot(self) -> None:
-        """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
-
-        Returns
-        -------
-        Our three plots determining the results
-        """
-        if self.actual_pre is None:
-            raise ValueError("actual_pre must not be None")
-        if self.actual_post is None:
-            raise ValueError("actual_post must not be None")
-        if self.prediction_pre is None:
-            raise ValueError("prediction_pre must not be None")
-        if self.prediction_post is None:
-            raise ValueError("prediction_post must not be None")
-        if self.dates is None:
-            raise ValueError("dates must not be None")
-        self._plot_counterfactual(
-            self.dates,
-            self.actual_pre[self.y_variable].to_numpy(),
-            self.actual_post[self.y_variable].to_numpy(),
-            self.prediction_pre[self.y_variable].to_numpy(),
-            self.prediction_post[self.y_variable].to_numpy(),
-        )
