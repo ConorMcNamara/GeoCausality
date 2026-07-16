@@ -32,6 +32,7 @@ Every estimator shares the same three-step interface:
    robust_synthetic_control
    matrix_completion
    augmented_synthetic_control
+   elastic_net_synthetic_control
    generalized_synthetic_control
    nonlinear_synthetic_control
    kernel_synthetic_control

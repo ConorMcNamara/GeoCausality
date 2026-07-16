@@ -1,12 +1,13 @@
 """Testing Statistical Hypotheses through Geo Experiments."""
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 
 
 from GeoCausality import (
     augmented_synthetic_control,
     causal_impact,
     diff_in_diff,
+    elastic_net_synthetic_control,
     fixed_effects,
     generalized_synthetic_control,
     geolift,
@@ -25,6 +26,7 @@ from GeoCausality import (
 
 __all__: list[str] = [
     "diff_in_diff",
+    "elastic_net_synthetic_control",
     "fixed_effects",
     "interactive_fixed_effects",
     "geox",

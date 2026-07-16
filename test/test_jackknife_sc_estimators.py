@@ -15,6 +15,7 @@ import polars as pl
 import pytest
 
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
+from GeoCausality.elastic_net_synthetic_control import ElasticNetSyntheticControl
 from GeoCausality.penalized_synthetic_control import PenalizedSyntheticControl
 from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
@@ -70,6 +71,7 @@ MODELS = [
     PenalizedSyntheticControl,
     RobustSyntheticControl,
     AugmentedSyntheticControl,
+    ElasticNetSyntheticControl,
 ]
 MODEL_IDS = [c.__name__ for c in MODELS]
 
