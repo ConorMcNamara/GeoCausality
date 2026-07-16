@@ -13,6 +13,9 @@ from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
 from tabulate import tabulate  # type: ignore
 
+# The lift types every ``summarize`` accepts. ``FixedEffects`` allows a subset.
+_LIFT_TYPES: tuple[str, ...] = ("absolute", "relative", "incremental", "cost-per", "revenue", "roas")
+
 
 class Estimator(abc.ABC):
     def __init__(
@@ -116,6 +119,79 @@ class Estimator(abc.ABC):
     def _get_ci_print(self) -> str:
         percent = int((1 - self.alpha) * 100)
         return f"{percent}%"
+
+    def _validate_lift(self, lift: str, allowed: tuple[str, ...] = _LIFT_TYPES) -> str:
+        """Normalise and validate the requested lift type.
+
+        Parameters
+        ----------
+        lift : str
+            The requested lift type (case-insensitive).
+        allowed : tuple of str, optional
+            The permitted lift types; defaults to every type in ``_LIFT_TYPES``.
+
+        Returns
+        -------
+        The normalised (case-folded) lift type.
+
+        Raises
+        ------
+        ValueError
+            If ``lift`` is not one of ``allowed``.
+        """
+        lift = lift.casefold()
+        if lift not in allowed:
+            choices = ", ".join(f"`{option}`" for option in allowed)
+            raise ValueError(f"Cannot measure {lift}. Choose one of {choices}")
+        return lift
+
+    def _format_lift_cells(
+        self,
+        lift: str,
+        point: float,
+        lower: float,
+        upper: float,
+        relative_divisor: float | None = None,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Format the Lift / lower-CI / upper-CI cells for one lift type.
+
+        Parameters
+        ----------
+        lift : str
+            The lift type. ``"relative"`` renders a percentage of
+            ``relative_divisor``; ``"revenue"`` scales by ``msrp`` as currency;
+            ``"roas"`` / ``"cost-per"`` render currency as-is; anything else
+            renders a thousands-separated integer count.
+        point, lower, upper : float
+            The point estimate and its confidence-interval bounds.
+        relative_divisor : float, optional
+            The denominator for the ``"relative"`` percentage.
+
+        Returns
+        -------
+        A tuple of single-element lists ``(Lift, lower CI, upper CI)`` ready to
+        drop into the tabulate column dict.
+        """
+        if lift == "relative":
+            if relative_divisor is None:
+                raise ValueError("relative_divisor is required for relative lift")
+
+            def fmt(value: float) -> str:
+                return f"{round(float(value) * 100 / relative_divisor, 2)}%"
+        elif lift == "revenue":
+
+            def fmt(value: float) -> str:
+                return f"${round(value * self.msrp, 2):,}"
+        elif lift in ("roas", "cost-per"):
+
+            def fmt(value: float) -> str:
+                return f"${round(value, 2)}"
+        else:
+
+            def fmt(value: float) -> str:
+                return f"{ceil(value):,}"
+
+        return [fmt(point)], [fmt(lower)], [fmt(upper)]
 
     @abc.abstractmethod
     def _get_roas(self) -> tuple[float, float, float]:
@@ -254,64 +330,50 @@ class EconometricEstimator(Estimator, ABC):
         """
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = lift.casefold()
-        if lift not in [
-            "absolute",
-            "relative",
-            "incremental",
-            "cost-per",
-            "revenue",
-            "roas",
-        ]:
-            raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
-            )
+        lift = self._validate_lift(lift)
         ci_alpha = self._get_ci_print()
+        lo_key, hi_key = f"{ci_alpha} Lower CI", f"{ci_alpha} Upper CI"
         variant = float(np.sum(self.results["test"]))
         baseline = float(np.sum(self.results["counterfactual"]))
+        incrementality = (
+            self.results["incrementality"],
+            self.results["incrementality_ci_lower"],
+            self.results["incrementality_ci_upper"],
+        )
         table_dict: dict[str, list[Any]]
-        if lift in ["incremental", "absolute"]:
+        if lift in ("incremental", "absolute"):
             table_dict = {
                 "Variant": [variant],
                 "Baseline": [baseline],
                 "Metric": [self.y_variable],
                 "Lift Type": ["Incremental"],
-                "Lift": [f"""{ceil(self.results["incrementality"]):,}"""],
-                f"{ci_alpha} Lower CI": [f"""{ceil(self.results["incrementality_ci_lower"]):,}"""],
-                f"{ci_alpha} Upper CI": [f"""{ceil(self.results["incrementality_ci_upper"]):,}"""],
             }
+            cells = self._format_lift_cells(lift, *incrementality)
         elif lift == "relative":
             table_dict = {
                 "Variant": [variant],
                 "Baseline": [baseline],
                 "Metric": [self.y_variable],
                 "Lift Type": ["Relative"],
-                "Lift": [f"""{round(float(self.results["incrementality"]) * 100 / baseline, 2)}%"""],
-                f"{ci_alpha} Lower CI": [f"""{round(self.results["incrementality_ci_lower"] * 100 / baseline, 2)}%"""],
-                f"{ci_alpha} Upper CI": [f"""{round(self.results["incrementality_ci_upper"] * 100 / baseline, 2)}%"""],
             }
+            cells = self._format_lift_cells(lift, *incrementality, relative_divisor=baseline)
         elif lift == "revenue":
             table_dict = {
-                "Variant": [f"""${round(variant * self.msrp, 2):,}"""],
-                "Baseline": [f"""${round(baseline * self.msrp, 2):,}"""],
+                "Variant": [f"${round(variant * self.msrp, 2):,}"],
+                "Baseline": [f"${round(baseline * self.msrp, 2):,}"],
                 "Metric": ["Revenue"],
                 "Lift Type": ["Incremental"],
-                "Lift": [f"""${round(self.results["incrementality"] * self.msrp, 2):,}"""],
-                f"{ci_alpha} Lower CI": [f"""${round(self.results["incrementality_ci_lower"] * self.msrp, 2):,}"""],
-                f"{ci_alpha} Upper CI": [f"""${round(self.results["incrementality_ci_upper"] * self.msrp, 2):,}"""],
             }
+            cells = self._format_lift_cells(lift, *incrementality)
         else:
-            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
             table_dict = {
-                "Variant": [f"""${round(self.spend / variant, 2)}"""],
-                "Baseline": [f"""${round(self.spend / baseline, 2)}"""],
+                "Variant": [f"${round(self.spend / variant, 2)}"],
+                "Baseline": [f"${round(self.spend / baseline, 2)}"],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
-                "Lift": [f"${round(roas_lift, 2)}"],
-                f"{ci_alpha} Lower CI": [f"${round(roas_ci_lower, 2)}"],
-                f"{ci_alpha} Upper CI": [f"${round(roas_ci_upper, 2)}"],
             }
+            cells = self._format_lift_cells(lift, *self._get_roas())
+        table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 

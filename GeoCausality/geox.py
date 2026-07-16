@@ -149,84 +149,36 @@ class GeoX(MLEstimator):
         """
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = lift.casefold()
-        if lift not in [
-            "absolute",
-            "relative",
-            "incremental",
-            "cost-per",
-            "revenue",
-            "roas",
-        ]:
-            raise ValueError(
-                f"Cannot measure {lift}. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-                f"or `roas`"
-            )
+        lift = self._validate_lift(lift)
+        ci_alpha = self._get_ci_print()
+        lo_key, hi_key = f"{ci_alpha} Lower CI", f"{ci_alpha} Upper CI"
+        baseline = np.sum(self.results["counterfactual"])
+        cumulative = (
+            self.results["cumulative_incrementality"][-1],
+            self.results["cumulative_incrementality_ci_lower"][-1],
+            self.results["cumulative_incrementality_ci_upper"][-1],
+        )
         table_dict: dict[str, list[Any]] = {
             "Variant": [np.sum(self.results["test"])],
-            "Baseline": [np.sum(self.results["counterfactual"])],
+            "Baseline": [baseline],
         }
-        ci_alpha = self._get_ci_print()
-        if lift in ["incremental", "absolute"]:
+        if lift in ("incremental", "absolute"):
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Incremental"]
-            table_dict["Lift"] = [f"""{ceil(self.results["cumulative_incrementality"][-1]):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{ceil(self.results["cumulative_incrementality_ci_lower"][-1]):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{ceil(self.results["cumulative_incrementality_ci_upper"][-1]):,}"""
-            ]
+            cells = self._format_lift_cells(lift, *cumulative)
         elif lift == "relative":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Relative"]
-            table_dict["Lift"] = [
-                f"""{
-                    round(
-                        float(self.results["cumulative_incrementality"][-1])
-                        * 100
-                        / np.sum(self.results["counterfactual"]),
-                        2,
-                    )
-                }%"""
-            ]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""{
-                    round(
-                        self.results["cumulative_incrementality_ci_lower"][-1]
-                        * 100
-                        / np.sum(self.results["counterfactual"]),
-                        2,
-                    )
-                }%"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""{
-                    round(
-                        self.results["cumulative_incrementality_ci_upper"][-1]
-                        * 100
-                        / np.sum(self.results["counterfactual"]),
-                        2,
-                    )
-                }%"""
-            ]
+            cells = self._format_lift_cells(lift, *cumulative, relative_divisor=baseline)
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type"] = ["Incremental"]
-            table_dict["Lift"] = [f"""${round(self.results["cumulative_incrementality"][-1] * self.msrp, 2):,}"""]
-            table_dict[f"{ci_alpha} Lower CI"] = [
-                f"""${round(self.results["cumulative_incrementality_ci_lower"][-1] * self.msrp, 2):,}"""
-            ]
-            table_dict[f"{ci_alpha} Upper CI"] = [
-                f"""${round(self.results["cumulative_incrementality_ci_upper"][-1] * self.msrp, 2):,}"""
-            ]
+            cells = self._format_lift_cells(lift, *cumulative)
         else:
             table_dict["Metric"] = ["ROAS"]
             table_dict["Lift Type"] = ["Incremental"]
-            roas_lift, roas_ci_lower, roas_ci_upper = self._get_roas()
-            table_dict["Lift"] = [f"${round(roas_lift, 2)}"]
-            table_dict[f"{ci_alpha} Lower CI"] = [f"${round(roas_ci_lower, 2)}"]
-            table_dict[f"{ci_alpha} Upper CI"] = [f"${round(roas_ci_upper, 2)}"]
+            cells = self._format_lift_cells(lift, *self._get_roas())
+        table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"][-1]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
