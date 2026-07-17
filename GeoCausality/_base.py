@@ -319,6 +319,100 @@ class EconometricEstimator(Estimator, ABC):
         return self
 
     # ------------------------------------------------------------------
+    # Shared donor-matrix construction
+    #
+    # Every synthetic-control style estimator builds the treated outcome as a
+    # per-date sum and the donor pool as a date-by-geo matrix, filtered to the
+    # pre-period, post-period or the full window. These two helpers build both,
+    # so each estimator's ``pre_process`` / ``generate`` just names the pieces it
+    # needs. ``pre_aggregate`` toggles the ``group_by([date, geo]).sum()`` some
+    # estimators run before pivoting (others assume one row per date-geo);
+    # ``sort_pivot`` orders the pivot by date for estimators that split
+    # pre/post by row index rather than joining on date.
+    # ------------------------------------------------------------------
+    def _period_filter(self, treatment_value: int, period: str) -> "nw.Expr":
+        """Build the ``(treatment, period)`` row filter for the aggregation helpers.
+
+        Parameters
+        ----------
+        treatment_value : int
+            ``1`` for treated rows, ``0`` for control rows.
+        period : {"pre", "post", "all"}
+            Restrict to the pre-period, the post-period, or keep every date.
+
+        Returns
+        -------
+        The narwhals boolean expression selecting the requested rows.
+        """
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
+        row_filter = nw.col(self.treatment_variable) == treatment_value
+        if period == "pre":
+            row_filter = row_filter & (nw.col("treatment_period") == 0)
+        elif period == "post":
+            row_filter = row_filter & (nw.col("treatment_period") == 1)
+        return row_filter
+
+    def _treated_series(self, period: str) -> nw.DataFrame:
+        """Treated outcome summed by date over the given period.
+
+        Parameters
+        ----------
+        period : {"pre", "post", "all"}
+            Which window to aggregate.
+
+        Returns
+        -------
+        A narwhals frame of ``(date, y)`` sorted by date.
+        """
+        return (
+            self.data.filter(self._period_filter(1, period))
+            .select([self.y_variable, self.date_variable])
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+            .sort(self.date_variable)
+        )
+
+    def _control_matrix(self, period: str, *, pre_aggregate: bool = True, sort_pivot: bool = False) -> nw.DataFrame:
+        """Control donor matrix (rows = date, cols = geo) over the given period.
+
+        Parameters
+        ----------
+        period : {"pre", "post", "all"}
+            Which window to aggregate.
+        pre_aggregate : bool, default=True
+            Sum the outcome per ``(date, geo)`` before pivoting. Set ``False`` when
+            the panel already has one row per date-geo (the pivot then assumes
+            uniqueness).
+        sort_pivot : bool, default=False
+            Sort the pivoted matrix by date. Needed by estimators that split
+            pre/post by row index rather than joining on the date column.
+
+        Returns
+        -------
+        The pivoted donor matrix as a narwhals frame. Donor columns are always in
+        geo-sorted order (independent of the input row order), so a matrix used to
+        fit weights and one used to predict share the same column order.
+        """
+        frame = self.data.filter(self._period_filter(0, period)).select(
+            [self.y_variable, self.date_variable, self.geo_variable]
+        )
+        if pre_aggregate:
+            frame = frame.group_by([self.date_variable, self.geo_variable]).agg(nw.col(self.y_variable).sum())
+        # Sort by (date, geo) before pivoting so the donor columns come out in a
+        # stable geo-sorted order regardless of the source row order. Without this,
+        # estimators that fit on one _control_matrix pivot and predict on another
+        # would map the weight vector onto mis-ordered donor columns.
+        frame = frame.sort([self.date_variable, self.geo_variable])
+        pivot = nw.from_native(
+            frame.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
+            eager_only=True,
+        )
+        if sort_pivot:
+            pivot = pivot.sort(self.date_variable)
+        return pivot
+
+    # ------------------------------------------------------------------
     # Shared results surface
     #
     # Every synthetic-control style estimator reports the same lift table and

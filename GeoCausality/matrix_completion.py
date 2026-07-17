@@ -169,25 +169,11 @@ class MatrixCompletion(EconometricEstimator):
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
-        day_x = self.data.filter(nw.col(self.treatment_variable) == 0).select(
-            [self.y_variable, self.geo_variable, self.date_variable]
-        )
-        # Pivot: rows=dates, cols=geos. Sort by date so the pre-period rows are the
-        # leading block (the split in ``generate`` relies on this ordering). One
-        # pivot over all dates keeps the donor column order consistent across the
-        # pre/post split.
-        self.daily_x = nw.from_native(
-            day_x.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        ).sort(self.date_variable)
-        daily_y = (
-            self.data.filter(nw.col(self.treatment_variable) == 1)
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        self.daily_y = daily_y
+        # Sort the pivot by date so the pre-period rows are the leading block (the
+        # split in ``generate`` relies on this ordering). One pivot over all dates
+        # keeps the donor column order consistent across the pre/post split.
+        self.daily_x = self._control_matrix("all", pre_aggregate=False, sort_pivot=True)
+        self.daily_y = self._treated_series("all")
         return self
 
     def generate(self) -> "MatrixCompletion":
