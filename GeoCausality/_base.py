@@ -304,17 +304,20 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        The pivoted donor matrix as a narwhals frame.
+        The pivoted donor matrix as a narwhals frame. Donor columns are always in
+        geo-sorted order (independent of the input row order), so a matrix used to
+        fit weights and one used to predict share the same column order.
         """
         frame = self.data.filter(self._period_filter(0, period)).select(
             [self.y_variable, self.date_variable, self.geo_variable]
         )
         if pre_aggregate:
-            frame = (
-                frame.group_by([self.date_variable, self.geo_variable])
-                .agg(nw.col(self.y_variable).sum())
-                .sort([self.date_variable, self.geo_variable])
-            )
+            frame = frame.group_by([self.date_variable, self.geo_variable]).agg(nw.col(self.y_variable).sum())
+        # Sort by (date, geo) before pivoting so the donor columns come out in a
+        # stable geo-sorted order regardless of the source row order. Without this,
+        # estimators that fit on one _control_matrix pivot and predict on another
+        # would map the weight vector onto mis-ordered donor columns.
+        frame = frame.sort([self.date_variable, self.geo_variable])
         pivot = nw.from_native(
             frame.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
             eager_only=True,
