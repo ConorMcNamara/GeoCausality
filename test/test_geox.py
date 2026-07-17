@@ -1,9 +1,30 @@
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from GeoCausality import geox
+
+LIFT_TYPES = ("incremental", "absolute", "relative", "cost-per", "revenue", "roas")
+
+
+def _fit(data_df: pd.DataFrame) -> geox.GeoX:
+    model = geox.GeoX(
+        data_df,
+        geo_variable="zipcode",
+        treatment_variable="is_test",
+        date_variable="date",
+        pre_period="2022-06-30",
+        post_period="2022-07-01",
+        y_variable="orders",
+        msrp=7.00,
+        spend=500_000,
+    )
+    return model.pre_process().generate()
+
 
 # The zipcodes dataset is vendored (gzipped) under test/data so the suite runs
 # offline and deterministically rather than downloading it over the network at
@@ -69,12 +90,26 @@ class TestGeoX:
             spend=500_000,
         )
         geo_x.pre_process().generate()
-        with pytest.raises(
-            ValueError,
-            match="Cannot measure blarg. Choose one of `absolute`, `relative`,  `incremental`, `cost-per`, `revenue` "
-            "or `roas`",
-        ):
+        with pytest.raises(ValueError, match="Cannot measure blarg"):
             geo_x.summarize(lift="blarg")
+
+    @staticmethod
+    @pytest.mark.parametrize("lift", LIFT_TYPES)
+    def test_summarize_runs_for_all_lift_types(lift: str, data_df: pd.DataFrame) -> None:
+        # Regression: results["test"]/["counterfactual"] must be numpy arrays so the
+        # summary sums do not hit narwhals Series.sum(axis=...).
+        geo_x = _fit(data_df)
+        with redirect_stdout(io.StringIO()) as buffer:
+            geo_x.summarize(lift)
+        assert buffer.getvalue().strip()
+
+    @staticmethod
+    def test_plot_runs(data_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Regression: the post-period date filter must handle a datetime/Timestamp
+        # date column (data_df parses dates), not only ISO strings.
+        geo_x = _fit(data_df)
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        geo_x.plot()
 
 
 if __name__ == "__main__":

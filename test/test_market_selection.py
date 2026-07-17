@@ -16,6 +16,7 @@ import polars as pl
 import pytest
 
 from GeoCausality.market_selection import MarketSelection
+from GeoCausality.power import PowerAnalysis
 from GeoCausality.synthetic_control import SyntheticControl
 
 N_DATES = 40
@@ -158,6 +159,57 @@ class TestReporting:
     def test_summarize_requires_search(history: pl.DataFrame) -> None:
         with pytest.raises(ValueError):
             _selection(history).summarize()
+
+
+def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
+    # Regression: the conformal band is on the treated series summed across the
+    # test geos, so _pre_fit must divide by the summed-series mean. Dividing by
+    # the per-geo-row mean instead leaves a spurious factor of len(test_geos),
+    # biasing search() against larger test sets.
+    duration = 5
+    test_geos = ["g0", "g1"]
+    control_geos = [f"g{i}" for i in range(2, N_GEOS)]
+    ms = _selection(history)
+    pa = PowerAnalysis(
+        history,
+        geo_variable="geo",
+        test_geos=test_geos,
+        control_geos=control_geos,
+        date_variable="date",
+        pre_period=PRE_PERIOD,
+        y_variable="y",
+        alpha=0.1,
+        estimator=SyntheticControl,
+        seed=0,
+    )
+    pre_fit = ms._pre_fit(pa, duration)
+    assert pre_fit is not None
+
+    # Reconstruct the band exactly as _pre_fit does, then the two candidate scales.
+    hist = pa.history
+    pre_boundary, post_boundary = hist[-duration - 1], hist[-duration]
+    model = SyntheticControl(
+        history,
+        geo_variable="geo",
+        test_geos=test_geos,
+        control_geos=control_geos,
+        date_variable="date",
+        pre_period=pre_boundary,
+        post_period=post_boundary,
+        y_variable="y",
+        alpha=0.1,
+    )
+    model.pre_process().generate()
+    band = float(model.results["conformal_band"])
+    pre = history.filter(pl.col("geo").is_in(test_geos) & (pl.col("date").cast(pl.Utf8) <= pre_boundary))
+    per_geo_mean = abs(float(pre["y"].mean()))
+    summed_mean = abs(float(pre.group_by("date").agg(pl.col("y").sum())["y"].mean()))
+
+    # Normalised by the summed-series mean, i.e. the old per-geo value / n_test.
+    assert pre_fit == pytest.approx(band / summed_mean, rel=1e-9)
+    assert pre_fit == pytest.approx((band / per_geo_mean) / len(test_geos), rel=1e-9)
+    # And NOT the old per-geo-row normalisation (differs by len(test_geos)).
+    assert pre_fit != pytest.approx(band / per_geo_mean, rel=1e-3)
 
 
 if __name__ == "__main__":
