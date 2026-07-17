@@ -1,5 +1,6 @@
 """GeoX (time-based regression) method for geo-experiment causal inference."""
 
+from datetime import date as date_cls
 from math import ceil
 from typing import Any
 
@@ -122,9 +123,9 @@ class GeoX(MLEstimator):
         ci_upper_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_lower"].values
         self.results = {
             "date": self.test_dates,
-            "test": self.post_test[self.y_variable],
-            "control": self.post_control[self.y_variable],
-            "counterfactual": self.post_test["counterfactual"],
+            "test": self.post_test[self.y_variable].to_numpy(),
+            "control": self.post_control[self.y_variable].to_numpy(),
+            "counterfactual": self.post_test["counterfactual"].to_numpy(),
             "counterfactual_ci_lower": model_summary["obs_ci_lower"],
             "counterfactual_ci_upper": model_summary["obs_ci_upper"],
             "incrementality": incrementality,
@@ -280,7 +281,16 @@ class GeoX(MLEstimator):
         if self.results is None:
             raise ValueError("results must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        marketing_start = [date for date in self.dates if date >= self.post_period]
+        # Compare on ``datetime.date`` so the filter is robust to the date column's
+        # backend type (str, ``datetime.date``, ``datetime``, or pandas ``Timestamp``).
+        post_period_date = date_cls.fromisoformat(self.post_period)
+
+        def _as_date(value: Any) -> Any:
+            if isinstance(value, str):
+                return date_cls.fromisoformat(value[:10])
+            return value.date() if hasattr(value, "date") else value
+
+        marketing_start = [date for date in self.dates if _as_date(date) >= post_period_date]
         control_data = nw.concat([self.pre_control, self.post_control])
         counterfactual = self.model.predict(sm.add_constant(control_data[self.y_variable].to_numpy()))
         total_fig = make_subplots(
