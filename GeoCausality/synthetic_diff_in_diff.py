@@ -122,38 +122,10 @@ class SyntheticDiffInDiff(EconometricEstimator):
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        test_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        test_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        control_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_pre_pivot = nw.from_native(
-            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
-        control_post_pivot = nw.from_native(
-            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        test_pre = self._treated_series("pre")
+        test_post = self._treated_series("post")
+        control_pre_pivot = self._control_matrix("pre")
+        control_post_pivot = self._control_matrix("post")
         self.synthetic_control_df = test_pre.join(control_pre_pivot, on=self.date_variable, how="left")
         self.synthetic_test_df = test_post.join(control_post_pivot, on=self.date_variable, how="left")
         return self

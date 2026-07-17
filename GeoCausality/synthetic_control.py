@@ -103,38 +103,10 @@ class SyntheticControl(EconometricEstimator):
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        test_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        test_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        control_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_pre_pivot = nw.from_native(
-            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
-        control_post_pivot = nw.from_native(
-            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        test_pre = self._treated_series("pre")
+        test_post = self._treated_series("post")
+        control_pre_pivot = self._control_matrix("pre")
+        control_post_pivot = self._control_matrix("post")
         self.synthetic_control_df = test_pre.join(control_pre_pivot, on=self.date_variable, how="left")
         self.synthetic_test_df = test_post.join(control_post_pivot, on=self.date_variable, how="left")
         return self
@@ -360,21 +332,10 @@ class SyntheticControlV(EconometricEstimator):
         # Following Abadie & Gardeazabal, the pre-period outcome trajectory is the
         # predictor set used to fit the V matrix and the donor weights: daily_x has
         # rows = pre-period dates, cols = donor geos; daily_y is the treated series.
-        day_x = self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0)).select(
-            [self.y_variable, self.geo_variable, self.date_variable]
-        )
-        daily_x_pivot = nw.from_native(
-            day_x.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        daily_x_pivot = self._control_matrix("pre", pre_aggregate=False)
         daily_x_arr: np.ndarray = daily_x_pivot.drop(self.date_variable).to_numpy()
 
-        daily_y = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
+        daily_y = self._treated_series("pre")
         daily_y_arr: np.ndarray = daily_y[self.y_variable].to_numpy()
 
         self._create_v(daily_x_arr, daily_y_arr)
@@ -390,38 +351,10 @@ class SyntheticControlV(EconometricEstimator):
         """
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
-        self.actual_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        self.actual_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        control_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_pre_pivot = nw.from_native(
-            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
-        control_post_pivot = nw.from_native(
-            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        self.actual_pre = self._treated_series("pre")
+        self.actual_post = self._treated_series("post")
+        control_pre_pivot = self._control_matrix("pre")
+        control_post_pivot = self._control_matrix("post")
         control_pre_arr = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_arr = control_post_pivot.drop(self.date_variable).to_numpy()
         # Cache the donor matrices for the shared faithful jackknife+ loop.

@@ -115,43 +115,10 @@ class PenalizedSyntheticControl(EconometricEstimator):
         """
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
-        self.actual_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        self.actual_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        control_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 0))
-            .select([self.y_variable, self.date_variable, self.geo_variable])
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 0) & (nw.col("treatment_period") == 1))
-            .select([self.y_variable, self.date_variable, self.geo_variable])
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        # Pivot: rows=dates, cols=geos — equivalent to the transposed pandas pivot
-        control_pre_pivot = nw.from_native(
-            control_pre.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
-        control_post_pivot = nw.from_native(
-            control_post.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        self.actual_pre = self._treated_series("pre")
+        self.actual_post = self._treated_series("post")
+        control_pre_pivot = self._control_matrix("pre")
+        control_post_pivot = self._control_matrix("post")
         # Drop the index column before matrix multiply; keep only geo columns
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
