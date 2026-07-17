@@ -5,6 +5,51 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-17
+
+A correctness and internal-consolidation release: five bug fixes (several
+changing estimator outputs) and a large deduplication of the estimator family
+into the shared base classes. No new estimators and no public API change.
+
+### Fixed
+
+- **Donor column-order dependence** in `AugmentedSyntheticControl`,
+  `SyntheticControlV` and `RobustSyntheticControl`. These fit donor weights on a
+  differently-ordered pivot than they predicted on, so on any input whose donor
+  rows were not already geo-sorted the weight vector was applied to the wrong
+  donors and the estimate was silently wrong. The donor matrix is now always
+  built with a stable geo-sorted column order. **Results change for these
+  estimators on non-geo-sorted inputs (they were previously incorrect).**
+- **`GeoX.summarize()` crashed for every lift type** (`np.sum` on a narwhals
+  `Series`) and **`GeoX.plot()` crashed on datetime/`Timestamp` date columns**
+  (comparing a date to the `str` post-period). Both now work; `summarize` stores
+  numpy arrays and `plot` compares on `datetime.date`.
+- **Off-by-one in the split-conformal band** (`np.quantile(scores, k / n)`
+  returned one order statistic too high), which made every conformal prediction
+  band one residual too wide. Bands are now slightly tighter (correct); point
+  estimates and effect confidence intervals are unaffected.
+- **`summarize()` raised `ZeroDivisionError`** on the `relative` / `roas` /
+  `cost-per` rows when the counterfactual or treated post-period summed to zero;
+  it now reports `inf`, matching the existing `_get_roas` guard.
+- **`MarketSelection` pre-fit metric** normalised the (geo-summed) conformal band
+  by the per-geo-row mean, leaving a spurious `len(test_geos)` factor that biased
+  `search()` against larger test sets. It now normalises by the summed-series
+  mean; cross-size rankings change (single-size rankings are unchanged).
+
+### Changed
+
+- Large internal deduplication of the synthetic-control estimator family into
+  `EconometricEstimator` / `Estimator`, with no public API change: the
+  counterfactual `plot()`, `_get_roas`, the `_ols` / eigenvalue-ratio factor
+  helpers, the narwhals frame helper, the results/inference assembly
+  (`_finalize_counterfactual_results`), the `summarize()` lift-table formatting
+  (`_validate_lift` / `_format_lift_cells`), and the donor-matrix construction
+  (`_treated_series` / `_control_matrix`) are now defined once in the base.
+  `InteractiveFixedEffects` now inherits the shared counterfactual `plot()`
+  (which also restores the confidence bands its own plot had dropped).
+- Standardised `_create_model` on the conventional `(x, y)` argument order across
+  the estimator family and disambiguated the two `_loss_w` helpers.
+
 ## [0.13.0] - 2026-07-16
 
 Adds the `ElasticNetSyntheticControl` estimator (elastic-net / intercept-shifted
