@@ -646,10 +646,11 @@ class EconometricEstimator(Estimator, ABC):
         """
         if alpha is None:
             alpha = self.alpha
-        scores = np.abs(pre_resid)
-        n = scores.shape[0]
-        level = min(1.0, np.ceil((n + 1) * (1 - alpha)) / n)
-        return float(np.quantile(scores, level, method="higher"))
+        # The conformalized band is the ceil((n + 1)(1 - alpha))-th smallest
+        # absolute residual (widening to the max when that rank exceeds n) --
+        # identical to the jackknife+ quantile, so reuse it. (A previous
+        # np.quantile(scores, k / n) computed one order statistic too high.)
+        return self._jackknife_quantile(pre_resid, alpha)
 
     def _conformal_inference(
         self,
