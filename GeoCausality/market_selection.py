@@ -227,9 +227,16 @@ class MarketSelection:
         band = model.results.get("conformal_band")
         if band is None:
             return None
-        scale = sub.filter(nw.col(self.geo_variable).is_in(power.test_geos) & (date_str <= pre_boundary))[
-            self.y_variable
-        ].mean()
+        # Normalise by the mean of the treated series summed across the test geos
+        # per date -- the same scale the estimator's conformal band is computed on.
+        # Averaging the individual geo-date rows instead leaves a spurious factor
+        # of len(test_geos), which biases search() against larger test sets.
+        summed = (
+            sub.filter(nw.col(self.geo_variable).is_in(power.test_geos) & (date_str <= pre_boundary))
+            .group_by(self.date_variable)
+            .agg(nw.col(self.y_variable).sum())
+        )
+        scale = summed[self.y_variable].mean()
         scale = abs(float(scale)) if scale else 1.0
         return float(band) / (scale or 1.0)
 

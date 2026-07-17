@@ -163,32 +163,10 @@ class GeneralizedSyntheticControl(EconometricEstimator):
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
         # Treated series, aggregated across test geos, split into pre / post.
-        self.actual_pre = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 0))
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
-        self.actual_post = (
-            self.data.filter((nw.col(self.treatment_variable) == 1) & (nw.col("treatment_period") == 1))
-            .select([self.y_variable, self.date_variable])
-            .group_by(self.date_variable)
-            .agg(nw.col(self.y_variable).sum())
-            .sort(self.date_variable)
-        )
+        self.actual_pre = self._treated_series("pre")
+        self.actual_post = self._treated_series("post")
         # Control outcome matrix over all periods: rows = dates, cols = geos.
-        control_all = (
-            self.data.filter(nw.col(self.treatment_variable) == 0)
-            .select([self.y_variable, self.date_variable, self.geo_variable])
-            .group_by([self.date_variable, self.geo_variable])
-            .agg(nw.col(self.y_variable).sum())
-            .sort([self.date_variable, self.geo_variable])
-        )
-        control_pivot = nw.from_native(
-            control_all.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        ).sort(self.date_variable)
+        control_pivot = self._control_matrix("all", sort_pivot=True)
         y0 = control_pivot.drop(self.date_variable).to_numpy()  # T x N
         n_pre = self.actual_pre.shape[0]
         y1_all = np.concatenate(
