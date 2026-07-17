@@ -145,6 +145,16 @@ class Estimator(abc.ABC):
             raise ValueError(f"Cannot measure {lift}. Choose one of {choices}")
         return lift
 
+    @staticmethod
+    def _safe_ratio(numerator: float, denominator: float) -> float:
+        """Divide, returning ``inf`` for a zero denominator.
+
+        Matches the guard in ``_get_roas`` so a degenerate summary (e.g. a
+        counterfactual or treated post-period that sums to zero) reports ``inf``
+        rather than raising ``ZeroDivisionError``.
+        """
+        return numerator / denominator if denominator else float(np.inf)
+
     def _format_lift_cells(
         self,
         lift: str,
@@ -177,7 +187,7 @@ class Estimator(abc.ABC):
                 raise ValueError("relative_divisor is required for relative lift")
 
             def fmt(value: float) -> str:
-                return f"{round(float(value) * 100 / relative_divisor, 2)}%"
+                return f"{round(self._safe_ratio(float(value) * 100, relative_divisor), 2)}%"
         elif lift == "revenue":
 
             def fmt(value: float) -> str:
@@ -367,8 +377,8 @@ class EconometricEstimator(Estimator, ABC):
             cells = self._format_lift_cells(lift, *incrementality)
         else:
             table_dict = {
-                "Variant": [f"${round(self.spend / variant, 2)}"],
-                "Baseline": [f"${round(self.spend / baseline, 2)}"],
+                "Variant": [f"${round(self._safe_ratio(self.spend, variant), 2)}"],
+                "Baseline": [f"${round(self._safe_ratio(self.spend, baseline), 2)}"],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
             }
