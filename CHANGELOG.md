@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-07-21
+
+A feature release adding opt-in distribution-free inference to the two
+econometric estimators. No breaking changes: the default behaviour of every
+estimator is unchanged.
+
+### Added
+
+- **Conformal inference for `DiffinDiff` and `FixedEffects`** via a new
+  `inference` constructor argument (`"ols"`, the default, `"conformal"`,
+  `"jackknife"` or `"auto"`). The point estimate stays the OLS /
+  fixed-effects coefficient; when `inference` is not `"ols"`, the p-value and
+  confidence intervals are routed through the shared conformal engine
+  (Chernozhukov-Wuthrich-Zhu moving-block permutation test, with a jackknife+
+  residual fallback for short pre-periods) applied to a parallel-trends
+  counterfactual. `DiffinDiff` builds the counterfactual on the geo-summed
+  series; `FixedEffects` builds it on the treated/control group means so the
+  residual scale matches its per-geo, per-day coefficient. Both keep their
+  existing `"ols"` closed-form path as the default.
+
 ## [0.14.0] - 2026-07-17
 
 A correctness and internal-consolidation release: five bug fixes (several
