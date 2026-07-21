@@ -1,6 +1,7 @@
 """Difference-in-differences method for geo-experiment causal inference."""
 
 import narwhals as nw
+import numpy as np
 import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 from narwhals.typing import IntoDataFrame
@@ -157,14 +158,12 @@ class DiffinDiff(EconometricEstimator):
             self.results["p_value"] = float(self.model.pvalues[f"{self.treatment_variable}:treatment_period"])
         else:
             actual_pre, prediction_pre, actual_post, prediction_post = self._counterfactual_from_parallel_trends()
-            self.results.update(
-                self._conformal_inference(actual_pre, prediction_pre, actual_post, prediction_post)
-            )
+            self.results.update(self._conformal_inference(actual_pre, prediction_pre, actual_post, prediction_post))
         return self
 
     def _counterfactual_from_parallel_trends(
         self,
-    ) -> tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Build the treated series and its parallel-trends counterfactual.
 
         Mirrors the counterfactual drawn in ``plot()``: the treated group's
