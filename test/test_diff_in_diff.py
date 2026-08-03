@@ -84,6 +84,32 @@ class TestDiffinDiff:
         )
         assert via_geos.results["lift"] == pytest.approx(via_column.results["lift"], rel=1e-6)
 
+    @staticmethod
+    @pytest.mark.parametrize("inference", ("conformal", "jackknife", "auto"))
+    def test_conformal_inference_keeps_ols_point_estimate(inference: str, effect_panel) -> None:
+        # The point estimate is always the OLS coefficient; only the inference
+        # (p-value / CIs) changes, so lift must match the default "ols" path.
+        ols = _fit(effect_panel)
+        conf = DiffinDiff(effect_panel.df, **effect_panel.kwargs(), inference=inference).pre_process().generate()
+        assert conf.results["lift"] == pytest.approx(ols.results["lift"], rel=1e-9)
+        assert conf.results["incrementality"] == pytest.approx(conf.results["lift"] * conf.n_dates)
+        assert conf.results["method"] in ("conformal", "jackknife+", "jackknife+ (residual)")
+        # The conformal CI is centred on the same effect and brackets it.
+        assert conf.results["lift_ci_lower"] <= conf.results["lift"] <= conf.results["lift_ci_upper"]
+        assert conf.results["incrementality_ci_lower"] == pytest.approx(conf.results["lift_ci_lower"] * conf.n_dates)
+
+    @staticmethod
+    def test_conformal_effect_vs_null_significance(effect_panel, null_panel) -> None:
+        effect = DiffinDiff(effect_panel.df, **effect_panel.kwargs(), inference="conformal").pre_process().generate()
+        null = DiffinDiff(null_panel.df, **null_panel.kwargs(), inference="conformal").pre_process().generate()
+        assert effect.results["p_value"] < null.results["p_value"]
+        assert effect.results["incrementality_ci_lower"] > 0.0
+
+    @staticmethod
+    def test_rejects_unknown_inference(effect_panel) -> None:
+        with pytest.raises(ValueError, match="inference must be one of"):
+            DiffinDiff(effect_panel.df, **effect_panel.kwargs(), inference="bogus")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

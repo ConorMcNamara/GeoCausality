@@ -75,6 +75,34 @@ class TestFixedEffects:
         with pytest.raises(ValueError, match="Cannot measure blarg"):
             model.summarize("blarg")
 
+    @staticmethod
+    @pytest.mark.parametrize("inference", ("conformal", "jackknife", "auto"))
+    def test_conformal_inference_keeps_ols_point_estimate(inference: str, effect_panel) -> None:
+        # The point estimate is always the fixed-effects coefficient; only the
+        # inference (p-value / CIs) changes, so lift must match the "ols" path.
+        ols = _fit(effect_panel)
+        conf = FixedEffects(effect_panel.df, **effect_panel.kwargs(), inference=inference).pre_process().generate()
+        assert conf.results["lift"] == pytest.approx(ols.results["lift"], rel=1e-9)
+        scale = conf.n_dates * conf.n_geos
+        assert conf.results["incrementality"] == pytest.approx(conf.results["lift"] * scale)
+        assert conf.results["method"] in ("conformal", "jackknife+", "jackknife+ (residual)")
+        # Incrementality CI stays on the coefficient scale (n_dates * n_geos), not
+        # the engine's default per-period (* t1) scaling.
+        assert conf.results["incrementality_ci_lower"] == pytest.approx(conf.results["lift_ci_lower"] * scale)
+        assert conf.results["incrementality_ci_upper"] == pytest.approx(conf.results["lift_ci_upper"] * scale)
+
+    @staticmethod
+    def test_conformal_effect_vs_null_significance(effect_panel, null_panel) -> None:
+        effect = FixedEffects(effect_panel.df, **effect_panel.kwargs(), inference="conformal").pre_process().generate()
+        null = FixedEffects(null_panel.df, **null_panel.kwargs(), inference="conformal").pre_process().generate()
+        assert effect.results["p_value"] < null.results["p_value"]
+        assert effect.results["incrementality_ci_lower"] > 0.0
+
+    @staticmethod
+    def test_rejects_unknown_inference(effect_panel) -> None:
+        with pytest.raises(ValueError, match="inference must be one of"):
+            FixedEffects(effect_panel.df, **effect_panel.kwargs(), inference="bogus")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

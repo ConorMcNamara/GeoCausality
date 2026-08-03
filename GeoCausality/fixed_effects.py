@@ -27,6 +27,7 @@ class FixedEffects(EconometricEstimator):
         alpha: float = 0.1,
         msrp: float = 0.0,
         spend: float = 0.0,
+        inference: str = "ols",
     ) -> None:
         """Initialize the fixed-effects estimator.
 
@@ -58,11 +59,25 @@ class FixedEffects(EconometricEstimator):
         spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
+        inference : str, default="ols"
+            How to compute p-values and confidence intervals. ``"ols"`` uses the
+            clustered standard errors of the ``campaign_treatment`` coefficient.
+            The other options attach distribution-free inference to a
+            parallel-trends counterfactual built on the treated/control group
+            means via the shared conformal engine: ``"conformal"`` runs the
+            Chernozhukov-Wuthrich-Zhu moving-block permutation test,
+            ``"jackknife"`` uses the jackknife+ residual interval, and ``"auto"``
+            picks conformal for long pre-periods and falls back to jackknife+ for
+            short ones. In every case the point estimate stays the fixed-effects
+            coefficient.
 
         Notes
         -----
         Based on https://matheusfacure.github.io/python-causality-handbook/14-Panel-Data-and-Fixed-Effects.html
         """
+        valid_inference = {"ols", "conformal", "jackknife", "auto"}
+        if inference not in valid_inference:
+            raise ValueError(f"inference must be one of {sorted(valid_inference)}, got {inference!r}")
         super().__init__(
             data,
             geo_variable,
@@ -77,6 +92,10 @@ class FixedEffects(EconometricEstimator):
             msrp,
             spend,
         )
+        self.inference = inference
+        # Route the conformal-family options through the shared engine's dispatcher.
+        if inference != "ols":
+            self.inference_method = inference
         self.n_dates: int | None = None
         self.n_geos: int | None = None
 
@@ -107,30 +126,90 @@ class FixedEffects(EconometricEstimator):
     def generate(self) -> "FixedEffects":
         """Fit the two-way fixed-effects model and store the lift estimates.
 
+        The point estimate is always the ``campaign_treatment`` coefficient. The
+        p-value and confidence intervals come from ``self.inference``: ``"ols"``
+        uses the model's clustered standard errors, while the conformal-family
+        options attach distribution-free inference to a parallel-trends
+        counterfactual built on the treated/control group means.
+
         Returns
         -------
         FixedEffects
             Itself, so it can be chained with summarize().
         """
+        if self.n_dates is None or self.n_geos is None:
+            raise ValueError("n_dates and n_geos must not be None")
         data_pd = self.data.to_pandas().set_index([self.geo_variable, self.date_variable])
         model = PanelOLS.from_formula(
             f"{self.y_variable} ~ campaign_treatment + EntityEffects + TimeEffects",
             data=data_pd,
         )
         self.model = model.fit(cov_type="clustered", cluster_entity=True, cluster_time=True)
-        cis = self.model.conf_int(1 - self.alpha)
+        lift = float(self.model.params.iloc[0])
+        scale = self.n_dates * self.n_geos
         self.results = {
-            "test": float(self.model.params.iloc[0]),
+            "test": lift,
             "control": 0.0,
-            "lift": float(self.model.params.iloc[0]),
-            "lift_ci_lower": float(cis["lower"].iloc[0]),
-            "lift_ci_upper": float(cis["upper"].iloc[0]),
-            "incrementality": float(self.model.params.iloc[0] * self.n_dates * self.n_geos),
-            "incrementality_ci_lower": float(cis["lower"].iloc[0] * self.n_dates * self.n_geos),
-            "incrementality_ci_upper": float(cis["upper"].iloc[0] * self.n_dates * self.n_geos),
-            "p_value": float(self.model.pvalues.iloc[0]),
+            "lift": lift,
+            "incrementality": lift * scale,
         }
+        if self.inference == "ols":
+            cis = self.model.conf_int(1 - self.alpha)
+            self.results["lift_ci_lower"] = float(cis["lower"].iloc[0])
+            self.results["lift_ci_upper"] = float(cis["upper"].iloc[0])
+            self.results["incrementality_ci_lower"] = self.results["lift_ci_lower"] * scale
+            self.results["incrementality_ci_upper"] = self.results["lift_ci_upper"] * scale
+            self.results["p_value"] = float(self.model.pvalues.iloc[0])
+        else:
+            actual_pre, prediction_pre, actual_post, prediction_post = self._counterfactual_from_parallel_trends()
+            inference = self._conformal_inference(actual_pre, prediction_pre, actual_post, prediction_post)
+            # The conformal ``lift`` CI is per-geo per-day (the coefficient scale),
+            # so rescale incrementality by n_dates * n_geos to match the point
+            # estimate rather than the engine's default per-period (* t1) scaling.
+            self.results["lift_ci_lower"] = inference["lift_ci_lower"]
+            self.results["lift_ci_upper"] = inference["lift_ci_upper"]
+            self.results["incrementality_ci_lower"] = inference["lift_ci_lower"] * scale
+            self.results["incrementality_ci_upper"] = inference["lift_ci_upper"] * scale
+            self.results["p_value"] = inference["p_value"]
+            self.results["conformal_band"] = inference["conformal_band"]
+            self.results["method"] = inference["method"]
         return self
+
+    def _counterfactual_from_parallel_trends(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Build the treated group mean and its parallel-trends counterfactual.
+
+        Averages the outcome over the treated geos and over the control geos per
+        date, then takes the control mean level-shifted by the pre-period gap as
+        the treated group's counterfactual. Working on group means (rather than
+        geo-summed series) keeps the per-period residuals on the same per-geo,
+        per-day scale as the fixed-effects coefficient, so the conformal p-value
+        and confidence intervals are centred on the same effect.
+
+        Returns
+        -------
+        A tuple of (actual_pre, prediction_pre, actual_post, prediction_post) as
+        numpy arrays.
+        """
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
+
+        def group_mean(treatment_value: int, period: int) -> np.ndarray:
+            return (
+                self.data.filter(
+                    (nw.col(self.treatment_variable) == treatment_value) & (nw.col("treatment_period") == period)
+                )
+                .group_by(self.date_variable)
+                .agg(nw.col(self.y_variable).mean())
+                .sort(self.date_variable)[self.y_variable]
+                .to_numpy()
+            )
+
+        treated_pre, control_pre = group_mean(1, 0), group_mean(0, 0)
+        treated_post, control_post = group_mean(1, 1), group_mean(0, 1)
+        offset = treated_pre.mean() - control_pre.mean()
+        return treated_pre, control_pre + offset, treated_post, control_post + offset
 
     def summarize(self, lift: str) -> None:
         """Print a tabulated summary of the estimated campaign lift.
