@@ -5,6 +5,39 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-08-11
+
+A packaging and tooling release. No changes to any estimator, the public API,
+or runtime behaviour.
+
+### Added
+
+- **PyPI publishing workflow** (`.github/workflows/publish.yml`) that builds
+  with `uv build` and publishes via PyPI Trusted Publishing (OIDC) on a
+  published GitHub Release.
+
+### Changed
+
+- **Build backend switched from `poetry-core` to `uv_build`.** The package
+  version is now declared once in `pyproject.toml` and read back at runtime via
+  `importlib.metadata`, so `__version__` can no longer drift from the packaged
+  metadata.
+- **CI migrated from `pip` to `uv`** (`uv sync` / `uv run` / `uv build`, with
+  `uvx` for the standalone `ruff` and `zuban` tools).
+- Bumped the `pytest` dev dependency to `>=9.0.3,<10.0.0`.
+
+### Removed
+
+- `poetry.lock` and the `[tool.poetry]` section, superseded by `uv.lock` and
+  `[tool.uv.build-backend]`.
+
+### Fixed
+
+- Behaviour-preserving type-checker and formatting cleanups to restore a green
+  `lint` CI job: a closure-narrowing fix in `FixedEffects`, a `drop(index=...)`
+  typing fix in the cross-validation splitter, and `ruff format` on `README.md`.
+  No estimator outputs change.
+
 ## [0.15.0] - 2026-07-21
 
 A feature release adding opt-in distribution-free inference to the two
