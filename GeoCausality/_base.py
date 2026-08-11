@@ -1417,7 +1417,7 @@ class EconometricEstimator(Estimator, ABC):
         -------
         A narwhals data frame with the date and outcome columns.
         """
-        return nw.from_native(
+        return nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame({self.date_variable: dates, self.y_variable: np.asarray(values, dtype=float)}),
             eager_only=True,
         )

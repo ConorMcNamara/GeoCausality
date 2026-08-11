@@ -203,7 +203,7 @@ class ElasticNetSyntheticControl(EconometricEstimator):
         prediction_pre_arr = control_pre_mat @ self.model + self.intercept_
         prediction_post_arr = control_post_mat @ self.model + self.intercept_
 
-        self.prediction_pre = nw.from_native(
+        self.prediction_pre = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_pre_pivot[self.date_variable].to_native(),
@@ -212,7 +212,7 @@ class ElasticNetSyntheticControl(EconometricEstimator):
             ),
             eager_only=True,
         )
-        self.prediction_post = nw.from_native(
+        self.prediction_post = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_post_pivot[self.date_variable].to_native(),

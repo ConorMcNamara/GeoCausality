@@ -70,13 +70,13 @@ pa = power.PowerAnalysis(
     geo_variable="geo",
     treatment_variable="is_treatment",
     date_variable="date",
-    pre_period="2022-06-30",   # last date of clean history
+    pre_period="2022-06-30",  # last date of clean history
     y_variable="orders",
     estimator=AugmentedSyntheticControl,
 )
 pa.simulate(effect_sizes=[0.0, 0.05, 0.10, 0.15], durations=[14, 28], n_sims=200).mde(target_power=0.8)
-pa.summarize()   # power curve + MDE table
-pa.plot()        # power-vs-effect curve, one line per duration
+pa.summarize()  # power curve + MDE table
+pa.plot()  # power-vs-effect curve, one line per duration
 ```
 
 Don't know which geos to treat yet? `MarketSelection` searches candidate test
@@ -94,8 +94,8 @@ ms = market_selection.MarketSelection(
     estimator=AugmentedSyntheticControl,
 )
 ms.search(n_test_geos=[1, 2, 3], effect_size=0.10, duration=28, n_sims=200)
-ms.summarize()   # ranked test markets: power, pre-fit, score
-ms.plot()        # top candidates by score
+ms.summarize()  # ranked test markets: power, pre-fit, score
+ms.plot()  # top candidates by score
 ```
 
 ---
@@ -164,7 +164,7 @@ model = diff_in_diff.DiffinDiff(
     y_variable="orders",
 )
 model.pre_process().generate().summarize(lift="relative")
-model.plot()   # parallel-trends: treated, control, and the counterfactual for the treated group
+model.plot()  # parallel-trends: treated, control, and the counterfactual for the treated group
 ```
 
 ### Fixed Effects
@@ -181,7 +181,7 @@ model = fixed_effects.FixedEffects(
     y_variable="orders",
 )
 model.pre_process().generate().summarize(lift="incremental")
-model.plot()   # event study: dynamic effect by period relative to treatment onset, with CIs
+model.plot()  # event study: dynamic effect by period relative to treatment onset, with CIs
 ```
 
 ### Interactive Fixed Effects
@@ -199,7 +199,7 @@ model = interactive_fixed_effects.InteractiveFixedEffects(
     # method="coefficient",  # full-panel Bai treatment coefficient (default is "projection")
 )
 model.pre_process().generate().summarize(lift="incremental")
-model.plot()   # three panels: actual vs. counterfactual, pointwise & cumulative difference
+model.plot()  # three panels: actual vs. counterfactual, pointwise & cumulative difference
 ```
 
 Unlike `FixedEffects` (which assumes a common time shock hitting every geo

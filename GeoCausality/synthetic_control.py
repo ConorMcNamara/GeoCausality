@@ -363,7 +363,7 @@ class SyntheticControlV(EconometricEstimator):
         self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
         prediction_pre_arr = control_pre_arr @ self.model
         prediction_post_arr = control_post_arr @ self.model
-        self.prediction_post = nw.from_native(
+        self.prediction_post = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_post_pivot[self.date_variable].to_native(),
@@ -372,7 +372,7 @@ class SyntheticControlV(EconometricEstimator):
             ),
             eager_only=True,
         )
-        self.prediction_pre = nw.from_native(
+        self.prediction_pre = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_pre_pivot[self.date_variable].to_native(),

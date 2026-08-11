@@ -1,6 +1,6 @@
 [project]
 name = "geocausality"
-version = "0.15.0"
+version = "0.15.1"
 description = "Package for analyzing the causal impact of geo-experiments"
 authors = [
     {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
@@ -34,16 +34,20 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest (>=8.3.5,<9.0.0)",
+    "pytest (>=9.0.3,<10.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)"
 ]
 
-[tool.poetry]
-packages = [{include = "GeoCausality"}]
-
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the importable package lives at the repo root, and its
+# directory name ("GeoCausality") differs from the normalized project
+# name ("geocausality"), so both must be declared explicitly.
+module-name = "GeoCausality"
+module-root = ""
 
 [tool.pytest.ini_options]
 pythonpath = ["geocausality", '.']
