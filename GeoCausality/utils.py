@@ -57,8 +57,8 @@ class HoldoutSplitter:
         df_holdout = self.df.iloc[holdout,]  # fmt: skip
         ser_holdout = self.ser.iloc[holdout]
 
-        df = self.df.drop(index=self.df.index[holdout])
-        ser = self.ser.drop(index=self.ser.index[holdout])
+        df = self.df.drop(index=self.df.index[holdout].tolist())
+        ser = self.ser.drop(index=self.ser.index[holdout].tolist())
 
         self.idx += 1
         return df, df_holdout, ser, ser_holdout

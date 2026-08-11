@@ -15,32 +15,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
+          enable-cache: true
           python-version: ${{ needs.python-versions.outputs.min-version }}
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff zuban
-
+      # ruff and zuban are standalone tools, not project dependencies, so run
+      # them with uvx (no need to sync the whole environment). Type checking
+      # tolerates missing imports (see [tool.zuban] in pyproject.toml).
       - name: Run ruff format check
-        run: ruff format --check .
+        run: uvx ruff format --check .
 
       - name: Run ruff linting
-        run: ruff check .
+        run: uvx ruff check .
 
       - name: Run zuban type checking
-        run: zuban check GeoCausality
+        run: uvx zuban check GeoCausality
 
   python-versions:
     name: Derive supported Python versions
@@ -82,28 +73,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          enable-cache: true
           # Harmless for stable releases; lets the newest classifier build before its final release.
-          allow-prereleases: true
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          python-version: ${{ matrix.python-version }}
 
       - name: Install package with dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+        run: uv sync --extra dev
 
       - name: Run tests with coverage
-        run: pytest --cov=GeoCausality --cov-report=xml --cov-report=term-missing
+        run: uv run pytest --cov=GeoCausality --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.python-versions.outputs.min-version
@@ -122,19 +103,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
+          enable-cache: true
           python-version: ${{ needs.python-versions.outputs.min-version }}
 
       - name: Install package and docs dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install .
-          pip install -r docs/requirements.txt
+          uv sync
+          uv pip install -r docs/requirements.txt
 
       - name: Build docs (warnings as errors)
-        run: sphinx-build -b html -W --keep-going docs docs/_build/html
+        run: uv run sphinx-build -b html -W --keep-going docs docs/_build/html
 
   build:
     name: Build distribution
@@ -144,18 +125,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
+          enable-cache: true
 
       - name: Build package
-        run: python -m build
+        run: uv build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

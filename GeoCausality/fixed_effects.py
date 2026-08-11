@@ -194,11 +194,14 @@ class FixedEffects(EconometricEstimator):
         """
         if self.treatment_variable is None:
             raise ValueError("treatment_variable must not be None")
+        # Bind the narrowed value locally; the None-check above does not flow
+        # into the nested closure, so reference the local rather than the attr.
+        treatment_variable = self.treatment_variable
 
         def group_mean(treatment_value: int, period: int) -> np.ndarray:
             return (
                 self.data.filter(
-                    (nw.col(self.treatment_variable) == treatment_value) & (nw.col("treatment_period") == period)
+                    (nw.col(treatment_variable) == treatment_value) & (nw.col("treatment_period") == period)
                 )
                 .group_by(self.date_variable)
                 .agg(nw.col(self.y_variable).mean())

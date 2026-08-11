@@ -175,7 +175,7 @@ class GeneralizedSyntheticControl(EconometricEstimator):
 
         prediction_all = self._fit_factor_model(y0, y1_all, n_pre)
 
-        self.prediction_pre = nw.from_native(
+        self.prediction_pre = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: self.actual_pre[self.date_variable].to_native(),
@@ -184,7 +184,7 @@ class GeneralizedSyntheticControl(EconometricEstimator):
             ),
             eager_only=True,
         )
-        self.prediction_post = nw.from_native(
+        self.prediction_post = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: self.actual_post[self.date_variable].to_native(),

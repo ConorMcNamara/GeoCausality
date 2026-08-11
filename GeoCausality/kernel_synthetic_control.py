@@ -176,7 +176,7 @@ class KernelSyntheticControl(NonLinearEstimator):
         prediction_pre_arr = predictor(control_pre_mat)
         prediction_post_arr = predictor(control_post_mat)
 
-        self.prediction_pre = nw.from_native(
+        self.prediction_pre = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_pre_pivot[self.date_variable].to_native(),
@@ -185,7 +185,7 @@ class KernelSyntheticControl(NonLinearEstimator):
             ),
             eager_only=True,
         )
-        self.prediction_post = nw.from_native(
+        self.prediction_post = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
                 {
                     self.date_variable: control_post_pivot[self.date_variable].to_native(),
