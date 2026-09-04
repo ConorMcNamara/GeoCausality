@@ -256,7 +256,7 @@ class RobustSyntheticControl(EconometricEstimator):
         M_hat, a matrix based on our SVD.
         """
         u, s, v = np.linalg.svd(groupby_x_transposed)
-        s_shape = s.shape[0] - 1
+        s_shape = s.shape[0]
         if self.threshold:
             idx = 0
             while s[idx] > self.threshold and idx < s_shape:
