@@ -151,13 +151,20 @@ class RobustSyntheticControl(EconometricEstimator):
         control_post_pivot = self._control_matrix("post")
         control_pre_mat = control_pre_pivot.drop(self.date_variable).to_numpy()
         control_post_mat = control_post_pivot.drop(self.date_variable).to_numpy()
-        # Cache the donor matrices for the shared faithful jackknife+ loop.
+        # Cache the raw donor matrices for the shared faithful jackknife+
+        # loop — _fit_predict_weights handles denoising each LOO fold.
         self._jk_x_pre = control_pre_mat
         self._jk_x_post = control_post_mat
         self._jk_y_pre = self.actual_pre[self.y_variable].to_numpy()
 
-        prediction_pre_arr = control_pre_mat @ self.model
-        prediction_post_arr = control_post_mat @ self.model
+        # Denoise the combined panel (same rows as daily_x) so the
+        # counterfactual is predicted in the same feature space the
+        # weights were fitted on.
+        combined = np.vstack([control_pre_mat, control_post_mat])
+        denoised = self._svd(combined.T).T
+        n_pre = control_pre_mat.shape[0]
+        prediction_pre_arr = denoised[:n_pre, :] @ self.model
+        prediction_post_arr = denoised[n_pre:, :] @ self.model
 
         self.prediction_pre = nw.from_native(  # type: ignore[call-overload]
             pl.DataFrame(
@@ -219,10 +226,10 @@ class RobustSyntheticControl(EconometricEstimator):
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
         """Refit the SVD-denoised ridge weights on a subset and predict.
 
-        Denoises the training donor matrix via the same truncated SVD as the full
-        fit, solves the ridge weights on the denoised pre-period, and predicts the
-        raw evaluation rows (matching ``generate``'s fit-denoised / predict-raw
-        scheme).
+        Denoises the combined training + evaluation panel via truncated SVD
+        (matching the paper's approach of denoising the full donor matrix
+        before splitting), solves the ridge weights on the denoised training
+        rows, and predicts on the denoised evaluation rows.
 
         Parameters
         ----------
@@ -237,10 +244,15 @@ class RobustSyntheticControl(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        denoised = self._svd(x_train.T).T
-        n_c = denoised.shape[1]
-        weights = np.linalg.solve(denoised.T @ denoised + self.lambda_ * np.identity(n_c), denoised.T @ y_train)
-        return x_eval @ weights
+        combined = np.vstack([x_train, x_eval])
+        denoised = self._svd(combined.T).T
+        denoised_train = denoised[:x_train.shape[0], :]
+        denoised_eval = denoised[x_train.shape[0]:, :]
+        n_c = denoised_train.shape[1]
+        weights = np.linalg.solve(
+            denoised_train.T @ denoised_train + self.lambda_ * np.identity(n_c), denoised_train.T @ y_train
+        )
+        return denoised_eval @ weights
 
     def _svd(self, groupby_x_transposed: np.ndarray) -> np.ndarray:
         """Perform singular value decomposition of our groupby_x_transposed matrix.
