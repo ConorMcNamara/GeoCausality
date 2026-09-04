@@ -305,9 +305,9 @@ class InteractiveFixedEffects(EconometricEstimator):
         f_mat = np.zeros((t, r))
         time_effect = np.zeros(t)
         for _ in range(self.max_iter):
-            means, time_effect = self._twoway_means(y0 - factor)
+            demeaned, time_effect = self._twoway_means(y0 - factor)
             if r > 0:
-                u, s, vt = np.linalg.svd(y0 - means, full_matrices=False)
+                u, s, vt = np.linalg.svd(demeaned + factor, full_matrices=False)
                 f_mat = u[:, :r] * s[:r]
                 new_factor = f_mat @ vt[:r, :]
             else:

@@ -149,9 +149,9 @@ class Estimator(abc.ABC):
     def _safe_ratio(numerator: float, denominator: float) -> float:
         """Divide, returning ``inf`` for a zero denominator.
 
-        Matches the guard in ``_get_roas`` so a degenerate summary (e.g. a
-        counterfactual or treated post-period that sums to zero) reports ``inf``
-        rather than raising ``ZeroDivisionError``.
+        Matches the guard in ``_get_roas`` / ``_get_cost_per`` so a degenerate
+        summary (e.g. a counterfactual or treated post-period that sums to zero)
+        reports ``inf`` rather than raising ``ZeroDivisionError``.
         """
         return numerator / denominator if denominator else float(np.inf)
 
@@ -417,7 +417,7 @@ class EconometricEstimator(Estimator, ABC):
     #
     # Every synthetic-control style estimator reports the same lift table and
     # return-on-ad-spend from an identical ``results`` contract, so ``summarize``
-    # and ``_get_roas`` are defined once here. They read ``results["test"]`` and
+    # and ``_get_roas`` / ``_get_cost_per`` are defined once here. They read ``results["test"]`` and
     # ``results["counterfactual"]`` as arrays of the post-period outcome, so each
     # estimator's ``generate`` stores those two keys as numpy arrays. Estimators
     # with a different estimand (e.g. ``DiffinDiff``, ``FixedEffects``) override
@@ -469,14 +469,22 @@ class EconometricEstimator(Estimator, ABC):
                 "Lift Type": ["Incremental"],
             }
             cells = self._format_lift_cells(lift, *incrementality)
-        else:
+        elif lift == "roas":
             table_dict = {
-                "Variant": [f"${round(self._safe_ratio(self.spend, variant), 2)}"],
-                "Baseline": [f"${round(self._safe_ratio(self.spend, baseline), 2)}"],
+                "Variant": [f"${round(variant * self.msrp, 2):,}"],
+                "Baseline": [f"${round(baseline * self.msrp, 2):,}"],
                 "Metric": ["ROAS"],
                 "Lift Type": ["Incremental"],
             }
             cells = self._format_lift_cells(lift, *self._get_roas())
+        else:
+            table_dict = {
+                "Variant": [f"${round(self._safe_ratio(self.spend, variant), 2)}"],
+                "Baseline": [f"${round(self._safe_ratio(self.spend, baseline), 2)}"],
+                "Metric": ["Cost-per"],
+                "Lift Type": ["Incremental"],
+            }
+            cells = self._format_lift_cells(lift, *self._get_cost_per())
         table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
@@ -484,21 +492,44 @@ class EconometricEstimator(Estimator, ABC):
     def _get_roas(self) -> tuple[float, float, float]:
         """Return the return-on-ad-spend point estimate and confidence interval.
 
+        ROAS is ``(incrementality * msrp) / spend``: the incremental revenue
+        generated per dollar of ad spend.
+
         Returns
         -------
-        A tuple of (ROAS, lower CI, upper CI), computed from the spend divided by
-        the incrementality and its interval (``inf`` when the denominator is not
-        positive).
+        A tuple of (ROAS, lower CI, upper CI). Returns ``inf`` when spend is
+        zero.
+        """
+        if self.results is None:
+            raise ValueError("results must not be None")
+        incr = self.results["incrementality"]
+        roas_lift = self._safe_ratio(incr * self.msrp, self.spend)
+        ci_lower = self.results["incrementality_ci_lower"]
+        roas_ci_lower = self._safe_ratio(ci_lower * self.msrp, self.spend)
+        ci_upper = self.results["incrementality_ci_upper"]
+        roas_ci_upper = self._safe_ratio(ci_upper * self.msrp, self.spend)
+        return roas_lift, roas_ci_lower, roas_ci_upper
+
+    def _get_cost_per(self) -> tuple[float, float, float]:
+        """Return the cost-per-acquisition point estimate and confidence interval.
+
+        CPA is ``spend / incrementality``: the ad spend required per
+        incremental unit.
+
+        Returns
+        -------
+        A tuple of (CPA, lower CI, upper CI). Returns ``inf`` when the
+        incrementality (or its CI bound) is not positive.
         """
         if self.results is None:
             raise ValueError("results must not be None")
         lift = ceil(self.results["incrementality"])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
+        cost_per = self.spend / lift if lift > 0 else np.inf
         ci_upper = ceil(self.results["incrementality_ci_upper"])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
+        cost_per_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
         ci_lower = ceil(self.results["incrementality_ci_lower"])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
-        return roas_lift, roas_ci_lower, roas_ci_upper
+        cost_per_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        return cost_per, cost_per_lower, cost_per_upper
 
     def _finalize_counterfactual_results(
         self,
@@ -1472,7 +1503,7 @@ class NonLinearEstimator(EconometricEstimator, ABC):
     pre-period ``(donor_matrix, treated_series)`` and returns a callable mapping a
     donor matrix to its counterfactual. Everything else is inherited from
     ``EconometricEstimator``: the shared lift table (``summarize``), the
-    return-on-ad-spend (``_get_roas``), conformal p-values/intervals, the faithful
+    return-on-ad-spend (``_get_roas`` / ``_get_cost_per``), conformal p-values/intervals, the faithful
     jackknife+ leave-one-out loop and the parametric bootstrap. Those inference
     tools are model-agnostic -- they drive the refit through
     ``_fit_predict_weights``, which this base routes to ``_fit_model`` -- so a

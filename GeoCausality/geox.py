@@ -175,10 +175,14 @@ class GeoX(MLEstimator):
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type"] = ["Incremental"]
             cells = self._format_lift_cells(lift, *cumulative)
-        else:
+        elif lift == "roas":
             table_dict["Metric"] = ["ROAS"]
             table_dict["Lift Type"] = ["Incremental"]
             cells = self._format_lift_cells(lift, *self._get_roas())
+        else:
+            table_dict["Metric"] = ["Cost-per"]
+            table_dict["Lift Type"] = ["Incremental"]
+            cells = self._format_lift_cells(lift, *self._get_cost_per())
         table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"][-1]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
@@ -186,13 +190,24 @@ class GeoX(MLEstimator):
     def _get_roas(self) -> tuple[float, float, float]:
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = ceil(self.results["cumulative_incrementality"][-1])
-        roas_lift = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
-        roas_ci_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["cumulative_incrementality_ci_lower"][-1])
-        roas_ci_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        incr = self.results["cumulative_incrementality"][-1]
+        roas_lift = self._safe_ratio(incr * self.msrp, self.spend)
+        ci_lower = self.results["cumulative_incrementality_ci_lower"][-1]
+        roas_ci_lower = self._safe_ratio(ci_lower * self.msrp, self.spend)
+        ci_upper = self.results["cumulative_incrementality_ci_upper"][-1]
+        roas_ci_upper = self._safe_ratio(ci_upper * self.msrp, self.spend)
         return roas_lift, roas_ci_lower, roas_ci_upper
+
+    def _get_cost_per(self) -> tuple[float, float, float]:
+        if self.results is None:
+            raise ValueError("results must not be None")
+        lift = ceil(self.results["cumulative_incrementality"][-1])
+        cost_per = self.spend / lift if lift > 0 else np.inf
+        ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
+        cost_per_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
+        ci_lower = ceil(self.results["cumulative_incrementality_ci_lower"][-1])
+        cost_per_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        return cost_per, cost_per_lower, cost_per_upper
 
     def _cumulative_distribution(self, rescale: float = 1.0) -> Any:
         """Calculate the shifted distribution of our cumulative data.
@@ -255,7 +270,8 @@ class GeoX(MLEstimator):
         test_len = len(self.post_control)
         ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
         ci_upper = delta.ppf(1 - self.alpha / 2).reshape(test_len)
-        p_value = delta.cdf(0.0).reshape(test_len)
+        one_sided = delta.cdf(0.0).reshape(test_len)
+        p_value = 2.0 * np.minimum(one_sided, 1.0 - one_sided)
         ci_dict = {
             "cumulative_ci_lower": ci_lower,
             "cumulative_ci_upper": ci_upper,
@@ -413,12 +429,12 @@ class GeoX(MLEstimator):
         for i, figure in enumerate(figures):
             for trace_data in figure.data:
                 total_fig.add_trace(trace_data, row=i + 1, col=1)
-                total_fig.add_vline(
-                    x=self.post_period,
-                    line_width=1,
-                    line_dash="dash",
-                    line_color="black",
-                    row=i + 1,
-                    col=1,
-                )
+            total_fig.add_vline(
+                x=self.post_period,
+                line_width=1,
+                line_dash="dash",
+                line_color="black",
+                row=i + 1,
+                col=1,
+            )
         total_fig.show()

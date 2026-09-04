@@ -248,10 +248,14 @@ class FixedEffects(EconometricEstimator):
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type"] = ["Incremental"]
             cells = self._format_lift_cells(lift, *incrementality)
-        else:
+        elif lift == "roas":
             table_dict["Metric"] = ["ROAS"]
             table_dict["Lift Type"] = ["Incremental"]
             cells = self._format_lift_cells(lift, *self._get_roas())
+        else:
+            table_dict["Metric"] = ["Cost-per"]
+            table_dict["Lift Type"] = ["Incremental"]
+            cells = self._format_lift_cells(lift, *self._get_cost_per())
         table_dict["Lift"], table_dict[lo_key], table_dict[hi_key] = cells
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
