@@ -429,12 +429,12 @@ class GeoX(MLEstimator):
         for i, figure in enumerate(figures):
             for trace_data in figure.data:
                 total_fig.add_trace(trace_data, row=i + 1, col=1)
-                total_fig.add_vline(
-                    x=self.post_period,
-                    line_width=1,
-                    line_dash="dash",
-                    line_color="black",
-                    row=i + 1,
-                    col=1,
-                )
+            total_fig.add_vline(
+                x=self.post_period,
+                line_width=1,
+                line_dash="dash",
+                line_color="black",
+                row=i + 1,
+                col=1,
+            )
         total_fig.show()
