@@ -9,19 +9,39 @@
 
 A Python library for measuring the causal impact of geo-level A/B experiments. GeoCausality provides a consistent, chainable API across a family of estimators — from simple difference-in-differences to interactive fixed effects and linear, nonlinear, kernel, matrix-completion, and elastic-net synthetic control.
 
----
+## Estimators
 
-## Table of Contents
+| Class | Description | Reference |
+|---|---|---|
+| `GeoX` | Time-based regression matched markets (TBR) | [Au 2018](https://storage.googleapis.com/gweb-research2023-media/pubtools/5500.pdf), [Kerman et al. 2017](http://audentia-gestion.fr/Recherche-Research-Google/38355.pdf) |
+| `DiffinDiff` | Difference-in-differences via OLS | [Card & Krueger 1994](https://www.nber.org/papers/w4509) |
+| `FixedEffects` | Two-way fixed effects (entity + time) via PanelOLS | — |
+| `InteractiveFixedEffects` | Interactive fixed effects / latent factor panel model | [Bai 2009](https://onlinelibrary.wiley.com/doi/10.3982/ECTA6135) |
+| `SyntheticControl` | Classic synthetic control (constrained weights) | [Abadie et al. 2010](https://www.tandfonline.com/doi/abs/10.1198/jasa.2009.ap08746) |
+| `SyntheticControlV` | Synthetic control with learned V matrix | [Abadie et al. 2010](https://www.tandfonline.com/doi/abs/10.1198/jasa.2009.ap08746) |
+| `PenalizedSyntheticControl` | Penalized synthetic control | [Abadie & L'Hour 2021](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1971535) |
+| `RobustSyntheticControl` | SVD-denoised synthetic control | [Amjad et al. 2018](https://www.jmlr.org/papers/v19/17-777.html) |
+| `AugmentedSyntheticControl` | Augmented SC with ridge bias correction | [Ben-Michael et al. 2021](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245) |
+| `ElasticNetSyntheticControl` | Elastic-net synthesis of SC, DiD & regression | [Doudchenko & Imbens 2016](https://www.nber.org/papers/w22791) |
+| `GeneralizedSyntheticControl` | Interactive fixed effects via control-only latent factors | [Xu 2017](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3) |
+| `MatrixCompletion` | Nuclear-norm matrix completion / MC-NNM | [Athey et al. 2021](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1891924) |
+| `NonlinearSyntheticControl` | Nonlinear-outcome synthetic control | [Tian 2023](https://arxiv.org/abs/2306.01967) |
+| `KernelSyntheticControl` | Kernel-ridge nonlinear-map synthetic control (linear + RBF) | — |
+| `SyntheticDiffInDiff` | Doubly-weighted difference-in-differences | [Arkhangelsky et al. 2021](https://www.aeaweb.org/articles?id=10.1257/aer.20190159) |
+| `CausalImpact` | Bayesian structural time-series counterfactual | [Brodersen et al. 2015](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-9/issue-1/Inferring-causal-impact-using-Bayesian-structural-time-series-models/10.1214/14-AOAS788.full) |
 
-- [Installation](#installation)
-- [Available Methods](#available-methods)
-- [Quick Start](#quick-start)
-- [API Overview](#api-overview)
-- [Validation](#validation)
-- [Contributing](#contributing)
-- [References](#references)
+### Pre-experiment design
 
----
+| Class | Description | Reference |
+|---|---|---|
+| `PowerAnalysis` | Pre-experiment power / MDE via placebo simulation | — |
+| `MarketSelection` | Rank candidate test-geo sets by power and pre-period fit | — |
+
+### GeoLift wrapper
+
+| Class | Description | Reference |
+|---|---|---|
+| `GeoLift` | Meta GeoLift pipeline: ASC point estimate + GSC parametric-bootstrap inference | [GeoLift docs](https://facebookincubator.github.io/GeoLift/) |
 
 ## Installation
 
@@ -29,188 +49,11 @@ A Python library for measuring the causal impact of geo-level A/B experiments. G
 pip install geocausality
 ```
 
-**Requirements:** Python ≥ 3.13
-
----
-
-## Available Methods
-
-| Class | Module | Description |
-|---|---|---|
-| `GeoX` | `geox` | Time-based regression matched markets (TBR) |
-| `DiffinDiff` | `diff_in_diff` | Difference-in-differences via OLS |
-| `FixedEffects` | `fixed_effects` | Two-way fixed effects (entity + time) via PanelOLS |
-| `InteractiveFixedEffects` | `interactive_fixed_effects` | Interactive fixed effects / latent factor panel model (Bai) |
-| `SyntheticControl` | `synthetic_control` | Classic synthetic control (constrained weights) |
-| `SyntheticControlV` | `synthetic_control` | Synthetic control with learned V matrix |
-| `PenalizedSyntheticControl` | `penalized_synthetic_control` | Synthetic control with pairwise penalty (Abadie & L'Hour) |
-| `RobustSyntheticControl` | `robust_synthetic_control` | SVD-denoised synthetic control (Amjad, Shah & Shen) |
-| `AugmentedSyntheticControl` | `augmented_synthetic_control` | Augmented SC with ridge bias correction (Ben-Michael et al.) |
-| `ElasticNetSyntheticControl` | `elastic_net_synthetic_control` | Elastic-net / intercept-shifted synthesis of SC, DiD & regression (Doudchenko & Imbens) |
-| `GeneralizedSyntheticControl` | `generalized_synthetic_control` | Interactive fixed effects via control-only latent factors (Xu) |
-| `MatrixCompletion` | `matrix_completion` | Nuclear-norm matrix completion of the masked panel / MC-NNM (Athey et al.) |
-| `NonlinearSyntheticControl` | `nonlinear_synthetic_control` | Nonlinear-outcome synthetic control: affine weights + distance-L1 + ridge (Tian 2023) |
-| `KernelSyntheticControl` | `kernel_synthetic_control` | Kernel-ridge nonlinear-map synthetic control (composite linear + RBF kernel) |
-| `SyntheticDiffInDiff` | `synthetic_diff_in_diff` | Doubly-weighted (unit + time) difference-in-differences (Arkhangelsky et al.) |
-| `CausalImpact` | `causal_impact` | Bayesian structural time-series counterfactual (Brodersen et al.) |
-
-### Pre-experiment design
-
-| Class | Module | Description |
-|---|---|---|
-| `PowerAnalysis` | `power` | Pre-experiment power / Minimum Detectable Effect via placebo simulation (GeoLift `GeoLiftPower` analog) |
-| `MarketSelection` | `market_selection` | Rank candidate test-geo sets by power and pre-period fit (GeoLift `GeoLiftMarketSelection` analog) |
-
-```python
-from GeoCausality import power
-from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
-
-pa = power.PowerAnalysis(
-    df,
-    geo_variable="geo",
-    treatment_variable="is_treatment",
-    date_variable="date",
-    pre_period="2022-06-30",  # last date of clean history
-    y_variable="orders",
-    estimator=AugmentedSyntheticControl,
-)
-pa.simulate(effect_sizes=[0.0, 0.05, 0.10, 0.15], durations=[14, 28], n_sims=200).mde(target_power=0.8)
-pa.summarize()  # power curve + MDE table
-pa.plot()  # power-vs-effect curve, one line per duration
-```
-
-Don't know which geos to treat yet? `MarketSelection` searches candidate test
-sets and ranks them, reusing `PowerAnalysis` as its scoring engine:
-
-```python
-from GeoCausality import market_selection
-
-ms = market_selection.MarketSelection(
-    df,
-    geo_variable="geo",
-    date_variable="date",
-    pre_period="2022-06-30",
-    y_variable="orders",
-    estimator=AugmentedSyntheticControl,
-)
-ms.search(n_test_geos=[1, 2, 3], effect_size=0.10, duration=28, n_sims=200)
-ms.summarize()  # ranked test markets: power, pre-fit, score
-ms.plot()  # top candidates by score
-```
-
----
+Requires Python >= 3.13.
 
 ## Quick Start
 
 All estimators share the same three-step chainable interface: `pre_process()` → `generate()` → `summarize()`.
-
-### GeoLift (one-call, GeoLift-style)
-
-`GeoLift` mirrors Meta's GeoLift pipeline: it uses **Augmented Synthetic Control**
-for the de-biased point estimate and **Generalized Synthetic Control** with
-**parametric-bootstrap** inference for the uncertainty, behind one call.
-
-```python
-from GeoCausality import geolift
-
-model = geolift.GeoLift(
-    df,
-    geo_variable="geo",
-    treatment_variable="is_treatment",
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    spend=500_000,
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()
-# model.results["incrementality"]  -> ASC point estimate
-# model.results["p_value"], ["incrementality_ci_lower/upper"]  -> GSC bootstrap inference
-```
-
-### GeoX (Time-Based Regression)
-
-```python
-import pandas as pd
-from GeoCausality import geox
-
-df = pd.read_csv("geo_data.csv", parse_dates=["date"])
-
-model = geox.GeoX(
-    df,
-    geo_variable="geo",
-    treatment_variable="is_treatment",
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    spend=500_000,
-)
-model.pre_process().generate().summarize(lift="incremental")
-```
-
-### Difference-in-Differences
-
-```python
-from GeoCausality import diff_in_diff
-
-model = diff_in_diff.DiffinDiff(
-    df,
-    geo_variable="geo",
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-)
-model.pre_process().generate().summarize(lift="relative")
-model.plot()  # parallel-trends: treated, control, and the counterfactual for the treated group
-```
-
-### Fixed Effects
-
-```python
-from GeoCausality import fixed_effects
-
-model = fixed_effects.FixedEffects(
-    df,
-    geo_variable="geo",
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()  # event study: dynamic effect by period relative to treatment onset, with CIs
-```
-
-### Interactive Fixed Effects
-
-```python
-from GeoCausality import interactive_fixed_effects
-
-model = interactive_fixed_effects.InteractiveFixedEffects(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    # method="coefficient",  # full-panel Bai treatment coefficient (default is "projection")
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()  # three panels: actual vs. counterfactual, pointwise & cumulative difference
-```
-
-Unlike `FixedEffects` (which assumes a common time shock hitting every geo
-equally), `InteractiveFixedEffects` lets latent time factors load onto each geo
-with a geo-specific weight, so it can absorb confounders that violate parallel
-trends. The default `method="projection"` estimates those factors from the
-control geos and projects the treated geos' pre-period onto them (robust);
-`method="coefficient"` instead estimates the treatment effect as a genuine
-full-panel Bai regression coefficient, jointly with the factors.
-
-### Synthetic Control
 
 ```python
 from GeoCausality import synthetic_control
@@ -222,197 +65,50 @@ model = synthetic_control.SyntheticControl(
     pre_period="2022-06-30",
     post_period="2022-07-01",
     y_variable="orders",
+    spend=500_000,
 )
 model.pre_process().generate().summarize(lift="roas")
-```
-
-### Elastic-Net Synthetic Control
-
-```python
-from GeoCausality import elastic_net_synthetic_control
-
-model = elastic_net_synthetic_control.ElasticNetSyntheticControl(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    # intercept=True, l1_ratio=0.5, lambda_=None,  # None -> cross-validated
-    # non_negative=False,                          # drop the simplex constraints
-)
-model.pre_process().generate().summarize(lift="incremental")
 model.plot()
 ```
 
-`ElasticNetSyntheticControl` (Doudchenko & Imbens, 2016) is the *synthesis*
-estimator: it unifies synthetic control, difference-in-differences, and
-constrained regression as one penalized regression, `mu + donor_matrix @ w`, fit
-on the pre-period by **elastic net**. It relaxes classic synthetic control's three
-restrictions via explicit switches — an `intercept` (a level shift, so the
-synthetic unit can track a treated unit outside the donor convex hull), dropping
-the `sum_to_one` / `non_negative` weight constraints, and elastic-net
-regularisation (`l1_ratio` mixes ridge vs. lasso, `lambda_` is cross-validated by
-default). Special cases recover the rest of the family: classic SC
-(`intercept=False, non_negative=True, sum_to_one=True, lambda_=0`), a
-ridge-augmented fit (`l1_ratio=0`), matched-market OLS (`lambda_=0`), and DiD. The
-`sum_to_one` constrained regime is not yet implemented (it raises
-`NotImplementedError`); for a dedicated pure-ridge fit prefer
-`AugmentedSyntheticControl`.
-
-### Matrix Completion
+Estimators that take a `treatment_variable` column instead of explicit geo lists work the same way:
 
 ```python
-from GeoCausality import matrix_completion
+from GeoCausality import diff_in_diff
 
-model = matrix_completion.MatrixCompletion(
+model = diff_in_diff.DiffinDiff(
     df,
-    test_geos=["geo_A", "geo_B"],
+    geo_variable="geo",
+    treatment_variable="is_treatment",
     date_variable="date",
     pre_period="2022-06-30",
     post_period="2022-07-01",
     y_variable="orders",
-    # lambda_=...,  # nuclear-norm penalty (cross-validated by default)
 )
-model.pre_process().generate().summarize(lift="incremental")
+model.pre_process().generate().summarize(lift="relative")
 model.plot()
 ```
 
-`MatrixCompletion` (Athey et al., 2021) — the MC-NNM estimator — takes a different
-route from the rest of the family: instead of regressing the treated series on a
-weighted combination of donors, it stacks **every** unit into one panel matrix,
-masks the treated unit's post-period cells as missing, and completes the whole
-matrix under a low-rank (**nuclear-norm**) penalty. The imputed treated
-post-period cells are the counterfactual. It fits two-way fixed effects plus a
-low-rank term by soft-impute, with the penalty chosen by cross-validation, so it
-runs with no rank or penalty tuning. Because there is no donor-weight vector, the
-weight-based faithful jackknife+ and parametric bootstrap do not apply; it reuses
-the shared conformal inference with the residual-only jackknife+ fallback on short
-pre-periods. It recovers the canonical Prop 99 magnitude closely and, like the
-kernel map, attenuates toward the pre-period level on the shorter, single-unit
-reunification panel.
+## Reference Options
 
-### Nonlinear Synthetic Control
+### Constructor parameters
 
-```python
-from GeoCausality import nonlinear_synthetic_control
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `data` | `pd.DataFrame \| pl.DataFrame` | — | Geo-level time-series data |
+| `geo_variable` | `str` | `"geo"` | Column identifying each geo unit |
+| `test_geos` | `list[str] \| None` | `None` | Geos assigned to treatment |
+| `control_geos` | `list[str] \| None` | `None` | Geos withheld from treatment |
+| `treatment_variable` | `str \| None` | `"is_treatment"` | Binary treatment indicator column |
+| `date_variable` | `str` | `"date"` | Date column |
+| `pre_period` | `str` | `"2021-01-01"` | Last date of the pre-treatment window |
+| `post_period` | `str` | `"2021-01-02"` | First date of the post-treatment window |
+| `y_variable` | `str` | `"y"` | Outcome metric column |
+| `alpha` | `float` | `0.1` | Significance level for confidence intervals |
+| `msrp` | `float` | `0.0` | Average sale price (for revenue lift) |
+| `spend` | `float` | `0.0` | Campaign spend (for ROAS / cost-per) |
 
-model = nonlinear_synthetic_control.NonlinearSyntheticControl(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    # a=..., b=...,  # distance-L1 / ridge penalties (cross-validated by default)
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()
-```
-
-`NonlinearSyntheticControl` (Tian, 2023) generalizes synthetic control to the
-case where the untreated outcome is a **strictly monotonic nonlinear** function
-of a latent linear index. Because that link is monotonic, matching the treated
-unit's observed pre-period outcomes still matches the latent index, so the
-counterfactual stays the familiar linear-in-weights combination of donor
-outcomes and no link function is specified. The adaptation is in the weight
-solver: weights are **affine** (sum to one but may be negative, so the synthetic
-unit can sit outside the donor convex hull), a **distance-weighted L1** penalty
-`a` concentrates weight on donors close to the treated unit, and an **L2 ridge**
-`b` spreads it out. Both penalties default to values chosen by rolling-origin
-cross-validation. Being linear-in-weights, it tracks trends and reproduces the
-canonical Prop 99 / reunification results.
-
-### Kernel Synthetic Control
-
-```python
-from GeoCausality import kernel_synthetic_control
-
-model = kernel_synthetic_control.KernelSyntheticControl(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    # bandwidth=..., lambda_=..., linear_weight=1.0,
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()
-```
-
-`KernelSyntheticControl` learns a genuinely nonlinear **regression** of the
-treated series on the donor outcomes via kernel ridge with a composite
-**linear + RBF** kernel, rather than a level-matching weighted combination. The
-linear term gives a global backbone that extrapolates trends; the RBF term adds
-local nonlinear flexibility; the treated series is centred so its level is
-carried by an intercept. The bandwidth defaults to the median-pairwise-distance
-heuristic and the ridge penalty `lambda_` to the one-standard-error rule over a
-leave-one-out grid (both pinnable); `linear_weight` trades off the two kernels.
-Reach for it when the treated-donor relationship is nonlinear within a
-reasonably stationary regime; for strongly trending panels prefer
-`NonlinearSyntheticControl` or the linear family, since a nonlinear map
-attenuates toward the pre-period level.
-
-### Synthetic Difference-in-Differences
-
-```python
-from GeoCausality import synthetic_diff_in_diff
-
-model = synthetic_diff_in_diff.SyntheticDiffInDiff(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-)
-model.pre_process().generate().summarize(lift="incremental")
-```
-
-`SyntheticDiffInDiff` (Arkhangelsky et al., 2021) sits between difference-in-differences
-and synthetic control: it fits non-negative, L2-penalized **unit** weights against the
-treated *trend* (a unit fixed effect absorbs the level gap, so donors need only move
-parallel to the treated series, not match its level) plus non-negative **time** weights
-that focus the pre-period comparison on the periods most predictive of the post-period.
-The estimand is the scalar average treatment effect on the treated — the doubly-weighted
-DID. Unlike the rest of the synthetic-control family, inference is the **placebo variance**
-of Arkhangelsky et al. (each donor is treated as a pseudo-treated unit against the
-remaining donors), reported in `results["standard_error"]` with `results["method"] ==
-"placebo"`. The `zeta` argument sets the unit-weight penalty and defaults to the paper's
-rule (`n_post ** 0.25 * sd(first-differences of the donor outcomes)`).
-
-### CausalImpact
-
-```python
-from GeoCausality import causal_impact
-
-model = causal_impact.CausalImpact(
-    df,
-    test_geos=["geo_A", "geo_B"],
-    date_variable="date",
-    pre_period="2022-06-30",
-    post_period="2022-07-01",
-    y_variable="orders",
-    # level="local linear trend",  # add a stochastic slope for drifting series
-    # seasonal=7,                  # weekly seasonality for daily data
-)
-model.pre_process().generate().summarize(lift="incremental")
-model.plot()
-```
-
-`CausalImpact` (Brodersen et al., 2015) builds the counterfactual from a
-**structural time-series model** (statsmodels' `UnobservedComponents`): a
-time-varying level/trend, optional seasonality, and a regression on the donor
-geos, fit on the pre-period and forecast forward over the post-period. Inference
-is native to the model — it draws counterfactual paths from the fitted state
-posterior via `simulate()` and reports the percentile interval of the
-cumulative-effect distribution with a posterior tail-area `p_value`
-(`results["method"] == "structural-ts"`). Set `inference_method = "conformal"` or
-`"jackknife"` to route through the shared synthetic-control inference instead;
-`n_sim` and `sim_seed` control the posterior draws.
-
-### `summarize` lift options
+### `lift`
 
 | Value | Description |
 |---|---|
@@ -423,137 +119,10 @@ cumulative-effect distribution with a posterior tail-area `p_value`
 | `"roas"` | Return on ad spend (requires `spend`) |
 | `"cost-per"` | Cost per incremental unit (requires `spend`) |
 
-### Inference on short pre-periods
+### `inference_method`
 
-Synthetic-control estimators report a distribution-free p-value and confidence
-intervals via the Chernozhukov–Wüthrich–Zhu moving-block permutation test and a
-split-conformal band. When the pre-treatment period is too short for those to be
-reliable (the band quantile saturates), inference automatically falls back to
-**jackknife+** (Barber et al., 2021), which reuses every pre-period point for
-both fitting and calibration. Every synthetic-control estimator refits its own
-weights leave-one-out for a faithful jackknife+ (`"jackknife+"`); estimators
-without that refit fall back to a residual-only approximation
-(`"jackknife+ (residual)"`). Setting `model.inference_method = "bootstrap"`
-instead performs inference by **parametric bootstrap** (GeoLift's GSC-style
-approach), supported across the whole synthetic-control family; `n_boot` and
-`bootstrap_seed` are configurable. The method used is reported in
-`results["method"]` (`"conformal"`, `"jackknife+"`, `"jackknife+ (residual)"`, or
-`"bootstrap"`), and can be forced with
-`model.inference_method = "conformal" | "jackknife" | "bootstrap"` before
-`generate()`.
-
-### Plotting
-
-Every estimator exposes a `plot()` method (call it after `generate()`) that
-renders an interactive Plotly figure with the diagnostic best suited to the
-method:
-
-| Estimator | `plot()` shows |
-|---|---|
-| `GeoX` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands |
-| Synthetic-control family (`SyntheticControl`, `SyntheticControlV`, `PenalizedSyntheticControl`, `RobustSyntheticControl`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `KernelSyntheticControl`, `SyntheticDiffInDiff`), `CausalImpact`, and `InteractiveFixedEffects` | Three panels: actual vs. counterfactual, pointwise difference, and cumulative difference, each with confidence bands (the pointwise prediction band around the counterfactual and around zero, and the cumulative band growing to the reported incrementality interval) |
-| `DiffinDiff` | Parallel-trends plot: treated and control group averages over time plus the parallel-trends counterfactual for the treated group. The post-period gap between the treated series and the counterfactual is the fitted DiD estimand |
-| `FixedEffects` | Event-study plot: the dynamic treatment effect by period relative to treatment onset, with confidence intervals. Pre-onset coefficients near zero support parallel trends; post-onset coefficients trace the effect |
-
-`GeoLift.plot()` reuses the synthetic-control three-panel view, and the
-pre-experiment tools plot their own summaries (`PowerAnalysis.plot()` — the
-power-vs-effect curve; `MarketSelection.plot()` — top candidate test sets by
-score).
-
-The `DiffinDiff` and `FixedEffects` plots are fit for visualization only and do
-not change the point estimate or intervals reported by `summarize()`. In
-particular, `FixedEffects.plot()` fits an auxiliary event-study model
-independently of `generate()`.
-
----
-
-## API Overview
-
-Every estimator accepts the same core constructor arguments:
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `data` | `pd.DataFrame \| pl.DataFrame` | — | Geo-level time-series data |
-| `geo_variable` | `str` | `"geo"` | Column identifying each geo unit |
-| `test_geos` | `list[str] \| None` | `None` | Geos assigned to treatment |
-| `control_geos` | `list[str] \| None` | `None` | Geos withheld from treatment |
-| `treatment_variable` | `str \| None` | `"is_treatment"` | Binary treatment indicator column (used when geo lists are not provided) |
-| `date_variable` | `str` | `"date"` | Date column |
-| `pre_period` | `str` | `"2021-01-01"` | Last date of the pre-treatment window |
-| `post_period` | `str` | `"2021-01-02"` | First date of the post-treatment window |
-| `y_variable` | `str` | `"y"` | Outcome metric column |
-| `alpha` | `float` | `0.1` | Significance level for confidence intervals |
-| `msrp` | `float` | `0.0` | Average sale price (for revenue lift) |
-| `spend` | `float` | `0.0` | Campaign spend (for ROAS / cost-per) |
-
-`GeneralizedSyntheticControl` also accepts `factor_selection` (`"er"` by default,
-the eigenvalue-ratio criterion; `"cv"` for cross-validation) and `n_factors` to
-fix the latent-factor count directly.
-
-`InteractiveFixedEffects` accepts `n_factors` / `max_factors` (the latent-factor
-count, auto-selected by the eigenvalue-ratio criterion when `n_factors` is
-`None`) and `method` (`"projection"` by default, or `"coefficient"` for the
-full-panel Bai treatment coefficient).
-
----
-
-## Validation
-
-GeoCausality's estimators are checked against the **published results of each
-method's foundational paper** — "golden master" parity tests in `test/` that
-vendor the canonical public dataset for each benchmark and assert our point
-estimate reproduces the literature within a reimplementation tolerance. Each test
-skips cleanly if its vendored dataset is absent.
-
-| Benchmark | Dataset | Estimators | Published | GeoCausality |
-|---|---|---|---|---|
-| Meta GeoLift walkthrough | `GeoLift_Test` | `GeoLift` | +5.5% lift / 4,704 incremental | ~6.5% / ~5,552 |
-| Card & Krueger (1994), NJ/PA minimum wage | `public.dat` (410 restaurants) | `DiffinDiff`, `FixedEffects` | DiD ≈ +2.76 FTE | +2.75 / +2.78 |
-| Abadie, Diamond & Hainmueller (2010), Prop 99 | `Synth` `smoking` (39 states × 1970–2000) | `SyntheticControl`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`, `PenalizedSyntheticControl`, `GeneralizedSyntheticControl`, `MatrixCompletion`, `NonlinearSyntheticControl`, `InteractiveFixedEffects`, `SyntheticDiffInDiff` | avg gap ≈ −19.5, year-2000 gap ≈ −26 packs | −19.5 / −15.8 / −15.2 / −23.5 / −20.7 / −20.0 / −20.2 / −26.2 / −15.6 |
-
-`KernelSyntheticControl` is validated against both panels for sign and
-significance rather than magnitude: as a nonlinear *map* of the donor outcomes it
-attenuates toward the pre-period level on strongly trending single-unit panels,
-so it is not expected to reproduce the published ATT magnitude (use
-`NonlinearSyntheticControl` or the linear family there).
-
-The GeoLift parity test caught a level bias in
-augmented synthetic control, and the Proposition 99 parity test surfaced — and we
-then fixed — two synthetic-control bugs:
-
-- **`PenalizedSyntheticControl`** now fits its donor weights against the full
-  pre-period **trajectory** (like `SyntheticControl`) with a per-period-scaled
-  Abadie & L'Hour penalty, instead of matching only the pre-period mean
-  (average post-period gap −33 → −23.5).
-- **`GeneralizedSyntheticControl`** now selects its latent-factor count by the
-  eigenvalue-ratio criterion (Ahn & Horenstein, 2013) by default, which no longer
-  over-selects factors and washes out the effect (average post-period gap −3.6 →
-  −20.7). The previous cross-validation is still available via
-  `factor_selection="cv"`.
-
----
+`"conformal"`, `"jackknife"`, `"bootstrap"` — set before `generate()` to override automatic selection. Reported in `results["method"]`.
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up the development environment, running tests, and submitting pull requests.
-
----
-
-## References
-
-- Au, Tim. "A Time-Based Regression Matched Markets Approach for Designing Geo Experiments." (2018). [PDF](https://storage.googleapis.com/gweb-research2023-media/pubtools/5500.pdf)
-- Kerman, Jouni, Peng Wang, and Jon Vaver. "Estimating ad effectiveness using geo experiments in a time-based regression framework." Google, 2017. [PDF](http://audentia-gestion.fr/Recherche-Research-Google/38355.pdf)
-- Brodersen, Kay H., et al. "Inferring causal impact using Bayesian structural time-series models." *Annals of Applied Statistics* 9.1 (2015): 247–274. [Link](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-9/issue-1/Inferring-causal-impact-using-Bayesian-structural-time-series-models/10.1214/14-AOAS788.full)
-- Abadie, Alberto, and Jérémy L'Hour. "A penalized synthetic control estimator for disaggregated data." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1971535)
-- Ben-Michael, Eli, Avi Feller, and Jesse Rothstein. "The augmented synthetic control method." *Journal of the American Statistical Association* (2021). [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1929245)
-- Amjad, Mohammad, Devavrat Shah, and Dennis Shen. "Robust synthetic control." *Journal of Machine Learning Research* 19.1 (2018): 802–852. [Link](https://www.jmlr.org/papers/v19/17-777.html)
-- Athey, Susan, Mohsen Bayati, Nikolay Doudchenko, Guido Imbens, and Khashayar Khosravi. "Matrix completion methods for causal panel data models." *Journal of the American Statistical Association* 116.536 (2021): 1716–1730. [Link](https://www.tandfonline.com/doi/full/10.1080/01621459.2021.1891924)
-- Doudchenko, Nikolay, and Guido W. Imbens. "Balancing, Regression, Difference-in-Differences and Synthetic Control Methods: A Synthesis." *NBER Working Paper No. 22791* (2016). [Link](https://www.nber.org/papers/w22791)
-- Tian, Wei. "The Synthetic Control Method with Nonlinear Outcomes." *arXiv preprint arXiv:2306.01967* (2023). [Link](https://arxiv.org/abs/2306.01967)
-- Barber, Rina Foygel, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. "Predictive inference with the jackknife+." *Annals of Statistics* 49.1 (2021): 486–507. [Link](https://projecteuclid.org/journals/annals-of-statistics/volume-49/issue-1/Predictive-inference-with-the-jackknife/10.1214/20-AOS1965.full)
-- Ahn, Seung C., and Alex R. Horenstein. "Eigenvalue ratio test for the number of factors." *Econometrica* 81.3 (2013): 1203–1227. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA8968)
-- Abadie, Alberto, Alexis Diamond, and Jens Hainmueller. "Synthetic control methods for comparative case studies: Estimating the effect of California's tobacco control program." *Journal of the American Statistical Association* 105.490 (2010): 493–505. [Link](https://www.tandfonline.com/doi/abs/10.1198/jasa.2009.ap08746)
-- Card, David, and Alan B. Krueger. "Minimum wages and employment: A case study of the fast-food industry in New Jersey and Pennsylvania." *American Economic Review* 84.4 (1994): 772–793. [Link](https://www.nber.org/papers/w4509)
-- Bai, Jushan. "Panel data models with interactive fixed effects." *Econometrica* 77.4 (2009): 1229–1279. [Link](https://onlinelibrary.wiley.com/doi/10.3982/ECTA6135)
-- Xu, Yiqing. "Generalized Synthetic Control Method: Causal Inference with Interactive Fixed Effects Models." *Political Analysis* 25.1 (2017): 57–76. [Link](https://www.cambridge.org/core/journals/political-analysis/article/generalized-synthetic-control-method-causal-inference-with-interactive-fixed-effects-models/B63A8BD7C239DD4141C67DA10CD0E4F3)
-- GeoLift (Meta). [Documentation](https://facebookincubator.github.io/GeoLift/)
+See [CONTRIBUTING.md](CONTRIBUTING.md).
