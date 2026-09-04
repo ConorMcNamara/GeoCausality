@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-09-03
+
+### Fixed
+
+- **ROAS now computes `(incrementality * msrp) / spend`** instead of
+  `spend / incrementality` (which is cost-per-acquisition). `lift="roas"` and
+  `lift="cost-per"` now return different values with correct metric labels.
+- **RobustSyntheticControl SVD threshold off-by-one**: the truncation loop
+  silently dropped the last singular value when all exceeded the threshold.
+  Also swapped the loop condition order to prevent an `IndexError`.
+- **RobustSyntheticControl fit-denoised / predict-raw inconsistency**: weights
+  fitted on the SVD-denoised donor matrix are now applied to denoised data for
+  prediction, matching Amjad, Shah & Shen (2018).
+- **GeoX one-sided p-value**: changed from `P(X ≤ 0)` to a two-sided p-value
+  (`2 * min(p, 1-p)`), consistent with every other estimator.
+- **GeoX duplicate vlines**: `add_vline` was called once per trace instead of
+  once per subplot.
+
 ## [0.15.1] - 2026-08-11
 
 A packaging and tooling release. No changes to any estimator, the public API,
