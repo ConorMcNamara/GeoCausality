@@ -246,8 +246,8 @@ class RobustSyntheticControl(EconometricEstimator):
         """
         combined = np.vstack([x_train, x_eval])
         denoised = self._svd(combined.T).T
-        denoised_train = denoised[:x_train.shape[0], :]
-        denoised_eval = denoised[x_train.shape[0]:, :]
+        denoised_train = denoised[: x_train.shape[0], :]
+        denoised_eval = denoised[x_train.shape[0] :, :]
         n_c = denoised_train.shape[1]
         weights = np.linalg.solve(
             denoised_train.T @ denoised_train + self.lambda_ * np.identity(n_c), denoised_train.T @ y_train
