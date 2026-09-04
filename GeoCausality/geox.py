@@ -270,7 +270,8 @@ class GeoX(MLEstimator):
         test_len = len(self.post_control)
         ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
         ci_upper = delta.ppf(1 - self.alpha / 2).reshape(test_len)
-        p_value = delta.cdf(0.0).reshape(test_len)
+        one_sided = delta.cdf(0.0).reshape(test_len)
+        p_value = 2.0 * np.minimum(one_sided, 1.0 - one_sided)
         ci_dict = {
             "cumulative_ci_lower": ci_lower,
             "cumulative_ci_upper": ci_upper,
