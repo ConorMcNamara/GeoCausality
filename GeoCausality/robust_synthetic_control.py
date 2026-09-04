@@ -259,7 +259,7 @@ class RobustSyntheticControl(EconometricEstimator):
         s_shape = s.shape[0]
         if self.threshold:
             idx = 0
-            while s[idx] > self.threshold and idx < s_shape:
+            while idx < s_shape and s[idx] > self.threshold:
                 idx += 1
         elif self.sv_count is not None:
             idx = self.sv_count
