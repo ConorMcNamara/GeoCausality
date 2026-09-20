@@ -36,7 +36,13 @@ from GeoCausality.power import PowerAnalysis
 
 
 class MarketSelection:
-    """Search candidate test-geo sets and rank them by power and pre-period fit."""
+    """Search candidate test-geo sets and rank them by power and pre-period fit.
+
+    When ``dtw_top_k`` is passed to :meth:`search`, candidates are first ranked
+    by Dynamic Time Warping similarity between test geos and their nearest
+    controls, and only the most promising ones proceed to the expensive power
+    simulation -- a pre-filter inspired by the R *MarketMatching* package.
+    """
 
     def __init__(
         self,
@@ -182,6 +188,105 @@ class MarketSelection:
             seen.add(tuple(sorted(include_set.union(combo))))
         return list(seen)
 
+    @staticmethod
+    def _dtw_distance(s: np.ndarray, t: np.ndarray) -> float:
+        """Dynamic Time Warping distance between two 1-D series.
+
+        Parameters
+        ----------
+        s, t : 1-D arrays
+            The two time series.
+
+        Returns
+        -------
+        The accumulated DTW cost (L1 element cost, no window constraint).
+        """
+        n, m = len(s), len(t)
+        dtw = np.full((n + 1, m + 1), np.inf)
+        dtw[0, 0] = 0.0
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                cost = abs(s[i - 1] - t[j - 1])
+                dtw[i, j] = cost + min(dtw[i - 1, j], dtw[i, j - 1], dtw[i - 1, j - 1])
+        return float(dtw[n, m])
+
+    def _geo_series(self) -> dict[str, np.ndarray]:
+        """Extract the z-scored pre-period time series per geo.
+
+        Z-scoring makes DTW distances comparable across geos with different
+        outcome scales: a geo with mean-100 and a geo with mean-10000 are
+        judged on shape, not level.
+
+        Returns
+        -------
+        A mapping from geo name to its z-scored pre-period series as a numpy
+        array, sorted by date.
+        """
+        date_str = nw.col(self.date_variable).cast(nw.String)
+        pre = self.data.filter(date_str <= self.pre_period).sort(self.date_variable)
+        result: dict[str, np.ndarray] = {}
+        for geo in self.all_geos:
+            vals = pre.filter(nw.col(self.geo_variable) == geo)[self.y_variable].to_numpy().astype(float)
+            std = vals.std()
+            if std > 0:
+                vals = (vals - vals.mean()) / std
+            else:
+                vals = vals - vals.mean()
+            result[geo] = vals
+        return result
+
+    def _pairwise_dtw(self) -> dict[tuple[str, str], float]:
+        """Compute pairwise DTW distances between all geos.
+
+        Returns
+        -------
+        A mapping from ``(geo_a, geo_b)`` to DTW distance, with both orderings
+        stored for convenient lookup.
+        """
+        series = self._geo_series()
+        geos = list(series)
+        dist: dict[tuple[str, str], float] = {}
+        for i, a in enumerate(geos):
+            dist[(a, a)] = 0.0
+            for b in geos[i + 1 :]:
+                d = self._dtw_distance(series[a], series[b])
+                dist[(a, b)] = d
+                dist[(b, a)] = d
+        return dist
+
+    def _dtw_filter(
+        self,
+        candidates: list[tuple[str, ...]],
+        top_k: int,
+    ) -> list[tuple[str, ...]]:
+        """Keep the ``top_k`` candidates whose test geos are closest to controls.
+
+        For each candidate, the score is the average over test geos of each test
+        geo's minimum DTW distance to any control geo. Lower is better: it means
+        the control pool contains close shape-matches for every test geo.
+
+        Parameters
+        ----------
+        candidates : list of tuples
+            The full candidate pool from ``_candidate_sets``.
+        top_k : int
+            How many candidates to keep.
+
+        Returns
+        -------
+        The ``top_k`` candidates with the smallest DTW scores.
+        """
+        dist = self._pairwise_dtw()
+
+        def score(test_geos: tuple[str, ...]) -> float:
+            controls = [g for g in self.all_geos if g not in set(test_geos)]
+            return float(
+                np.mean([min(dist[(tg, cg)] for cg in controls) for tg in test_geos])
+            )
+
+        scored = sorted(candidates, key=score)
+        return scored[:top_k]
+
     def _pre_fit(self, power: PowerAnalysis, duration: int) -> float | None:
         """Scaled pre-period fit of the estimator for a candidate split.
 
@@ -248,6 +353,7 @@ class MarketSelection:
         include: list[str] | None = None,
         exclude: list[str] | None = None,
         n_sims: int = 100,
+        dtw_top_k: int | None = None,
     ) -> "MarketSelection":
         """Score and rank candidate test-geo sets.
 
@@ -264,6 +370,11 @@ class MarketSelection:
             Geos forced into / barred from every test set.
         n_sims : int, default=100
             Placebo experiments per candidate, forwarded to the power simulation.
+        dtw_top_k : int, optional
+            When set, candidates are first ranked by Dynamic Time Warping
+            similarity and only the top ``dtw_top_k`` proceed to the power
+            simulation. This can dramatically speed up the search when the
+            candidate pool is large.
 
         Returns
         -------
@@ -271,6 +382,8 @@ class MarketSelection:
             Itself, so it can be chained with summarize() / plot().
         """
         candidates = self._candidate_sets(n_test_geos, include or [], exclude or [])
+        if dtw_top_k is not None and dtw_top_k < len(candidates):
+            candidates = self._dtw_filter(candidates, dtw_top_k)
         records: list[dict[str, Any]] = []
         for test_geos in candidates:
             control_geos = [g for g in self.all_geos if g not in set(test_geos)]

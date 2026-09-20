@@ -420,3 +420,65 @@ class PowerAnalysis:
             yaxis_range=[0, 1],
         )
         fig.show()
+
+    def plot_mde_sensitivity(self) -> None:
+        """Plot the Minimum Detectable Effect as a function of experiment duration.
+
+        Raises
+        ------
+        ValueError
+            If ``mde()`` has not been run yet.
+        """
+        if self.mde_table is None:
+            raise ValueError("Call mde() before plot_mde_sensitivity()")
+        rows = [r for r in self.mde_table if r["mde"] is not None]
+        if not rows:
+            raise ValueError("No durations achieved the target power — cannot plot MDE sensitivity")
+        durations = [r["duration"] for r in rows]
+        mdes = [r["mde"] for r in rows]
+        target = self.results.get("target_power", DEFAULT_TARGET_POWER) if self.results else DEFAULT_TARGET_POWER
+        unit = "multiplicative" if self.injection == "multiplicative" else "additive"
+        fig = go.Figure(
+            go.Scatter(x=durations, y=mdes, mode="lines+markers"),
+        )
+        fig.update_layout(
+            title=f"MDE sensitivity (target power {target:.0%})",
+            xaxis_title="Experiment duration (periods)",
+            yaxis_title=f"Minimum Detectable Effect ({unit})",
+        )
+        fig.show()
+
+    def plot_power_heatmap(self) -> None:
+        """Plot a heatmap of power over the (effect size x duration) grid.
+
+        Raises
+        ------
+        ValueError
+            If ``simulate()`` has not been run yet.
+        """
+        if self.power_curve is None:
+            raise ValueError("Call simulate() before plot_power_heatmap()")
+        durations = sorted({r["duration"] for r in self.power_curve})
+        effects = sorted({r["effect"] for r in self.power_curve})
+        lookup = {(r["effect"], r["duration"]): r["power"] for r in self.power_curve}
+        z = [[lookup.get((e, d), float("nan")) for e in effects] for d in durations]
+        unit = "multiplicative" if self.injection == "multiplicative" else "additive"
+        fig = go.Figure(
+            go.Heatmap(
+                x=effects,
+                y=durations,
+                z=z,
+                zmin=0,
+                zmax=1,
+                colorscale="RdYlGn",
+                colorbar_title="Power",
+                text=[[f"{v:.0%}" for v in row] for row in z],
+                texttemplate="%{text}",
+            ),
+        )
+        fig.update_layout(
+            title="Power heatmap",
+            xaxis_title=f"Effect size ({unit})",
+            yaxis_title="Experiment duration (periods)",
+        )
+        fig.show()

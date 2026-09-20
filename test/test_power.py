@@ -17,6 +17,7 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
+import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -171,6 +172,52 @@ class TestReporting:
     def test_summarize_requires_simulate(history: pl.DataFrame) -> None:
         with pytest.raises(ValueError):
             _power(history).summarize()
+
+
+class TestPlotMdeSensitivity:
+    @staticmethod
+    def test_requires_mde(history: pl.DataFrame) -> None:
+        with pytest.raises(ValueError):
+            _power(history).simulate(effect_sizes=[0.0, 0.5], durations=[10], n_sims=10).plot_mde_sensitivity()
+
+    @staticmethod
+    def test_raises_when_no_duration_reaches_target(history: pl.DataFrame) -> None:
+        pa = _power(history).simulate(effect_sizes=[0.0], durations=[10], n_sims=10).mde(target_power=0.99)
+        with pytest.raises(ValueError, match="No durations achieved"):
+            pa.plot_mde_sensitivity()
+
+    @staticmethod
+    def test_creates_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        shown: list[go.Figure] = []
+        monkeypatch.setattr(go.Figure, "show", lambda self: shown.append(self))
+        effects = [0.0, 0.2, 0.4, 0.6, 0.8]
+        pa = _power(history).simulate(effect_sizes=effects, durations=[10, 14], n_sims=15).mde()
+        pa.plot_mde_sensitivity()
+        assert len(shown) == 1
+        fig = shown[0]
+        assert len(fig.data) == 1
+        assert fig.layout.xaxis.title.text == "Experiment duration (periods)"
+
+
+class TestPlotPowerHeatmap:
+    @staticmethod
+    def test_requires_simulate(history: pl.DataFrame) -> None:
+        with pytest.raises(ValueError):
+            _power(history).plot_power_heatmap()
+
+    @staticmethod
+    def test_creates_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        shown: list[go.Figure] = []
+        monkeypatch.setattr(go.Figure, "show", lambda self: shown.append(self))
+        pa = _power(history).simulate(effect_sizes=[0.0, 0.3, 0.6], durations=[10, 14], n_sims=10)
+        pa.plot_power_heatmap()
+        assert len(shown) == 1
+        fig = shown[0]
+        heatmap = fig.data[0]
+        assert heatmap.type == "heatmap"
+        assert list(heatmap.x) == [0.0, 0.3, 0.6]
+        assert list(heatmap.y) == [10, 14]
+        assert all(0.0 <= v <= 1.0 for row in heatmap.z for v in row)
 
 
 if __name__ == "__main__":

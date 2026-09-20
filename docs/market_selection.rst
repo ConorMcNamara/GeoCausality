@@ -39,6 +39,15 @@ score (``fit_weight`` trades them off). When the full enumeration would exceed
 ``max_candidates``, a seeded sample is drawn and a warning is issued, so the
 search is never silently truncated.
 
+DTW pre-filtering
+~~~~~~~~~~~~~~~~~
+When the candidate pool is large, the power simulation dominates runtime. Pass
+``dtw_top_k`` to ``search()`` to pre-filter candidates using **Dynamic Time
+Warping** (DTW) — an approach inspired by the R *MarketMatching* package. Each
+candidate is scored by the average DTW distance from its test geos to their
+nearest controls (on z-scored pre-period series), and only the ``dtw_top_k``
+most shape-similar candidates proceed to the full power simulation.
+
 Usage
 -----
 
@@ -61,6 +70,18 @@ Usage
 
 Use ``include`` to force geos into every candidate set and ``exclude`` to bar
 geos from being treated (they remain available as controls).
+
+To speed up large searches with DTW pre-filtering:
+
+.. code-block:: python
+
+   ms.search(
+       n_test_geos=[1, 2, 3],
+       effect_size=0.10,
+       duration=28,
+       n_sims=200,
+       dtw_top_k=20,  # only the 20 best DTW matches run power sims
+   )
 
 References
 ----------
