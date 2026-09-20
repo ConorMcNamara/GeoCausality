@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-09-20
+
+### Added
+
+- **`Switchback`** (`switchback`) — a switchback (crossover) experiment
+  estimator for settings where treatment alternates on/off within geos over
+  time (e.g. toggling paid-search ads). Fits a two-way fixed-effects panel
+  regression (`PanelOLS`) with cluster-robust standard errors and provides:
+  - **Washout periods** (`washout`) — discard observations immediately after
+    each treatment switch to mitigate carryover bias.
+  - **Carryover lag modeling** (`carryover_lags`) — explicit lagged treatment
+    indicators as additional regressors.
+  - **Randomization inference** (`permutation_test()`) — circular-shift
+    permutation of switchback schedules for a non-parametric p-value.
+  - **Analytical power** (`power_analytical()`) — closed-form MDE / power
+    using an AR(1) autocorrelation-inflated variance formula.
+  - **Simulation-based power** (`power_simulation()`) — Monte Carlo with
+    AR(1) correlated errors and FE model fitting.
+  - **Treatment schedule plot** (`plot()`) — color-coded treatment on/off per
+    geo over time.
+- **GeoX Meridian enhancements** — five features ported from Google's Meridian
+  TBR implementation (Kerman, Wang & Vaver 2017):
+  - `non_negative` — constrain the posterior credible interval to non-negative
+    effects.
+  - `alternative` (`"two-sided"` / `"greater"` / `"less"`) — one-sided
+    hypothesis testing.
+  - `validation_split` — hold out the first *k* pre-period days for model
+    diagnostics.
+  - Percent-lift confidence intervals in `results`.
+  - `placebo_test()` — runs the TBR model on the pre-period as a
+    specification check.
+- **Estimator selection guide** (`docs/estimator_guide.rst`) — a decision
+  flowchart and quick-reference table to help choose the right estimator for a
+  given experiment design.
+
+### Documentation
+
+- New `switchback.rst` page with methodology (two-way FE, washout, carryover,
+  randomization inference, power analysis) and usage examples.
+- New "Advanced options" section in `geo_x.rst` documenting all Meridian
+  enhancements.
+- Updated `estimator_guide.rst` with the switchback design family and decision
+  flowchart.
+
 ## [0.15.3] - 2026-09-20
 
 ### Added
@@ -532,6 +576,16 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.16.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.16.0
+[0.15.3]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.3
+[0.15.2]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.2
+[0.15.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.1
+[0.15.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.0
+[0.14.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.14.0
+[0.13.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.13.0
+[0.12.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.12.1
+[0.12.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.12.0
+[0.11.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.11.0
 [0.10.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.10.1
 [0.10.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.10.0
 [0.9.2]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.9.2
