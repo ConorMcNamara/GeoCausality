@@ -56,6 +56,74 @@ Relationship to Geo Experiments
 -------------------------------
 TBR is a valuable tool for analyzing data from geo experiments, particularly when the experimental design involves a small number of geos or matched market tests. It complements other geo experiment methodologies and provides a framework for estimating causal effects in challenging situations.
 
+Advanced options
+----------------
+
+Non-negative slope constraint
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+By default (``non_negative=True``) the regression slope is clamped to zero when
+the OLS estimate is negative. This prevents nonsensical counterfactuals where
+increased control activity would predict decreased treatment activity.
+
+.. code-block:: python
+
+   model = GeoX(df, ..., non_negative=True)   # default: clamp
+   model = GeoX(df, ..., non_negative=False)  # allow negative slope
+
+One-sided hypothesis tests
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+The ``alternative`` parameter controls the sidedness of the test:
+
+- ``"two-sided"`` (default) — standard two-tailed test.
+- ``"greater"`` — H_a: treatment > control. The p-value is P(delta <= 0).
+- ``"less"`` — H_a: treatment < control. The p-value is P(delta > 0).
+
+.. code-block:: python
+
+   model = GeoX(df, ..., alternative="greater")
+   model.pre_process().generate()
+   # results["p_value"] is one-sided; CI lower bound is finite, upper is inf
+
+Validation split
+~~~~~~~~~~~~~~~~
+``generate()`` automatically holds out the last *post-period-length* rows of the
+pre-period, fits on the remainder, and stores the holdout RMSE as
+``results["validation_rmse"]``. This gives an early signal of counterfactual
+quality before the post-period is observed.
+
+Percent-lift confidence intervals
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+After ``generate()``, the results dictionary contains log-ratio-based percent
+lift estimates and CIs:
+
+- ``results["percent_lift"]`` — point estimate, ``exp(log(y/ŷ)) - 1``.
+- ``results["percent_lift_ci_lower"]`` / ``results["percent_lift_ci_upper"]``
+
+These use the model's residual scale and a *t*-quantile, following the Meridian
+GeoX log-ratio approach.
+
+Placebo permutation test
+~~~~~~~~~~~~~~~~~~~~~~~~
+``placebo_test()`` splits the control geos into pseudo-treatment and
+pseudo-control groups, fits TBR on each split, and compares the real
+experiment's *t*-statistic against the empirical null distribution.
+
+.. code-block:: python
+
+   model = GeoX(df, ...).pre_process().generate()
+   placebo = model.placebo_test(n_placebos=500, min_placebo_r2=0.6)
+   print(placebo["empirical_p_value"])
+
+The returned dictionary contains:
+
+- ``placebo_t_stats`` — array of placebo *t*-statistics that passed the R² filter.
+- ``real_t_stat`` — the real experiment's *t*-statistic.
+- ``empirical_p_value`` — fraction of placebos at least as extreme.
+- ``n_placebos_passed`` — how many passed the R² filter.
+- ``n_placebos_total`` — how many were evaluated.
+
+The result is also stored in ``results["placebo"]``.
+
 Key Research Papers
 -------------------
 

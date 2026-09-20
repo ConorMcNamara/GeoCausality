@@ -19,6 +19,7 @@ Every estimator shares the same three-step interface:
 
    about
    quickstart
+   estimator_guide
 
 .. toctree::
    :maxdepth: 1
