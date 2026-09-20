@@ -68,6 +68,16 @@ def _selection(history: pl.DataFrame, **overrides: object) -> MarketSelection:
     return MarketSelection(history, **kwargs)
 
 
+@pytest.fixture(scope="module")
+def searched_size2(history: pl.DataFrame) -> MarketSelection:
+    return _selection(history).search(n_test_geos=[2], effect_size=0.3, duration=10, n_sims=8)
+
+
+@pytest.fixture(scope="module")
+def searched_sizes_1_2(history: pl.DataFrame) -> MarketSelection:
+    return _selection(history).search(n_test_geos=[1, 2], effect_size=0.3, duration=10, n_sims=8)
+
+
 class TestCandidateGeneration:
     @staticmethod
     def test_enumerates_requested_sizes(history: pl.DataFrame) -> None:
@@ -113,26 +123,22 @@ class TestCandidateGeneration:
 
 class TestSearch:
     @staticmethod
-    def test_rankings_structure(history: pl.DataFrame) -> None:
-        ms = _selection(history).search(n_test_geos=[2], effect_size=0.3, duration=10, n_sims=8)
-        assert ms.rankings is not None
-        assert len(ms.rankings) == 28  # C(8,2)
-        for r in ms.rankings:
+    def test_rankings_structure(searched_size2: MarketSelection) -> None:
+        assert searched_size2.rankings is not None
+        assert len(searched_size2.rankings) == 28  # C(8,2)
+        for r in searched_size2.rankings:
             assert {"test_geos", "n_test", "n_control", "power", "pre_fit", "score"} <= r.keys()
             assert r["n_test"] + r["n_control"] == N_GEOS
             assert 0.0 <= r["power"] <= 1.0
 
     @staticmethod
-    def test_rankings_sorted_by_score_desc(history: pl.DataFrame) -> None:
-        ms = _selection(history).search(n_test_geos=[1, 2], effect_size=0.3, duration=10, n_sims=8)
-        scores = [r["score"] for r in ms.rankings]
+    def test_rankings_sorted_by_score_desc(searched_sizes_1_2: MarketSelection) -> None:
+        scores = [r["score"] for r in searched_sizes_1_2.rankings]
         assert scores == sorted(scores, reverse=True)
 
     @staticmethod
-    def test_pre_fit_computed_for_synthetic_control(history: pl.DataFrame) -> None:
-        ms = _selection(history).search(n_test_geos=[2], effect_size=0.3, duration=10, n_sims=6)
-        # SyntheticControl exposes conformal_band, so pre_fit should be populated.
-        assert all(r["pre_fit"] is not None and r["pre_fit"] >= 0.0 for r in ms.rankings)
+    def test_pre_fit_computed_for_synthetic_control(searched_size2: MarketSelection) -> None:
+        assert all(r["pre_fit"] is not None and r["pre_fit"] >= 0.0 for r in searched_size2.rankings)
 
     @staticmethod
     def test_fit_weight_zero_ranks_on_power(history: pl.DataFrame) -> None:
@@ -147,10 +153,9 @@ class TestSearch:
 
 class TestReporting:
     @staticmethod
-    def test_summarize_runs(history: pl.DataFrame) -> None:
-        ms = _selection(history).search(n_test_geos=[1, 2], effect_size=0.3, duration=10, n_sims=6)
+    def test_summarize_runs(searched_sizes_1_2: MarketSelection) -> None:
         with redirect_stdout(io.StringIO()) as buffer:
-            ms.summarize(top=5)
+            searched_sizes_1_2.summarize(top=5)
         out = buffer.getvalue()
         assert "Score" in out
         assert "Test Geos" in out
@@ -241,10 +246,6 @@ class TestDTW:
 
 
 def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
-    # Regression: the conformal band is on the treated series summed across the
-    # test geos, so _pre_fit must divide by the summed-series mean. Dividing by
-    # the per-geo-row mean instead leaves a spurious factor of len(test_geos),
-    # biasing search() against larger test sets.
     duration = 5
     test_geos = ["g0", "g1"]
     control_geos = [f"g{i}" for i in range(2, N_GEOS)]
@@ -264,7 +265,6 @@ def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
     pre_fit = ms._pre_fit(pa, duration)
     assert pre_fit is not None
 
-    # Reconstruct the band exactly as _pre_fit does, then the two candidate scales.
     hist = pa.history
     pre_boundary, post_boundary = hist[-duration - 1], hist[-duration]
     model = SyntheticControl(
@@ -284,10 +284,8 @@ def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
     per_geo_mean = abs(float(pre["y"].mean()))
     summed_mean = abs(float(pre.group_by("date").agg(pl.col("y").sum())["y"].mean()))
 
-    # Normalised by the summed-series mean, i.e. the old per-geo value / n_test.
     assert pre_fit == pytest.approx(band / summed_mean, rel=1e-9)
     assert pre_fit == pytest.approx((band / per_geo_mean) / len(test_geos), rel=1e-9)
-    # And NOT the old per-geo-row normalisation (differs by len(test_geos)).
     assert pre_fit != pytest.approx(band / per_geo_mean, rel=1e-3)
 
 

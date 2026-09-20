@@ -63,39 +63,44 @@ def _build(df: pl.DataFrame, pre: str, post: str, **overrides: object) -> Matrix
     return MatrixCompletion(df, **kwargs)
 
 
+@pytest.fixture(scope="module")
+def long_effect_model() -> MatrixCompletion:
+    df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
+    return _build(df, pre, post).pre_process().generate()
+
+
+@pytest.fixture(scope="module")
+def null_model() -> MatrixCompletion:
+    df, pre, post = _panel(LONG_PRE, LONG_POST, effect=0.0)
+    return _build(df, pre, post).pre_process().generate()
+
+
+@pytest.fixture(scope="module")
+def short_pre_model() -> MatrixCompletion:
+    df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
+    return _build(df, pre, post).pre_process().generate()
+
+
 class TestEffectRecovery:
     @staticmethod
-    def test_recovers_known_effect() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
+    def test_recovers_known_effect(long_effect_model: MatrixCompletion) -> None:
         # True total effect: 2 test geos x 40/day x 10 post-days = 800.
-        assert results["incrementality"] == pytest.approx(800.0, rel=0.15)
+        assert long_effect_model.results["incrementality"] == pytest.approx(800.0, rel=0.15)
 
     @staticmethod
-    def test_effect_is_positive_and_significant() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
-        assert results["incrementality"] > 0.0
-        assert results["p_value"] <= 0.1
+    def test_effect_is_positive_and_significant(long_effect_model: MatrixCompletion) -> None:
+        assert long_effect_model.results["incrementality"] > 0.0
+        assert long_effect_model.results["p_value"] <= 0.1
 
     @staticmethod
-    def test_null_is_near_zero() -> None:
-        # Under the null the recovered incrementality is a tiny fraction of the
-        # baseline. We assert magnitude, not (non-)significance: the conformal
-        # p-value on a near-perfect completion is noisy on its discrete grid, so
-        # it is not a reliable null signal -- the same reason the family parity
-        # tests only assert significance for real effects.
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=0.0)
-        results = _build(df, pre, post).pre_process().generate().results
-        baseline = float(np.sum(results["counterfactual"]))
-        assert abs(results["incrementality"]) < 0.05 * baseline
+    def test_null_is_near_zero(null_model: MatrixCompletion) -> None:
+        baseline = float(np.sum(null_model.results["counterfactual"]))
+        assert abs(null_model.results["incrementality"]) < 0.05 * baseline
 
 
 class TestResultsContract:
     @staticmethod
-    def test_results_keys_present() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
+    def test_results_keys_present(long_effect_model: MatrixCompletion) -> None:
         expected = {
             "test",
             "counterfactual",
@@ -109,67 +114,51 @@ class TestResultsContract:
             "conformal_band",
             "method",
         }
-        assert expected <= set(results.keys())
+        assert expected <= set(long_effect_model.results.keys())
 
     @staticmethod
-    def test_counterfactual_length_matches_post_period() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        model = _build(df, pre, post).pre_process().generate()
-        assert model.results["counterfactual"].shape == (LONG_POST,)
-        assert model.results["test"].shape == (LONG_POST,)
+    def test_counterfactual_length_matches_post_period(long_effect_model: MatrixCompletion) -> None:
+        assert long_effect_model.results["counterfactual"].shape == (LONG_POST,)
+        assert long_effect_model.results["test"].shape == (LONG_POST,)
 
     @staticmethod
-    def test_ci_brackets_estimate() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
+    def test_ci_brackets_estimate(long_effect_model: MatrixCompletion) -> None:
+        results = long_effect_model.results
         assert results["incrementality_ci_lower"] <= results["incrementality_ci_upper"]
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
 
     @staticmethod
-    def test_summarize_runs(capsys: pytest.CaptureFixture) -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        model = _build(df, pre, post).pre_process().generate()
-        model.summarize("absolute")
+    def test_summarize_runs(long_effect_model: MatrixCompletion, capsys: pytest.CaptureFixture) -> None:
+        long_effect_model.summarize("absolute")
         assert "Incremental" in capsys.readouterr().out
 
 
 class TestInferenceRouting:
     @staticmethod
-    def test_long_pre_uses_conformal() -> None:
-        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
-        assert results["method"] == "conformal"
+    def test_long_pre_uses_conformal(long_effect_model: MatrixCompletion) -> None:
+        assert long_effect_model.results["method"] == "conformal"
 
     @staticmethod
-    def test_short_pre_uses_residual_jackknife() -> None:
-        # No donor-weight refit hook, so the short pre-period falls back to the
-        # residual-only jackknife+ (not the faithful refit-based variant).
-        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
-        results = _build(df, pre, post).pre_process().generate().results
-        assert results["method"] == "jackknife+ (residual)"
+    def test_short_pre_uses_residual_jackknife(short_pre_model: MatrixCompletion) -> None:
+        assert short_pre_model.results["method"] == "jackknife+ (residual)"
 
     @staticmethod
-    def test_no_faithful_loo() -> None:
-        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=40.0)
-        model = _build(df, pre, post).pre_process().generate()
-        assert model._loo_counterfactuals() is None
+    def test_no_faithful_loo(short_pre_model: MatrixCompletion) -> None:
+        assert short_pre_model._loo_counterfactuals() is None
 
 
 class TestPenaltyAndReproducibility:
     @staticmethod
-    def test_reproducible() -> None:
+    def test_reproducible(long_effect_model: MatrixCompletion) -> None:
         df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
-        a = _build(df, pre, post).pre_process().generate().results
-        b = _build(df, pre, post).pre_process().generate().results
-        assert a["incrementality"] == b["incrementality"]
-        assert a["p_value"] == b["p_value"]
+        fresh = _build(df, pre, post).pre_process().generate().results
+        assert long_effect_model.results["incrementality"] == fresh["incrementality"]
+        assert long_effect_model.results["p_value"] == fresh["p_value"]
 
     @staticmethod
     def test_fixed_lambda_runs() -> None:
         df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
         results = _build(df, pre, post, lambda_=0.0).pre_process().generate().results
-        # lambda_=0 is pure interpolation of the observed cells plus two-way FE;
-        # it still recovers a positive, sizeable effect.
         assert results["incrementality"] > 0.0
 
     @staticmethod
