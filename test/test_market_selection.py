@@ -218,7 +218,11 @@ class TestDTW:
     @staticmethod
     def test_search_with_dtw_top_k(history: pl.DataFrame) -> None:
         ms = _selection(history).search(
-            n_test_geos=[1, 2], effect_size=0.3, duration=10, n_sims=6, dtw_top_k=5,
+            n_test_geos=[1, 2],
+            effect_size=0.3,
+            duration=10,
+            n_sims=6,
+            dtw_top_k=5,
         )
         assert ms.rankings is not None
         assert len(ms.rankings) == 5
@@ -226,7 +230,11 @@ class TestDTW:
     @staticmethod
     def test_dtw_top_k_larger_than_pool_is_noop(history: pl.DataFrame) -> None:
         ms = _selection(history).search(
-            n_test_geos=[1], effect_size=0.3, duration=10, n_sims=6, dtw_top_k=100,
+            n_test_geos=[1],
+            effect_size=0.3,
+            duration=10,
+            n_sims=6,
+            dtw_top_k=100,
         )
         assert ms.rankings is not None
         assert len(ms.rankings) == 8  # C(8,1) = 8, all kept

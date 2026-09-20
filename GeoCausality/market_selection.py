@@ -280,9 +280,7 @@ class MarketSelection:
 
         def score(test_geos: tuple[str, ...]) -> float:
             controls = [g for g in self.all_geos if g not in set(test_geos)]
-            return float(
-                np.mean([min(dist[(tg, cg)] for cg in controls) for tg in test_geos])
-            )
+            return float(np.mean([min(dist[(tg, cg)] for cg in controls) for tg in test_geos]))
 
         scored = sorted(candidates, key=score)
         return scored[:top_k]
