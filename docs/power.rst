@@ -66,6 +66,23 @@ The estimator is pluggable, so power is measured with the same method that will
 analyse the real experiment. Effect injection is multiplicative by default (a
 fractional lift) and the placebo sampler is seeded for reproducibility.
 
+Visualization
+~~~~~~~~~~~~~
+Beyond the default power curve, two additional plots help explore the design
+space:
+
+.. code-block:: python
+
+   pa.plot_mde_sensitivity()  # MDE as a function of experiment duration
+   pa.plot_power_heatmap()    # power over the full (effect x duration) grid
+
+* **MDE sensitivity curve** — answers "how much does extending the experiment
+  buy me?" by plotting the Minimum Detectable Effect against duration. Requires
+  ``mde()`` to have been called first.
+* **Power heatmap** — a color-coded matrix of power over every tested
+  (effect size, duration) cell, with percentage labels. Useful for scanning the
+  full design space at a glance.
+
 References
 ----------
 * GeoLift (Meta). ``GeoLiftPower``.

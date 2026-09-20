@@ -161,6 +161,85 @@ class TestReporting:
             _selection(history).summarize()
 
 
+class TestDTW:
+    @staticmethod
+    def test_dtw_identical_series_is_zero() -> None:
+        s = np.array([1.0, 2.0, 3.0])
+        assert MarketSelection._dtw_distance(s, s) == 0.0
+
+    @staticmethod
+    def test_dtw_symmetric() -> None:
+        s = np.array([1.0, 2.0, 3.0])
+        t = np.array([1.0, 2.0, 5.0])
+        assert MarketSelection._dtw_distance(s, t) == MarketSelection._dtw_distance(t, s)
+
+    @staticmethod
+    def test_dtw_known_value() -> None:
+        s = np.array([0.0, 0.0, 0.0])
+        t = np.array([1.0, 1.0, 1.0])
+        assert MarketSelection._dtw_distance(s, t) == pytest.approx(3.0)
+
+    @staticmethod
+    def test_dtw_different_lengths() -> None:
+        s = np.array([0.0, 1.0])
+        t = np.array([0.0, 1.0, 2.0])
+        d = MarketSelection._dtw_distance(s, t)
+        assert d > 0.0
+        assert np.isfinite(d)
+
+    @staticmethod
+    def test_geo_series_z_scored(history: pl.DataFrame) -> None:
+        ms = _selection(history)
+        series = ms._geo_series()
+        assert len(series) == N_GEOS
+        for vals in series.values():
+            assert abs(vals.mean()) < 1e-10
+            if vals.std() > 0:
+                assert vals.std() == pytest.approx(1.0, abs=0.1)
+
+    @staticmethod
+    def test_pairwise_dtw_structure(history: pl.DataFrame) -> None:
+        ms = _selection(history)
+        dist = ms._pairwise_dtw()
+        for g in ms.all_geos:
+            assert dist[(g, g)] == 0.0
+        for a in ms.all_geos:
+            for b in ms.all_geos:
+                assert dist[(a, b)] == dist[(b, a)]
+
+    @staticmethod
+    def test_dtw_filter_reduces_candidates(history: pl.DataFrame) -> None:
+        ms = _selection(history)
+        candidates = ms._candidate_sets(n_test_geos=[1, 2], include=[], exclude=[])
+        assert len(candidates) == 36  # C(8,1) + C(8,2)
+        filtered = ms._dtw_filter(candidates, top_k=10)
+        assert len(filtered) == 10
+
+    @staticmethod
+    def test_search_with_dtw_top_k(history: pl.DataFrame) -> None:
+        ms = _selection(history).search(
+            n_test_geos=[1, 2],
+            effect_size=0.3,
+            duration=10,
+            n_sims=6,
+            dtw_top_k=5,
+        )
+        assert ms.rankings is not None
+        assert len(ms.rankings) == 5
+
+    @staticmethod
+    def test_dtw_top_k_larger_than_pool_is_noop(history: pl.DataFrame) -> None:
+        ms = _selection(history).search(
+            n_test_geos=[1],
+            effect_size=0.3,
+            duration=10,
+            n_sims=6,
+            dtw_top_k=100,
+        )
+        assert ms.rankings is not None
+        assert len(ms.rankings) == 8  # C(8,1) = 8, all kept
+
+
 def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
     # Regression: the conformal band is on the treated series summed across the
     # test geos, so _pre_fit must divide by the summed-series mean. Dividing by
