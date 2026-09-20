@@ -1,7 +1,8 @@
 """GeoX (time-based regression) method for geo-experiment causal inference."""
 
 from datetime import date as date_cls
-from math import ceil
+from itertools import combinations
+from math import ceil, comb
 from typing import Any
 
 import narwhals as nw
@@ -33,6 +34,8 @@ class GeoX(MLEstimator):
         alpha: float = 0.1,
         msrp: float = 0.0,
         spend: float = 0.0,
+        non_negative: bool = True,
+        alternative: str = "two-sided",
     ) -> None:
         """Initialize the GeoX estimator.
 
@@ -64,6 +67,14 @@ class GeoX(MLEstimator):
         spend : float, default=0.0
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
+        non_negative : bool, default=True
+            When True, the regression slope is clamped to zero if the OLS
+            estimate is negative. Matches Meridian GeoX's guardrail against
+            nonsensical fits.
+        alternative : str, default="two-sided"
+            The sidedness of the hypothesis test. One of ``"two-sided"``,
+            ``"greater"`` (treatment > control) or ``"less"`` (treatment <
+            control).
 
         Notes
         -----
@@ -83,6 +94,11 @@ class GeoX(MLEstimator):
             msrp,
             spend,
         )
+        self.non_negative = non_negative
+        alternative = alternative.casefold()
+        if alternative not in ("two-sided", "greater", "less"):
+            raise ValueError(f"alternative must be 'two-sided', 'greater' or 'less', got {alternative!r}")
+        self.alternative = alternative
         self.intercept_test: Any = None
         self.prediction_pre: nw.DataFrame | None = None
         self.prediction_post: nw.DataFrame | None = None
@@ -110,22 +126,44 @@ class GeoX(MLEstimator):
         if self.post_test is None:
             raise ValueError("post_test must not be None")
         pre_control_np = self.pre_control[self.y_variable].to_numpy()
+        pre_test_np = self.pre_test[self.y_variable].to_numpy().flatten()
         intercept_train = sm.add_constant(pre_control_np)
-        self.model = sm.OLS(self.pre_test[self.y_variable].to_numpy().flatten(), intercept_train).fit()
+
+        # --- Validation split: hold out the last `post_len` pre-period rows ---
+        post_len = len(self.post_control)
+        val_rmse: float | None = None
+        if len(pre_control_np) > post_len + 2:
+            train_x = intercept_train[:-post_len]
+            train_y = pre_test_np[:-post_len]
+            val_x = intercept_train[-post_len:]
+            val_y = pre_test_np[-post_len:]
+            val_model = sm.OLS(train_y, train_x).fit()
+            if self.non_negative and val_model.params[1] < 0:
+                val_model.params[1] = 0.0
+            val_pred = val_model.predict(val_x)
+            val_rmse = float(np.sqrt(np.mean((val_y - val_pred) ** 2)))
+
+        # --- Full pre-period fit ---
+        self.model = sm.OLS(pre_test_np, intercept_train).fit()
+        if self.non_negative and self.model.params[1] < 0:
+            self.model.params[1] = 0.0
+
         self.intercept_test = sm.add_constant(self.post_control[self.y_variable].to_numpy())
         model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
         # Add counterfactual column via pandas (we're at a statsmodels boundary already)
         post_test_pd = self.post_test.to_pandas()
         post_test_pd = post_test_pd.assign(counterfactual=model_summary["mean"].values)
         self.post_test = nw.from_native(post_test_pd, eager_only=True)
-        incrementality = self.post_test[self.y_variable].to_numpy() - self.post_test["counterfactual"].to_numpy()
-        ci_lower_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_upper"].values
-        ci_upper_series = self.post_test[self.y_variable].to_numpy() - model_summary["obs_ci_lower"].values
+        actual = self.post_test[self.y_variable].to_numpy()
+        counterfactual = self.post_test["counterfactual"].to_numpy()
+        incrementality = actual - counterfactual
+        ci_lower_series = actual - model_summary["obs_ci_upper"].values
+        ci_upper_series = actual - model_summary["obs_ci_lower"].values
         self.results = {
             "date": self.test_dates,
-            "test": self.post_test[self.y_variable].to_numpy(),
+            "test": actual,
             "control": self.post_control[self.y_variable].to_numpy(),
-            "counterfactual": self.post_test["counterfactual"].to_numpy(),
+            "counterfactual": counterfactual,
             "counterfactual_ci_lower": model_summary["obs_ci_lower"],
             "counterfactual_ci_upper": model_summary["obs_ci_upper"],
             "incrementality": incrementality,
@@ -137,6 +175,21 @@ class GeoX(MLEstimator):
         self.results["cumulative_incrementality_ci_lower"] = ci_dict["cumulative_ci_lower"]
         self.results["cumulative_incrementality_ci_upper"] = ci_dict["cumulative_ci_upper"]
         self.results["p_value"] = ci_dict["p_value"]
+        if val_rmse is not None:
+            self.results["validation_rmse"] = val_rmse
+
+        # --- Log-ratio percent lift CIs ---
+        safe_cf = np.where(counterfactual > 0, counterfactual, np.nan)
+        log_ratio = np.log(actual / safe_cf)
+        log_rmse = float(np.sqrt(self.model.scale)) / float(np.nanmean(safe_cf))
+        q = t_dist.ppf(1 - self.alpha / 2, self.model.df_resid)
+        self.results["percent_lift"] = np.where(np.isnan(log_ratio), np.nan, np.exp(log_ratio) - 1)
+        self.results["percent_lift_ci_lower"] = np.where(
+            np.isnan(log_ratio), np.nan, np.exp(log_ratio - q * log_rmse) - 1
+        )
+        self.results["percent_lift_ci_upper"] = np.where(
+            np.isnan(log_ratio), np.nan, np.exp(log_ratio + q * log_rmse) - 1
+        )
         return self
 
     def summarize(self, lift: str) -> None:
@@ -268,16 +321,171 @@ class GeoX(MLEstimator):
             raise ValueError("post_control must not be None")
         delta = self._cumulative_distribution(rescale=rescale)
         test_len = len(self.post_control)
-        ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
-        ci_upper = delta.ppf(1 - self.alpha / 2).reshape(test_len)
         one_sided = delta.cdf(0.0).reshape(test_len)
-        p_value = 2.0 * np.minimum(one_sided, 1.0 - one_sided)
+        if self.alternative == "greater":
+            ci_lower = delta.ppf(self.alpha).reshape(test_len)
+            ci_upper = np.full(test_len, np.inf)
+            p_value = one_sided
+        elif self.alternative == "less":
+            ci_lower = np.full(test_len, -np.inf)
+            ci_upper = delta.ppf(1 - self.alpha).reshape(test_len)
+            p_value = 1.0 - one_sided
+        else:
+            ci_lower = delta.ppf(self.alpha / 2).reshape(test_len)
+            ci_upper = delta.ppf(1 - self.alpha / 2).reshape(test_len)
+            p_value = 2.0 * np.minimum(one_sided, 1.0 - one_sided)
         ci_dict = {
             "cumulative_ci_lower": ci_lower,
             "cumulative_ci_upper": ci_upper,
             "p_value": p_value,
         }
         return ci_dict
+
+    def placebo_test(
+        self,
+        n_placebos: int = 500,
+        min_placebo_r2: float = 0.6,
+        seed: int = 0,
+    ) -> dict[str, Any]:
+        """Run a placebo permutation test using only the control geos.
+
+        Splits the control geos into pseudo-treatment and pseudo-control groups,
+        fits TBR on each split, and compares the real experiment's t-statistic
+        against the empirical null distribution. This validates that the model
+        is well-calibrated and provides a non-parametric p-value.
+
+        Parameters
+        ----------
+        n_placebos : int, default=500
+            Maximum number of placebo splits to evaluate. When the full
+            enumeration of same-sized splits is smaller, all are used.
+        min_placebo_r2 : float, default=0.6
+            Minimum pre-period R² for a placebo to be included. Splits with
+            poor fit are uninformative and are discarded.
+        seed : int, default=0
+            Seed for the placebo sampler when the full enumeration exceeds
+            ``n_placebos``.
+
+        Returns
+        -------
+        dict
+            ``placebo_t_stats`` (array of placebo t-statistics that passed the
+            R² filter), ``real_t_stat`` (the real experiment's t-statistic),
+            ``empirical_p_value`` (fraction of placebos at least as extreme),
+            ``n_placebos_passed`` (how many passed the R² filter), and
+            ``n_placebos_total`` (how many were evaluated).
+        """
+        if self.results is None:
+            raise ValueError("Call generate() before placebo_test()")
+
+        treatment_var: str = self.treatment_variable or "is_test"
+        if self.test_geos is not None:
+            test_geo_list = list(self.test_geos)
+        else:
+            test_geo_list = self.data.filter(nw.col(treatment_var) == 1)[self.geo_variable].unique().to_list()
+        if self.control_geos is not None:
+            control_geos = list(self.control_geos)
+        else:
+            control_geos = self.data.filter(nw.col(treatment_var) == 0)[self.geo_variable].unique().to_list()
+
+        n_test = len(test_geo_list)
+        if len(control_geos) < 2:
+            raise ValueError("Need at least 2 control geos for a placebo test")
+
+        split_size = min(n_test, len(control_geos) - 1)
+        total_splits = comb(len(control_geos), split_size)
+        rng = np.random.default_rng(seed)
+
+        if total_splits <= n_placebos:
+            splits = list(combinations(control_geos, split_size))
+        else:
+            seen: set[tuple[str, ...]] = set()
+            while len(seen) < n_placebos:
+                pick = tuple(sorted(rng.choice(control_geos, size=split_size, replace=False)))
+                seen.add(pick)
+            splits = list(seen)
+
+        date_str = nw.col(self.date_variable).cast(nw.String)
+        control_data = self.data.filter(nw.col(self.geo_variable).is_in(control_geos))
+
+        placebo_stats: list[float] = []
+        for pseudo_test in splits:
+            pseudo_test_set = set(pseudo_test)
+            is_pseudo_test = nw.col(self.geo_variable).is_in(list(pseudo_test_set))
+
+            pre_pseudo_test = (
+                control_data.filter((date_str <= self.pre_period) & is_pseudo_test)
+                .group_by(self.date_variable)
+                .agg(nw.col(self.y_variable).sum())
+                .sort(self.date_variable)
+            )
+            pre_pseudo_ctrl = (
+                control_data.filter((date_str <= self.pre_period) & ~is_pseudo_test)
+                .group_by(self.date_variable)
+                .agg(nw.col(self.y_variable).sum())
+                .sort(self.date_variable)
+            )
+            post_pseudo_test = (
+                control_data.filter((date_str >= self.post_period) & is_pseudo_test)
+                .group_by(self.date_variable)
+                .agg(nw.col(self.y_variable).sum())
+                .sort(self.date_variable)
+            )
+            post_pseudo_ctrl = (
+                control_data.filter((date_str >= self.post_period) & ~is_pseudo_test)
+                .group_by(self.date_variable)
+                .agg(nw.col(self.y_variable).sum())
+                .sort(self.date_variable)
+            )
+
+            x_pre = pre_pseudo_ctrl[self.y_variable].to_numpy()
+            y_pre = pre_pseudo_test[self.y_variable].to_numpy().flatten()
+            x_post = post_pseudo_ctrl[self.y_variable].to_numpy()
+            y_post = post_pseudo_test[self.y_variable].to_numpy().flatten()
+
+            model = sm.OLS(y_pre, sm.add_constant(x_pre)).fit()
+            if self.non_negative and model.params[1] < 0:
+                model.params[1] = 0.0
+
+            if model.rsquared < min_placebo_r2:
+                continue
+
+            pred_post = model.predict(sm.add_constant(x_post))
+            cum_delta = float(np.sum(y_post - pred_post))
+            post_len = len(x_post)
+            one_to_t = np.arange(1, post_len + 1).reshape(post_len, 1)
+            ctrl_matrix = sm.add_constant(np.array(x_post.flatten()))
+            cum_ctrl = np.cumsum(ctrl_matrix, axis=0) / one_to_t
+            var_t = cum_ctrl[-1] @ np.array(model.cov_params()) @ cum_ctrl[-1].T
+            var_from_params = var_t * post_len**2
+            var_from_obs = post_len * model.scale
+            scale = float(np.sqrt(var_from_params + var_from_obs))
+            if scale > 0:
+                placebo_stats.append(cum_delta / scale)
+
+        # Real experiment's t-statistic at the final post-period date.
+        real_cum = float(self.results["cumulative_incrementality"][-1])
+        delta_dist = self._cumulative_distribution()
+        real_scale = float(delta_dist.kwds["scale"][-1])
+        real_t = real_cum / real_scale if real_scale > 0 else 0.0
+
+        placebo_arr = np.asarray(placebo_stats, dtype=float)
+        if len(placebo_arr) > 0:
+            n_extreme = np.sum(np.abs(placebo_arr) >= abs(real_t))
+            empirical_p = float((n_extreme + 1) / (len(placebo_arr) + 1))
+        else:
+            empirical_p = np.nan
+
+        result = {
+            "placebo_t_stats": placebo_arr,
+            "real_t_stat": real_t,
+            "empirical_p_value": empirical_p,
+            "n_placebos_passed": len(placebo_arr),
+            "n_placebos_total": len(splits),
+        }
+        if self.results is not None:
+            self.results["placebo"] = result
+        return result
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.

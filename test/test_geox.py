@@ -2,6 +2,7 @@ import io
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
@@ -110,6 +111,211 @@ class TestGeoX:
         geo_x = _fit(data_df)
         monkeypatch.setattr(go.Figure, "show", lambda self: None)
         geo_x.plot()
+
+
+def _make_negative_slope_data() -> pd.DataFrame:
+    """Synthetic panel where the natural OLS slope (control -> test) is negative."""
+    rng = np.random.default_rng(42)
+    dates = pd.date_range("2021-01-01", periods=60, freq="D")
+    rows = []
+    for d in dates:
+        control_y = 100.0 + rng.normal(0, 1)
+        test_y = 200.0 - 0.5 * control_y + rng.normal(0, 1)
+        rows.append({"geo": "c1", "date": d, "orders": control_y, "is_test": False})
+        rows.append({"geo": "t1", "date": d, "orders": test_y, "is_test": True})
+    return pd.DataFrame(rows)
+
+
+class TestNonNegativeSlope:
+    @staticmethod
+    def test_slope_clamped_when_negative() -> None:
+        df = _make_negative_slope_data()
+        model = geox.GeoX(
+            df,
+            geo_variable="geo",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2021-02-14",
+            post_period="2021-02-15",
+            y_variable="orders",
+            non_negative=True,
+        )
+        model.pre_process().generate()
+        assert model.model.params[1] >= 0.0
+
+    @staticmethod
+    def test_negative_slope_allowed_when_disabled() -> None:
+        df = _make_negative_slope_data()
+        model = geox.GeoX(
+            df,
+            geo_variable="geo",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2021-02-14",
+            post_period="2021-02-15",
+            y_variable="orders",
+            non_negative=False,
+        )
+        model.pre_process().generate()
+        assert model.model.params[1] < 0.0
+
+
+class TestAlternative:
+    @staticmethod
+    def test_invalid_alternative_raises(data_df: pd.DataFrame) -> None:
+        with pytest.raises(ValueError, match="alternative"):
+            geox.GeoX(data_df, alternative="both")
+
+    @staticmethod
+    def test_two_sided_default(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        p = model.results["p_value"][-1]
+        # Two-sided p-value is always <= 1.
+        assert 0.0 <= p <= 1.0
+
+    @staticmethod
+    def test_greater_returns_one_sided(data_df: pd.DataFrame) -> None:
+        model = geox.GeoX(
+            data_df,
+            geo_variable="zipcode",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2022-06-30",
+            post_period="2022-07-01",
+            y_variable="orders",
+            alternative="greater",
+        )
+        model.pre_process().generate()
+        p_greater = model.results["p_value"][-1]
+        # This dataset has a large positive treatment effect, so the one-sided
+        # "greater" p-value should be tiny and <= the two-sided p-value.
+        two_sided = _fit(data_df)
+        p_two = two_sided.results["p_value"][-1]
+        assert p_greater <= p_two
+        assert p_greater < 0.01
+
+    @staticmethod
+    def test_less_returns_one_sided(data_df: pd.DataFrame) -> None:
+        model = geox.GeoX(
+            data_df,
+            geo_variable="zipcode",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2022-06-30",
+            post_period="2022-07-01",
+            y_variable="orders",
+            alternative="less",
+        )
+        model.pre_process().generate()
+        p_less = model.results["p_value"][-1]
+        # Positive treatment effect tested against "less" should be near 1.
+        assert p_less > 0.5
+
+    @staticmethod
+    def test_greater_ci_lower_bound_only(data_df: pd.DataFrame) -> None:
+        model = geox.GeoX(
+            data_df,
+            geo_variable="zipcode",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2022-06-30",
+            post_period="2022-07-01",
+            y_variable="orders",
+            alternative="greater",
+        )
+        model.pre_process().generate()
+        assert all(np.isinf(model.results["cumulative_incrementality_ci_upper"]))
+        assert all(np.isfinite(model.results["cumulative_incrementality_ci_lower"]))
+
+
+class TestValidationRMSE:
+    @staticmethod
+    def test_rmse_present_in_results(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        assert "validation_rmse" in model.results
+        assert model.results["validation_rmse"] > 0.0
+
+    @staticmethod
+    def test_rmse_is_finite(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        assert np.isfinite(model.results["validation_rmse"])
+
+
+class TestPercentLiftCIs:
+    @staticmethod
+    def test_percent_lift_keys_present(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        for key in ("percent_lift", "percent_lift_ci_lower", "percent_lift_ci_upper"):
+            assert key in model.results
+
+    @staticmethod
+    def test_ci_brackets_point_estimate(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        lift = model.results["percent_lift"]
+        lo = model.results["percent_lift_ci_lower"]
+        hi = model.results["percent_lift_ci_upper"]
+        valid = ~np.isnan(lift)
+        assert np.all(lo[valid] <= lift[valid])
+        assert np.all(lift[valid] <= hi[valid])
+
+    @staticmethod
+    def test_percent_lift_positive_for_positive_effect(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        lift = model.results["percent_lift"]
+        valid = ~np.isnan(lift)
+        assert np.all(lift[valid] > 0)
+
+
+class TestPlaceboTest:
+    @staticmethod
+    def test_requires_generate(data_df: pd.DataFrame) -> None:
+        model = geox.GeoX(
+            data_df,
+            geo_variable="zipcode",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2022-06-30",
+            post_period="2022-07-01",
+            y_variable="orders",
+        )
+        model.pre_process()
+        with pytest.raises(ValueError, match="generate"):
+            model.placebo_test()
+
+    @staticmethod
+    def test_returns_expected_keys(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.placebo_test(n_placebos=10, min_placebo_r2=0.0)
+        assert "placebo_t_stats" in result
+        assert "real_t_stat" in result
+        assert "empirical_p_value" in result
+        assert "n_placebos_passed" in result
+        assert "n_placebos_total" in result
+
+    @staticmethod
+    def test_stored_in_results(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        model.placebo_test(n_placebos=10, min_placebo_r2=0.0)
+        assert "placebo" in model.results
+
+    @staticmethod
+    def test_empirical_p_value_in_range(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.placebo_test(n_placebos=20, min_placebo_r2=0.0)
+        assert 0.0 <= result["empirical_p_value"] <= 1.0
+
+    @staticmethod
+    def test_r2_filter_reduces_placebos(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        no_filter = model.placebo_test(n_placebos=30, min_placebo_r2=0.0, seed=0)
+        with_filter = model.placebo_test(n_placebos=30, min_placebo_r2=0.9, seed=0)
+        assert with_filter["n_placebos_passed"] <= no_filter["n_placebos_passed"]
+
+    @staticmethod
+    def test_real_t_stat_is_finite(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.placebo_test(n_placebos=5, min_placebo_r2=0.0)
+        assert np.isfinite(result["real_t_stat"])
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from GeoCausality import (
     penalized_synthetic_control,
     power,
     robust_synthetic_control,
+    switchback,
     synthetic_control,
     synthetic_diff_in_diff,
 )
@@ -46,6 +47,7 @@ __all__: list[str] = [
     "causal_impact",
     "generalized_synthetic_control",
     "geolift",
+    "switchback",
     "power",
     "market_selection",
 ]
