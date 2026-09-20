@@ -114,9 +114,10 @@ class Switchback(Estimator):
             Itself, so it can be chained with ``generate()``.
         """
         df = self.data.sort([self.geo_variable, self.date_variable])
+        treat_var: str = self.treatment_variable or "is_treatment"
 
         if self.washout > 0:
-            treat_col = nw.col(self.treatment_variable)
+            treat_col = nw.col(treat_var)
             shifted = treat_col.shift(1).over(self.geo_variable)
             switch = (treat_col != shifted) & ~shifted.is_null()
             df = df.with_columns(switch.alias("_switch"))
@@ -127,11 +128,11 @@ class Switchback(Estimator):
 
         if self.carryover_lags > 0:
             for lag in range(1, self.carryover_lags + 1):
-                lag_col = nw.col(self.treatment_variable).shift(lag).over(self.geo_variable).fill_null(0)
+                lag_col = nw.col(treat_var).shift(lag).over(self.geo_variable).fill_null(0)
                 df = df.with_columns(lag_col.alias(f"treatment_lag_{lag}"))
 
         self.panel = df
-        self.n_treated_obs = int(df.filter(nw.col(self.treatment_variable) == 1).shape[0])
+        self.n_treated_obs = int(df.filter(nw.col(treat_var) == 1).shape[0])
         return self
 
     def generate(self) -> "Switchback":
@@ -145,7 +146,8 @@ class Switchback(Estimator):
         if self.panel is None:
             raise ValueError("Call pre_process() before generate()")
 
-        exog_terms = [self.treatment_variable]
+        treat_var: str = self.treatment_variable or "is_treatment"
+        exog_terms: list[str] = [treat_var]
         for lag in range(1, self.carryover_lags + 1):
             exog_terms.append(f"treatment_lag_{lag}")
         exog_formula = " + ".join(exog_terms)
@@ -155,11 +157,11 @@ class Switchback(Estimator):
         model = PanelOLS.from_formula(formula, data=panel_pd)
         self.model = model.fit(cov_type="clustered", cluster_entity=True)
 
-        lift = float(self.model.params[self.treatment_variable])
+        lift = float(self.model.params[treat_var])
         cis = self.model.conf_int(1 - self.alpha)
-        ci_lower = float(cis.loc[self.treatment_variable, "lower"])
-        ci_upper = float(cis.loc[self.treatment_variable, "upper"])
-        p_value = float(self.model.pvalues[self.treatment_variable])
+        ci_lower = float(cis.loc[treat_var, "lower"])
+        ci_upper = float(cis.loc[treat_var, "upper"])
+        p_value = float(self.model.pvalues[treat_var])
 
         self.results = {
             "lift": lift,
@@ -314,8 +316,9 @@ class Switchback(Estimator):
         observed = self.results["lift"]
         panel_pd = self.panel.to_pandas()
         geos = panel_pd[self.geo_variable].unique()
+        treat_var: str = self.treatment_variable or "is_treatment"
 
-        exog_terms = [self.treatment_variable]
+        exog_terms: list[str] = [treat_var]
         for lag in range(1, self.carryover_lags + 1):
             exog_terms.append(f"treatment_lag_{lag}")
         exog_formula = " + ".join(exog_terms)
@@ -326,18 +329,16 @@ class Switchback(Estimator):
             perm_df = panel_pd.copy()
             for geo in geos:
                 mask = perm_df[self.geo_variable] == geo
-                treat_vals = perm_df.loc[mask, self.treatment_variable].values
+                treat_vals = perm_df.loc[mask, treat_var].values
                 shift = rng.integers(1, len(treat_vals))
-                perm_df.loc[mask, self.treatment_variable] = np.roll(treat_vals, shift)
+                perm_df.loc[mask, treat_var] = np.roll(treat_vals, shift)
                 for lag in range(1, self.carryover_lags + 1):
-                    perm_df.loc[mask, f"treatment_lag_{lag}"] = np.roll(
-                        perm_df.loc[mask, self.treatment_variable].values, lag
-                    )
+                    perm_df.loc[mask, f"treatment_lag_{lag}"] = np.roll(perm_df.loc[mask, treat_var].values, lag)
             perm_indexed = perm_df.set_index([self.geo_variable, self.date_variable])
             try:
                 perm_model = PanelOLS.from_formula(formula, data=perm_indexed)
                 perm_fit = perm_model.fit(cov_type="clustered", cluster_entity=True)
-                perm_effects.append(float(perm_fit.params[self.treatment_variable]))
+                perm_effects.append(float(perm_fit.params[treat_var]))
             except Exception:
                 continue
 
@@ -354,6 +355,235 @@ class Switchback(Estimator):
         self.results["permutation_test"] = result
         return result
 
+    # ------------------------------------------------------------------
+    # Power analysis
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _estimate_autocorrelation(residuals_by_geo: list[np.ndarray]) -> float:
+        """Estimate pooled AR(1) autocorrelation from per-geo residual series."""
+        num = 0.0
+        den = 0.0
+        for r in residuals_by_geo:
+            if len(r) < 2:
+                continue
+            r_dm = r - r.mean()
+            num += float(np.dot(r_dm[1:], r_dm[:-1]))
+            den += float(np.dot(r_dm, r_dm))
+        return num / den if den > 0 else 0.0
+
+    def power_analytical(
+        self,
+        mde: float | None = None,
+        n_geos: int | None = None,
+        n_periods: int | None = None,
+        sigma: float | None = None,
+        rho: float | None = None,
+        treatment_fraction: float = 0.5,
+        power_target: float = 0.8,
+    ) -> dict[str, float]:
+        """Analytical power calculation for the switchback design.
+
+        When ``mde`` is provided, returns the statistical power for that effect
+        size. When ``mde`` is ``None``, inverts the formula to return the
+        minimum detectable effect at ``power_target``.
+
+        If ``sigma`` and ``rho`` (residual standard deviation and AR(1)
+        autocorrelation) are not supplied, they are estimated from the fitted
+        model's residuals. Similarly, ``n_geos`` and ``n_periods`` default to
+        the values in the current panel.
+
+        Parameters
+        ----------
+        mde : float or None
+            The effect size to evaluate. If ``None``, the MDE at
+            ``power_target`` power is returned instead.
+        n_geos : int or None
+            Number of geos. Defaults to the current data.
+        n_periods : int or None
+            Number of time periods per geo (after washout). Defaults to the
+            current data.
+        sigma : float or None
+            Residual standard deviation. Estimated from the model if not given.
+        rho : float or None
+            Within-geo AR(1) autocorrelation. Estimated from the model if not
+            given.
+        treatment_fraction : float, default=0.5
+            Proportion of periods each geo spends in treatment.
+        power_target : float, default=0.8
+            Target power when computing the MDE (ignored when ``mde`` is
+            given).
+
+        Returns
+        -------
+        dict
+            ``mde``, ``power``, ``sigma``, ``rho``, ``n_geos``,
+            ``n_periods``, ``se_tau``.
+        """
+        from scipy.stats import norm
+
+        if self.panel is None or self.model is None:
+            raise ValueError("Call pre_process().generate() before power_analytical()")
+
+        panel_pd = self.panel.to_pandas()
+        geos = panel_pd[self.geo_variable].unique()
+
+        if n_geos is None:
+            n_geos = len(geos)
+        if n_periods is None:
+            n_periods = int(panel_pd.groupby(self.geo_variable).size().median())
+
+        if sigma is None:
+            sigma = float(np.sqrt(self.model.resids.var()))
+        if rho is None:
+            resids = self.model.resids
+            residuals_by_geo: list[np.ndarray] = []
+            for geo in geos:
+                geo_resids = resids.xs(geo, level=self.geo_variable)
+                residuals_by_geo.append(geo_resids.values)
+            rho = self._estimate_autocorrelation(residuals_by_geo)
+
+        p = treatment_fraction
+        effective_n = n_geos * n_periods * p * (1 - p)
+        inflation = 1 + (n_periods - 1) * rho
+        var_tau = sigma**2 * inflation / effective_n
+        se_tau = float(np.sqrt(var_tau))
+
+        z_alpha = float(norm.ppf(1 - self.alpha / 2))
+
+        if mde is not None:
+            z_power = (abs(mde) / se_tau) - z_alpha
+            power = float(norm.cdf(z_power))
+        else:
+            z_beta = float(norm.ppf(power_target))
+            mde = (z_alpha + z_beta) * se_tau
+            power = power_target
+
+        return {
+            "mde": mde,
+            "power": power,
+            "sigma": sigma,
+            "rho": rho,
+            "n_geos": n_geos,
+            "n_periods": n_periods,
+            "se_tau": se_tau,
+        }
+
+    def power_simulation(
+        self,
+        mde: float,
+        n_simulations: int = 500,
+        n_geos: int | None = None,
+        n_periods: int | None = None,
+        sigma: float | None = None,
+        rho: float | None = None,
+        treatment_fraction: float = 0.5,
+        switching_freq: int = 7,
+        seed: int = 0,
+    ) -> dict[str, Any]:
+        """Simulation-based power calculation for the switchback design.
+
+        Generates synthetic switchback panels under a given effect size, fits
+        the two-way FE model on each, and counts how often the null is
+        rejected at level ``alpha``.
+
+        Parameters
+        ----------
+        mde : float
+            The effect size (treatment coefficient) to simulate.
+        n_simulations : int, default=500
+            Number of Monte Carlo replications.
+        n_geos : int or None
+            Number of geos. Defaults to the current data.
+        n_periods : int or None
+            Number of time periods per geo. Defaults to the current data.
+        sigma : float or None
+            Residual standard deviation. Estimated from the model if not given.
+        rho : float or None
+            Within-geo AR(1) autocorrelation. Estimated from the model if not
+            given.
+        treatment_fraction : float, default=0.5
+            Approximate proportion of periods in treatment.
+        switching_freq : int, default=7
+            Number of consecutive periods in each on/off window.
+        seed : int, default=0
+            Random seed for reproducibility.
+
+        Returns
+        -------
+        dict
+            ``mde``, ``power``, ``n_simulations``, ``n_rejections``,
+            ``sigma``, ``rho``, ``power_ci_lower``, ``power_ci_upper``.
+        """
+        if self.panel is None or self.model is None:
+            raise ValueError("Call pre_process().generate() before power_simulation()")
+
+        panel_pd = self.panel.to_pandas()
+        geos_arr = panel_pd[self.geo_variable].unique()
+        treat_var: str = self.treatment_variable or "is_treatment"
+
+        if n_geos is None:
+            n_geos = len(geos_arr)
+        if n_periods is None:
+            n_periods = int(panel_pd.groupby(self.geo_variable).size().median())
+
+        if sigma is None:
+            sigma = float(np.sqrt(self.model.resids.var()))
+        if rho is None:
+            resids = self.model.resids
+            residuals_by_geo: list[np.ndarray] = []
+            for geo in geos_arr:
+                geo_resids = resids.xs(geo, level=self.geo_variable)
+                residuals_by_geo.append(geo_resids.values)
+            rho = self._estimate_autocorrelation(residuals_by_geo)
+
+        rng = np.random.default_rng(seed)
+        n_rejections = 0
+
+        for _ in range(n_simulations):
+            rows = []
+            for g in range(n_geos):
+                geo_fe = rng.normal(0, 10)
+                phase = rng.integers(0, 2)
+                noise = np.zeros(n_periods)
+                noise[0] = rng.normal(0, sigma)
+                for t in range(1, n_periods):
+                    noise[t] = rho * noise[t - 1] + rng.normal(0, sigma * np.sqrt(1 - rho**2))
+                for t in range(n_periods):
+                    time_fe = 2.0 * np.sin(2 * np.pi * t / 30)
+                    treat = int((t // switching_freq + phase) % 2)
+                    y = geo_fe + time_fe + mde * treat + noise[t]
+                    rows.append({"geo": f"g{g}", "date": t, treat_var: treat, "y": y})
+
+            import pandas as pd
+
+            sim_df = pd.DataFrame(rows)
+            sim_indexed = sim_df.set_index(["geo", "date"])
+            formula = f"y ~ {treat_var} + EntityEffects + TimeEffects"
+            try:
+                sim_model = PanelOLS.from_formula(formula, data=sim_indexed)
+                sim_fit = sim_model.fit(cov_type="clustered", cluster_entity=True)
+                if float(sim_fit.pvalues[treat_var]) < self.alpha:
+                    n_rejections += 1
+            except Exception:
+                continue
+
+        power = n_rejections / n_simulations
+        from scipy.stats import norm
+
+        z = float(norm.ppf(0.975))
+        se_power = np.sqrt(power * (1 - power) / n_simulations)
+        return {
+            "mde": mde,
+            "power": power,
+            "n_simulations": n_simulations,
+            "n_rejections": n_rejections,
+            "sigma": sigma,
+            "rho": rho,
+            "power_ci_lower": max(0.0, power - z * se_power),
+            "power_ci_upper": min(1.0, power + z * se_power),
+        }
+
     def plot(self) -> None:
         """Plot the treatment schedule and outcome time series per geo.
 
@@ -364,15 +594,18 @@ class Switchback(Estimator):
         if self.panel is None:
             raise ValueError("Call pre_process() before plot()")
 
-        panel_pd = self.panel.to_pandas()
+        import pandas as pd
+
+        panel_pd: pd.DataFrame = self.panel.to_pandas()
         geos = sorted(panel_pd[self.geo_variable].unique())
+        treat_var: str = self.treatment_variable or "is_treatment"
 
         fig = go.Figure()
         for geo in geos:
-            geo_data = panel_pd[panel_pd[self.geo_variable] == geo].sort_values(self.date_variable)
+            geo_data = panel_pd.loc[panel_pd[self.geo_variable] == geo].sort_values(by=self.date_variable)
             dates = geo_data[self.date_variable]
             y = geo_data[self.y_variable]
-            treat = geo_data[self.treatment_variable]
+            treat = geo_data[treat_var]
             colors = ["red" if t == 1 else "blue" for t in treat]
             fig.add_trace(
                 go.Scatter(

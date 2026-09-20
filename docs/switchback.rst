@@ -94,6 +94,64 @@ Usage
    placebo = model.permutation_test(n_permutations=1000)
    print(f"Empirical p-value: {placebo['empirical_p_value']:.4f}")
 
+Power Analysis
+--------------
+The ``Switchback`` estimator provides both analytical (closed-form) and
+simulation-based power calculations to help design experiments before they run.
+Both methods require that ``generate()`` has already been called so that the
+residual variance and autocorrelation structure can be estimated from the data.
+
+Analytical power
+~~~~~~~~~~~~~~~~
+The analytical method uses a closed-form variance formula that accounts for
+within-geo serial correlation via an AR(1) autocorrelation parameter
+:math:`\rho`:
+
+.. math::
+
+   \text{Var}(\hat\tau) = \frac{\sigma^2 \bigl[1 + (T-1)\rho\bigr]}{G \cdot T \cdot p(1-p)}
+
+where :math:`G` is the number of geos, :math:`T` the number of periods,
+:math:`p` the treatment proportion, and :math:`\sigma^2` the residual variance.
+Power is then computed from the non-central *t*-distribution.
+
+Pass ``mde`` to get power for a given minimum detectable effect, or set
+``mde=None`` with ``power_target`` to solve for the required MDE:
+
+.. code-block:: python
+
+   # Given MDE → power
+   result = model.power_analytical(mde=5.0)
+   print(f"Power: {result['power']:.2f}")
+
+   # Given target power → required MDE
+   result = model.power_analytical(mde=None, power_target=0.8)
+   print(f"Required MDE: {result['mde']:.2f}")
+
+You can also override the number of geos and periods to explore hypothetical
+designs:
+
+.. code-block:: python
+
+   result = model.power_analytical(mde=3.0, n_geos=20, n_periods=90)
+
+Simulation-based power
+~~~~~~~~~~~~~~~~~~~~~~
+The simulation method runs a Monte Carlo experiment: for each iteration it
+generates synthetic data with AR(1) correlated errors, injects the specified
+effect, fits the two-way fixed-effects model, and checks whether the treatment
+coefficient is significant at the chosen level.
+
+.. code-block:: python
+
+   result = model.power_simulation(mde=5.0, n_simulations=500, seed=42)
+   print(f"Simulated power: {result['power']:.2f}")
+   print(f"95% CI: [{result['power_ci_lower']:.2f}, {result['power_ci_upper']:.2f}]")
+
+The simulation approach is more flexible — it captures the exact finite-sample
+behaviour including geo and time fixed effects — but is slower than the
+analytical formula.
+
 Limitations
 -----------
 

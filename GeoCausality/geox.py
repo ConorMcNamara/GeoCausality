@@ -378,14 +378,15 @@ class GeoX(MLEstimator):
         if self.results is None:
             raise ValueError("Call generate() before placebo_test()")
 
+        treatment_var: str = self.treatment_variable or "is_test"
         if self.test_geos is not None:
             test_geo_list = list(self.test_geos)
         else:
-            test_geo_list = self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].unique().to_list()
+            test_geo_list = self.data.filter(nw.col(treatment_var) == 1)[self.geo_variable].unique().to_list()
         if self.control_geos is not None:
             control_geos = list(self.control_geos)
         else:
-            control_geos = self.data.filter(nw.col(self.treatment_variable) == 0)[self.geo_variable].unique().to_list()
+            control_geos = self.data.filter(nw.col(treatment_var) == 0)[self.geo_variable].unique().to_list()
 
         n_test = len(test_geo_list)
         if len(control_geos) < 2:

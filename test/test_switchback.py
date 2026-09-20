@@ -151,6 +151,68 @@ class TestPermutationTest:
         assert "permutation_test" in model.results
 
 
+class TestPowerAnalytical:
+    @staticmethod
+    def test_returns_expected_keys(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_analytical(mde=5.0)
+        expected = {"mde", "power", "sigma", "rho", "n_geos", "n_periods", "se_tau"}
+        assert expected == set(result.keys())
+
+    @staticmethod
+    def test_power_increases_with_mde(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        small = model.power_analytical(mde=1.0)
+        large = model.power_analytical(mde=10.0)
+        assert large["power"] > small["power"]
+
+    @staticmethod
+    def test_mde_returned_when_none(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_analytical(mde=None, power_target=0.8)
+        assert result["mde"] > 0
+        assert result["power"] == pytest.approx(0.8)
+
+    @staticmethod
+    def test_rho_between_minus_one_and_one(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_analytical(mde=5.0)
+        assert -1.0 <= result["rho"] <= 1.0
+
+    @staticmethod
+    def test_more_geos_increases_power(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        fewer = model.power_analytical(mde=3.0, n_geos=5)
+        more = model.power_analytical(mde=3.0, n_geos=50)
+        assert more["power"] > fewer["power"]
+
+
+class TestPowerSimulation:
+    @staticmethod
+    def test_returns_expected_keys(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_simulation(mde=5.0, n_simulations=10, seed=0)
+        expected = {"mde", "power", "n_simulations", "n_rejections", "sigma", "rho", "power_ci_lower", "power_ci_upper"}
+        assert expected == set(result.keys())
+
+    @staticmethod
+    def test_power_in_range(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_simulation(mde=5.0, n_simulations=10, seed=0)
+        assert 0.0 <= result["power"] <= 1.0
+
+    @staticmethod
+    def test_large_effect_high_power(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.power_simulation(mde=20.0, n_simulations=20, seed=0)
+        assert result["power"] >= 0.5
+
+    @staticmethod
+    def test_stored_in_results(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        model.power_simulation(mde=5.0, n_simulations=10, seed=0)
+
+
 class TestWrongInputs:
     @staticmethod
     def test_generate_before_preprocess() -> None:
