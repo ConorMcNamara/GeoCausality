@@ -29,6 +29,7 @@ A Python library for measuring the causal impact of geo-level A/B experiments. G
 | `KernelSyntheticControl` | Kernel-ridge nonlinear-map synthetic control (linear + RBF) | — |
 | `SyntheticDiffInDiff` | Doubly-weighted difference-in-differences | [Arkhangelsky et al. 2021](https://www.aeaweb.org/articles?id=10.1257/aer.20190159) |
 | `CausalImpact` | Bayesian structural time-series counterfactual | [Brodersen et al. 2015](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-9/issue-1/Inferring-causal-impact-using-Bayesian-structural-time-series-models/10.1214/14-AOAS788.full) |
+| `Switchback` | Switchback (crossover) experiment with two-way FE | [Bojinov & Shephard 2019](https://projecteuclid.org/journals/annals-of-statistics/volume-47/issue-6/Time-series-experiments-and-causal-estimands-exact-randomization-tests-and/10.1214/18-AOS1756.full) |
 
 ### Pre-experiment design
 
@@ -89,6 +90,31 @@ model.pre_process().generate().summarize(lift="relative")
 model.plot()
 ```
 
+For switchback (crossover) experiments where treatment toggles on/off within geos over time:
+
+```python
+from GeoCausality import switchback
+
+model = switchback.Switchback(
+    df,
+    geo_variable="geo",
+    date_variable="date",
+    y_variable="revenue",
+    treatment_variable="ads_on",
+    washout=1,
+    carryover_lags=1,
+)
+model.pre_process().generate().summarize(lift="incremental")
+model.plot()
+
+# Randomization inference
+model.permutation_test(n_permutations=1000)
+
+# Power analysis
+model.power_analytical(mde=5.0)
+model.power_simulation(mde=5.0, n_simulations=500)
+```
+
 ## Reference Options
 
 ### Constructor parameters
@@ -107,6 +133,13 @@ model.plot()
 | `alpha` | `float` | `0.1` | Significance level for confidence intervals |
 | `msrp` | `float` | `0.0` | Average sale price (for revenue lift) |
 | `spend` | `float` | `0.0` | Campaign spend (for ROAS / cost-per) |
+
+### Switchback-specific parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `washout` | `int` | `0` | Periods to discard after each treatment switch |
+| `carryover_lags` | `int` | `0` | Lagged treatment indicators to include as regressors |
 
 ### `lift`
 
