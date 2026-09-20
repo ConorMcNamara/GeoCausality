@@ -39,6 +39,7 @@ Every estimator shares the same three-step interface:
    kernel_synthetic_control
    synthetic_diff_in_diff
    causal_impact
+   switchback
 
 .. toctree::
    :maxdepth: 1

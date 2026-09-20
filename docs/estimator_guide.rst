@@ -75,6 +75,10 @@ Quick reference
      - Strong trend/seasonality in the outcome
      - Pre-period dynamics continue post-treatment
      - Model specification (trend, seasonality) must be chosen
+   * - :doc:`switchback`
+     - Treatment toggles on/off over time within geos
+     - No carryover beyond washout window
+     - Requires rapid treatment switching; few-geo SEs may be unreliable
    * - :doc:`geolift`
      - Just want the recommended pipeline
      - Inherits ASC + GSC assumptions
@@ -215,31 +219,44 @@ that a static counterfactual would mistrack. **Avoid** when you are unsure
 about the right trend/seasonal specification — misspecification biases the
 counterfactual.
 
+Switchback (crossover) design
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:doc:`switchback` is for experiments where treatment assignment alternates over
+time within geos — each geo switches between treatment and control across time
+windows. A two-way fixed-effects panel model with cluster-robust standard
+errors estimates the average treatment effect. Washout periods and carryover
+lag terms mitigate bleed-over between windows, and randomization inference
+provides a non-parametric p-value.
+
+**Choose Switchback when** treatment can be toggled rapidly (e.g. paid-search
+ads on/off) and you want within-unit identification from few geos. **Avoid**
+when carryover effects are long-lived relative to the switching window or when
+the treatment cannot be cleanly toggled.
+
 Decision flowchart
 ------------------
 
 .. code-block:: text
 
-   Is this your first analysis or are you unsure?
-   ├── Yes → GeoLift (or AugmentedSyntheticControl)
+   Does treatment alternate on/off within geos over time?
+   ├── Yes → Switchback
    └── No
-       ├── Very few geos (1–3 treated)?
-       │   ├── Yes → GeoX
+       ├── Is this your first analysis or are you unsure?
+       │   ├── Yes → GeoLift (or AugmentedSyntheticControl)
        │   └── No
-       │       ├── Strong seasonality or trend?
-       │       │   ├── Yes → CausalImpact
+       │       ├── Very few geos (1–3 treated)?
+       │       │   ├── Yes → GeoX
        │       │   └── No
-       │       │       ├── Parallel trends credible?
-       │       │       │   ├── Yes → DiffinDiff or FixedEffects
+       │       │       ├── Strong seasonality or trend?
+       │       │       │   ├── Yes → CausalImpact
        │       │       │   └── No
-       │       │       │       ├── Nonlinear outcome?
-       │       │       │       │   ├── Yes → NonlinearSC or KernelSC
+       │       │       │       ├── Parallel trends credible?
+       │       │       │       │   ├── Yes → DiffinDiff or FixedEffects
        │       │       │       │   └── No
-       │       │       │       │       ├── Want robustness to both DiD and SC?
-       │       │       │       │       │   ├── Yes → SyntheticDiffInDiff
-       │       │       │       │       │   └── No → AugmentedSyntheticControl
-       │       │       │       │       └──
-       │       │       │       └──
-       │       │       └──
-       │       └──
-       └──
+       │       │       │       │       ├── Nonlinear outcome?
+       │       │       │       │       │   ├── Yes → NonlinearSC or KernelSC
+       │       │       │       │       │   └── No
+       │       │       │       │       │       ├── Want robustness to both DiD and SC?
+       │       │       │       │       │       │   ├── Yes → SyntheticDiffInDiff
+       │       │       │       │       │       │   └── No → AugmentedSyntheticControl
