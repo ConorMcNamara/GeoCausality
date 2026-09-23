@@ -480,6 +480,7 @@ class Switchback(Estimator):
         treatment_fraction: float = 0.5,
         switching_freq: int = 7,
         seed: int = 0,
+        n_jobs: int = 1,
     ) -> dict[str, Any]:
         """Simulation-based power calculation for the switchback design.
 
@@ -508,6 +509,10 @@ class Switchback(Estimator):
             Number of consecutive periods in each on/off window.
         seed : int, default=0
             Random seed for reproducibility.
+        n_jobs : int, default 1
+            Number of parallel workers for the simulation loop. ``-1`` uses
+            all available cores.  ``1`` (the default) runs sequentially with
+            no parallelism overhead.
 
         Returns
         -------
@@ -537,37 +542,45 @@ class Switchback(Estimator):
                 residuals_by_geo.append(geo_resids.values)
             rho = self._estimate_autocorrelation(residuals_by_geo)
 
-        rng = np.random.default_rng(seed)
-        n_rejections = 0
+        import pandas as pd
 
-        for _ in range(n_simulations):
+        alpha_val = self.alpha
+        ss = np.random.SeedSequence(seed)
+        sim_seeds = ss.generate_state(n_simulations)
+
+        def _run_sim(sim_seed: int) -> bool:
+            sim_rng = np.random.default_rng(sim_seed)
             rows = []
             for g in range(n_geos):
-                geo_fe = rng.normal(0, 10)
-                phase = rng.integers(0, 2)
+                geo_fe = sim_rng.normal(0, 10)
+                phase = sim_rng.integers(0, 2)
                 noise = np.zeros(n_periods)
-                noise[0] = rng.normal(0, sigma)
+                noise[0] = sim_rng.normal(0, sigma)
                 for t in range(1, n_periods):
-                    noise[t] = rho * noise[t - 1] + rng.normal(0, sigma * np.sqrt(1 - rho**2))
+                    noise[t] = rho * noise[t - 1] + sim_rng.normal(0, sigma * np.sqrt(1 - rho**2))
                 for t in range(n_periods):
                     time_fe = 2.0 * np.sin(2 * np.pi * t / 30)
                     treat = int((t // switching_freq + phase) % 2)
                     y = geo_fe + time_fe + mde * treat + noise[t]
                     rows.append({"geo": f"g{g}", "date": t, treat_var: treat, "y": y})
-
-            import pandas as pd
-
             sim_df = pd.DataFrame(rows)
             sim_indexed = sim_df.set_index(["geo", "date"])
             formula = f"y ~ {treat_var} + EntityEffects + TimeEffects"
             try:
                 sim_model = PanelOLS.from_formula(formula, data=sim_indexed)
                 sim_fit = sim_model.fit(cov_type="clustered", cluster_entity=True)
-                if float(sim_fit.pvalues[treat_var]) < self.alpha:
-                    n_rejections += 1
+                return float(sim_fit.pvalues[treat_var]) < alpha_val
             except Exception:
-                continue
+                return False
 
+        if n_jobs == 1:
+            outcomes = [_run_sim(int(s)) for s in sim_seeds]
+        else:
+            from joblib import Parallel, delayed
+
+            outcomes = Parallel(n_jobs=n_jobs)(delayed(_run_sim)(int(s)) for s in sim_seeds)
+
+        n_rejections = sum(outcomes)
         power = n_rejections / n_simulations
         from scipy.stats import norm
 
