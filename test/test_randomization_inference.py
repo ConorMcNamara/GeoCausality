@@ -149,6 +149,16 @@ class TestMaxPlacebos:
         assert a["placebo_statistics"] == b["placebo_statistics"]
 
 
+class TestParallel:
+    @staticmethod
+    def test_parallel_matches_sequential(fitted: SyntheticControl) -> None:
+        seq = fitted.randomization_test(max_placebos=4, seed=0, n_jobs=1)
+        par = fitted.randomization_test(max_placebos=4, seed=0, n_jobs=2)
+        assert seq["placebo_geos"] == par["placebo_geos"]
+        assert seq["placebo_statistics"] == pytest.approx(par["placebo_statistics"])
+        assert seq["p_value"] == par["p_value"]
+
+
 class TestSignificance:
     @staticmethod
     def test_strong_effect_is_significant() -> None:

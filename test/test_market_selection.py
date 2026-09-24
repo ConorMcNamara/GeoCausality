@@ -245,6 +245,17 @@ class TestDTW:
         assert len(ms.rankings) == 8  # C(8,1) = 8, all kept
 
 
+class TestParallel:
+    @staticmethod
+    def test_parallel_matches_sequential(history: pl.DataFrame) -> None:
+        seq = _selection(history).search(n_test_geos=[1], effect_size=0.3, duration=10, n_sims=6, n_jobs=1)
+        par = _selection(history).search(n_test_geos=[1], effect_size=0.3, duration=10, n_sims=6, n_jobs=2)
+        assert len(seq.rankings) == len(par.rankings)
+        seq_scores = [r["score"] for r in seq.rankings]
+        par_scores = [r["score"] for r in par.rankings]
+        assert seq_scores == pytest.approx(par_scores)
+
+
 def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
     duration = 5
     test_geos = ["g0", "g1"]
