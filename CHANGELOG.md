@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-09-23
+
+### Added
+
+- **Randomization inference** (`randomization_test()`) — Abadie-style placebo
+  permutation test on all `EconometricEstimator` subclasses. Treats each donor
+  geo as a placebo treated unit, re-fits the full pipeline, and builds a null
+  distribution. Supports three test statistics: `avg_lift`, `sum_lift`, and
+  `mspe_ratio` (Abadie, Diamond & Hainmueller 2015). Rank-based two-sided
+  p-value with optional `max_placebos` cap and `seed` for reproducibility.
+- **README updates** — added Switchback estimator and GeoX Meridian
+  enhancements to the quick-start examples and reference tables.
+
+### Changed
+
+- **Test fixture caching** — module-scoped pytest fixtures for
+  `MatrixCompletion` and `MarketSelection` tests, eliminating redundant model
+  fits (~30% faster test suite).
+
 ## [0.16.0] - 2026-09-20
 
 ### Added
@@ -576,6 +595,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.17.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.0
 [0.16.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.16.0
 [0.15.3]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.3
 [0.15.2]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.2
