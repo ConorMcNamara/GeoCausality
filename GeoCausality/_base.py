@@ -1465,6 +1465,7 @@ class EconometricEstimator(Estimator, ABC):
         statistic: str = "avg_lift",
         seed: int | None = None,
         max_placebos: int | None = None,
+        n_jobs: int = 1,
     ) -> dict[str, Any]:
         """Placebo permutation test in the style of Abadie, Diamond & Hainmueller (2010).
 
@@ -1496,6 +1497,10 @@ class EconometricEstimator(Estimator, ABC):
             Cap the number of placebo geos to run. When the donor pool is very
             large, this draws a random subset rather than exhaustively iterating
             every donor.
+        n_jobs : int, default 1
+            Number of parallel workers for the placebo loop. ``-1`` uses all
+            available cores.  ``1`` (the default) runs sequentially with no
+            parallelism overhead.
 
         Returns
         -------
@@ -1542,36 +1547,51 @@ class EconometricEstimator(Estimator, ABC):
 
         native_data = self.data.to_native()
         estimator_cls = type(self)
+        geo_var = self.geo_variable
+        date_var = self.date_variable
+        pre_per = self.pre_period
+        post_per = self.post_period
+        y_var = self.y_variable
+        alpha_val = self.alpha
+
+        def _fit_placebo(placebo_geo: str) -> tuple[str, float] | None:
+            placebo_control = [g for g in all_geos if g != placebo_geo]
+            try:
+                m = estimator_cls(
+                    native_data,
+                    geo_variable=geo_var,
+                    test_geos=[placebo_geo],
+                    control_geos=placebo_control,
+                    date_variable=date_var,
+                    pre_period=pre_per,
+                    post_period=post_per,
+                    y_variable=y_var,
+                    alpha=alpha_val,
+                )
+                m.pre_process().generate()
+                r = m.results
+                if r is None:
+                    return None
+                return (placebo_geo, self._ri_statistic(r, statistic))
+            except Exception:
+                return None
+
+        if n_jobs == 1:
+            raw = [_fit_placebo(g) for g in donor_geos]
+        else:
+            from joblib import Parallel, delayed
+
+            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(g) for g in donor_geos)
 
         placebo_stats: list[float] = []
         placebo_geos: list[str] = []
         n_failed = 0
-
-        for placebo_geo in donor_geos:
-            placebo_control = [g for g in all_geos if g != placebo_geo]
-            try:
-                placebo_model = estimator_cls(
-                    native_data,
-                    geo_variable=self.geo_variable,
-                    test_geos=[placebo_geo],
-                    control_geos=placebo_control,
-                    date_variable=self.date_variable,
-                    pre_period=self.pre_period,
-                    post_period=self.post_period,
-                    y_variable=self.y_variable,
-                    alpha=self.alpha,
-                )
-                placebo_model.pre_process().generate()
-                placebo_results = placebo_model.results
-                if placebo_results is None:
-                    n_failed += 1
-                    continue
-                stat = self._ri_statistic(placebo_results, statistic)
-                placebo_stats.append(stat)
-                placebo_geos.append(placebo_geo)
-            except Exception:
+        for r in raw:
+            if r is None:
                 n_failed += 1
-                continue
+            else:
+                placebo_geos.append(r[0])
+                placebo_stats.append(r[1])
 
         if not placebo_stats:
             warnings.warn("All placebo runs failed; cannot compute a p-value", stacklevel=2)

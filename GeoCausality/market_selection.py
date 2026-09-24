@@ -352,6 +352,7 @@ class MarketSelection:
         exclude: list[str] | None = None,
         n_sims: int = 100,
         dtw_top_k: int | None = None,
+        n_jobs: int = 1,
     ) -> "MarketSelection":
         """Score and rank candidate test-geo sets.
 
@@ -373,6 +374,10 @@ class MarketSelection:
             similarity and only the top ``dtw_top_k`` proceed to the power
             simulation. This can dramatically speed up the search when the
             candidate pool is large.
+        n_jobs : int, default 1
+            Number of parallel workers for the candidate scoring loop.
+            ``-1`` uses all available cores.  ``1`` (the default) runs
+            sequentially with no parallelism overhead.
 
         Returns
         -------
@@ -382,36 +387,54 @@ class MarketSelection:
         candidates = self._candidate_sets(n_test_geos, include or [], exclude or [])
         if dtw_top_k is not None and dtw_top_k < len(candidates):
             candidates = self._dtw_filter(candidates, dtw_top_k)
-        records: list[dict[str, Any]] = []
-        for test_geos in candidates:
-            control_geos = [g for g in self.all_geos if g not in set(test_geos)]
+
+        native_data = self.data.to_native()
+        geo_var = self.geo_variable
+        date_var = self.date_variable
+        pre_per = self.pre_period
+        y_var = self.y_variable
+        alpha_val = self.alpha
+        est = self.estimator
+        est_kw = self.estimator_kwargs
+        inj = self.injection
+        min_pre = self.min_pre_periods
+        seed_val = self.seed
+        all_geos = self.all_geos
+
+        def _score_candidate(test_geos: tuple[str, ...]) -> dict[str, Any]:
+            control = [g for g in all_geos if g not in set(test_geos)]
             pa = PowerAnalysis(
-                self.data.to_native(),
-                geo_variable=self.geo_variable,
+                native_data,
+                geo_variable=geo_var,
                 test_geos=list(test_geos),
-                control_geos=control_geos,
-                date_variable=self.date_variable,
-                pre_period=self.pre_period,
-                y_variable=self.y_variable,
-                alpha=self.alpha,
-                estimator=self.estimator,
-                estimator_kwargs=self.estimator_kwargs,
-                injection=self.injection,
-                min_pre_periods=self.min_pre_periods,
-                seed=self.seed,
+                control_geos=control,
+                date_variable=date_var,
+                pre_period=pre_per,
+                y_variable=y_var,
+                alpha=alpha_val,
+                estimator=est,
+                estimator_kwargs=est_kw,
+                injection=inj,
+                min_pre_periods=min_pre,
+                seed=seed_val,
             ).simulate(effect_sizes=[effect_size], durations=[duration], n_sims=n_sims)
             curve = pa.power_curve
             if curve is None:
                 raise ValueError("power_curve must not be None")
-            records.append(
-                {
-                    "test_geos": list(test_geos),
-                    "n_test": len(test_geos),
-                    "n_control": len(control_geos),
-                    "power": curve[0]["power"],
-                    "pre_fit": self._pre_fit(pa, duration),
-                }
-            )
+            return {
+                "test_geos": list(test_geos),
+                "n_test": len(test_geos),
+                "n_control": len(control),
+                "power": curve[0]["power"],
+                "pre_fit": self._pre_fit(pa, duration),
+            }
+
+        if n_jobs == 1:
+            records: list[dict[str, Any]] = [_score_candidate(c) for c in candidates]
+        else:
+            from joblib import Parallel, delayed
+
+            records = Parallel(n_jobs=n_jobs)(delayed(_score_candidate)(c) for c in candidates)
 
         self.rankings = self._score(records)
         self.results = {

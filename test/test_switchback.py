@@ -213,6 +213,16 @@ class TestPowerSimulation:
         model.power_simulation(mde=5.0, n_simulations=10, seed=0)
 
 
+class TestParallel:
+    @staticmethod
+    def test_parallel_power_simulation(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        seq = model.power_simulation(mde=5.0, n_simulations=10, seed=0, n_jobs=1)
+        par = model.power_simulation(mde=5.0, n_simulations=10, seed=0, n_jobs=2)
+        assert seq["n_rejections"] == par["n_rejections"]
+        assert seq["power"] == par["power"]
+
+
 class TestWrongInputs:
     @staticmethod
     def test_generate_before_preprocess() -> None:
