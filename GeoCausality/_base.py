@@ -1,4 +1,5 @@
 import abc
+import warnings
 from abc import ABC
 from collections.abc import Callable
 from datetime import date as date_cls
@@ -572,6 +573,8 @@ class EconometricEstimator(Estimator, ABC):
             "test": actual_post,
             "counterfactual": prediction_post,
             "lift": actual_post - prediction_post,
+            "_actual_pre": actual_pre,
+            "_prediction_pre": prediction_pre,
             **extra,
         }
         results["incrementality"] = float(np.sum(results["lift"]))
@@ -1452,6 +1455,177 @@ class EconometricEstimator(Estimator, ABC):
             pl.DataFrame({self.date_variable: dates, self.y_variable: np.asarray(values, dtype=float)}),
             eager_only=True,
         )
+
+    # ------------------------------------------------------------------
+    # Randomization inference (Abadie-style placebo permutation test)
+    # ------------------------------------------------------------------
+    def randomization_test(
+        self,
+        *,
+        statistic: str = "avg_lift",
+        seed: int | None = None,
+        max_placebos: int | None = None,
+    ) -> dict[str, Any]:
+        """Placebo permutation test in the style of Abadie, Diamond & Hainmueller (2010).
+
+        For each donor (control) geo, temporarily treat it as the single
+        treated unit while the remaining geos (original donors minus the
+        placebo geo, plus the original treated geos) form the control pool.
+        The full ``pre_process().generate()`` pipeline is re-run for every
+        placebo geo, producing a null distribution of treatment effect
+        statistics.  The rank-based p-value is the fraction of placebos whose
+        absolute statistic is at least as large as the observed one.
+
+        Parameters
+        ----------
+        statistic : {"avg_lift", "sum_lift", "mspe_ratio"}, default "avg_lift"
+            The test statistic.
+
+            * ``"avg_lift"`` — mean of the per-period lift (matches the
+              Proposition 99 literature).
+            * ``"sum_lift"`` — total incrementality.
+            * ``"mspe_ratio"`` — ratio of the post-period MSPE to the
+              pre-period MSPE, as in Abadie, Diamond & Hainmueller (2015).
+              Placebos with poor pre-period fit are down-weighted
+              automatically by this ratio, so it does not need an explicit
+              fit filter.
+        seed : int, optional
+            If ``max_placebos`` is set and fewer than the full donor pool are
+            sampled, this seed controls which subset is drawn.
+        max_placebos : int, optional
+            Cap the number of placebo geos to run. When the donor pool is very
+            large, this draws a random subset rather than exhaustively iterating
+            every donor.
+
+        Returns
+        -------
+        dict with keys:
+
+        * ``observed_statistic`` — the test statistic on the real treated unit.
+        * ``placebo_statistics`` — list of per-geo placebo statistics.
+        * ``placebo_geos`` — the corresponding geo labels.
+        * ``p_value`` — two-sided rank-based p-value.
+        * ``n_placebos`` — number of successful placebos.
+        * ``n_failed`` — number of placebos that raised during fitting.
+        * ``statistic`` — name of the test statistic used.
+
+        Raises
+        ------
+        ValueError
+            If ``generate()`` has not been called, or no control geos are
+            available in the data.
+        """
+        current_results = self.results
+        if current_results is None:
+            raise ValueError("Call generate() before randomization_test()")
+        valid_stats = ("avg_lift", "sum_lift", "mspe_ratio")
+        if statistic not in valid_stats:
+            raise ValueError(f"statistic must be one of {valid_stats}, got {statistic!r}")
+
+        results: dict[str, Any] = current_results
+        observed = self._ri_statistic(results, statistic)
+
+        all_geos: list[str] = sorted(self.data[self.geo_variable].unique().to_list())
+        treat_var: str = self.treatment_variable or "is_treatment"
+        test_geos_set: set[str] = set(
+            self.test_geos
+            if self.test_geos is not None
+            else self.data.filter(nw.col(treat_var) == 1)[self.geo_variable].unique().to_list()
+        )
+        donor_geos = [g for g in all_geos if g not in test_geos_set]
+        if not donor_geos:
+            raise ValueError("No control geos available for placebo permutation")
+
+        if max_placebos is not None and max_placebos < len(donor_geos):
+            rng = np.random.default_rng(seed)
+            donor_geos = list(rng.choice(donor_geos, size=max_placebos, replace=False))
+
+        native_data = self.data.to_native()
+        estimator_cls = type(self)
+
+        placebo_stats: list[float] = []
+        placebo_geos: list[str] = []
+        n_failed = 0
+
+        for placebo_geo in donor_geos:
+            placebo_control = [g for g in all_geos if g != placebo_geo]
+            try:
+                placebo_model = estimator_cls(
+                    native_data,
+                    geo_variable=self.geo_variable,
+                    test_geos=[placebo_geo],
+                    control_geos=placebo_control,
+                    date_variable=self.date_variable,
+                    pre_period=self.pre_period,
+                    post_period=self.post_period,
+                    y_variable=self.y_variable,
+                    alpha=self.alpha,
+                )
+                placebo_model.pre_process().generate()
+                placebo_results = placebo_model.results
+                if placebo_results is None:
+                    n_failed += 1
+                    continue
+                stat = self._ri_statistic(placebo_results, statistic)
+                placebo_stats.append(stat)
+                placebo_geos.append(placebo_geo)
+            except Exception:
+                n_failed += 1
+                continue
+
+        if not placebo_stats:
+            warnings.warn("All placebo runs failed; cannot compute a p-value", stacklevel=2)
+            result: dict[str, Any] = {
+                "observed_statistic": observed,
+                "placebo_statistics": [],
+                "placebo_geos": [],
+                "p_value": float("nan"),
+                "n_placebos": 0,
+                "n_failed": n_failed,
+                "statistic": statistic,
+            }
+            results["randomization_test"] = result
+            return result
+
+        n_placebos = len(placebo_stats)
+        n_extreme = sum(1 for s in placebo_stats if abs(s) >= abs(observed))
+        p_value = (n_extreme + 1) / (n_placebos + 1)
+
+        result = {
+            "observed_statistic": observed,
+            "placebo_statistics": placebo_stats,
+            "placebo_geos": placebo_geos,
+            "p_value": p_value,
+            "n_placebos": n_placebos,
+            "n_failed": n_failed,
+            "statistic": statistic,
+        }
+        results["randomization_test"] = result
+        return result
+
+    @staticmethod
+    def _ri_statistic(results: dict[str, Any], statistic: str) -> float:
+        """Extract the test statistic from a results dict."""
+        lift = np.asarray(results["lift"], dtype=float).ravel()
+        if statistic == "avg_lift":
+            return float(np.mean(lift))
+        elif statistic == "sum_lift":
+            return float(np.sum(lift))
+        else:
+            actual_pre = results.get("_actual_pre")
+            prediction_pre = results.get("_prediction_pre")
+            if actual_pre is not None and prediction_pre is not None:
+                pre_resid = np.asarray(actual_pre, dtype=float) - np.asarray(prediction_pre, dtype=float)
+                mspe_pre = float(np.mean(pre_resid**2))
+            else:
+                mspe_pre = 1.0
+            actual_post = np.asarray(results["test"], dtype=float)
+            counterfactual_post = np.asarray(results["counterfactual"], dtype=float)
+            post_resid = actual_post - counterfactual_post
+            mspe_post = float(np.mean(post_resid**2))
+            if mspe_pre == 0:
+                return float("inf") if mspe_post > 0 else 0.0
+            return mspe_post / mspe_pre
 
     def plot(self) -> None:
         """Plot the actual series, counterfactual, and pointwise and cumulative differences.
