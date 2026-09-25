@@ -1647,6 +1647,121 @@ class EconometricEstimator(Estimator, ABC):
                 return float("inf") if mspe_post > 0 else 0.0
             return mspe_post / mspe_pre
 
+    # ------------------------------------------------------------------
+    # Model diagnostics
+    # ------------------------------------------------------------------
+    def diagnose(self) -> dict[str, Any]:
+        """Run a battery of pre-period diagnostics on a fitted model.
+
+        Returns a dictionary with the following keys:
+
+        * ``pre_mape`` — mean absolute percentage error of the
+          counterfactual fit over the pre-period.
+        * ``pre_rmse`` — root mean squared error of the pre-period fit.
+        * ``durbin_watson`` — Durbin-Watson statistic of the pre-period
+          residuals (values near 2 indicate no autocorrelation;
+          significantly below 2 suggests positive autocorrelation).
+        * ``residual_stationarity`` — dict with ``adf_statistic``,
+          ``adf_p_value`` and ``is_stationary`` (at the 5% level) from
+          the augmented Dickey-Fuller test on the pre-period residuals.
+        * ``placebo_in_time`` — dict from a placebo-in-time test that
+          splits the pre-period at 70%, re-fits, and reports ``lift``
+          and ``p_value`` on the held-out fake post-period. ``None``
+          when the pre-period is too short to split.
+
+        Raises
+        ------
+        ValueError
+            If ``generate()`` has not been called.
+        """
+        current_results = self.results
+        if current_results is None:
+            raise ValueError("Call generate() before diagnose()")
+
+        actual_pre = np.asarray(current_results["_actual_pre"], dtype=float).ravel()
+        prediction_pre = np.asarray(current_results["_prediction_pre"], dtype=float).ravel()
+        pre_resid = actual_pre - prediction_pre
+
+        pre_rmse = float(np.sqrt(np.mean(pre_resid**2)))
+        safe_actual = np.where(actual_pre != 0, actual_pre, np.nan)
+        pre_mape = float(np.nanmean(np.abs(pre_resid / safe_actual)))
+
+        dw_num = float(np.sum(np.diff(pre_resid) ** 2))
+        dw_den = float(np.sum(pre_resid**2))
+        durbin_watson = dw_num / dw_den if dw_den > 0 else float("nan")
+
+        from statsmodels.tsa.stattools import adfuller
+
+        n_pre = len(pre_resid)
+        if n_pre >= 6:
+            adf_result = adfuller(pre_resid, maxlag=max(1, n_pre // 4 - 1), autolag="AIC")
+            residual_stationarity: dict[str, Any] = {
+                "adf_statistic": float(adf_result[0]),
+                "adf_p_value": float(adf_result[1]),
+                "is_stationary": float(adf_result[1]) < 0.05,
+            }
+        else:
+            residual_stationarity = {
+                "adf_statistic": float("nan"),
+                "adf_p_value": float("nan"),
+                "is_stationary": None,
+            }
+
+        placebo_in_time = self._placebo_in_time()
+
+        diag: dict[str, Any] = {
+            "pre_mape": pre_mape,
+            "pre_rmse": pre_rmse,
+            "durbin_watson": durbin_watson,
+            "residual_stationarity": residual_stationarity,
+            "placebo_in_time": placebo_in_time,
+        }
+        current_results["diagnostics"] = diag
+        return diag
+
+    def _placebo_in_time(self) -> dict[str, Any] | None:
+        """Split the pre-period and re-fit on the first 70% as a placebo test.
+
+        Returns ``None`` when the pre-period is too short (< 10 dates) to
+        produce a meaningful split.
+        """
+        date_str = nw.col(self.date_variable).cast(nw.String)
+        pre_dates = sorted(self.data.filter(date_str <= self.pre_period)[self.date_variable].unique().to_list())
+        if len(pre_dates) < 10:
+            return None
+
+        split_idx = int(len(pre_dates) * 0.7)
+        fake_pre = str(pre_dates[split_idx - 1])
+        fake_post = str(pre_dates[split_idx])
+        native_data = self.data.to_native()
+        estimator_cls = type(self)
+
+        try:
+            placebo = estimator_cls(
+                native_data,
+                geo_variable=self.geo_variable,
+                test_geos=list(self.test_geos) if self.test_geos is not None else None,
+                control_geos=list(self.control_geos) if self.control_geos is not None else None,
+                treatment_variable=self.treatment_variable,
+                date_variable=self.date_variable,
+                pre_period=fake_pre,
+                post_period=fake_post,
+                y_variable=self.y_variable,
+                alpha=self.alpha,
+            )
+            placebo.pre_process().generate()
+            r = placebo.results
+            if r is None:
+                return None
+            return {
+                "lift": float(np.mean(np.asarray(r["lift"], dtype=float))),
+                "p_value": float(r["p_value"]),
+                "fake_pre": fake_pre,
+                "fake_post": fake_post,
+            }
+        except Exception:
+            return None
+
     def plot(self) -> None:
         """Plot the actual series, counterfactual, and pointwise and cumulative differences.
 

@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-09-25
+
+### Added
+
+- **`diagnose()`** on `EconometricEstimator` — runs pre-period diagnostics
+  after fitting: pre-period MAPE and RMSE, Durbin-Watson autocorrelation
+  statistic, augmented Dickey-Fuller residual stationarity test, and a
+  placebo-in-time test that splits the pre-period at 70% and re-fits.
+- **`randomization_test()`** on `GeoX` — Abadie-style placebo permutation
+  test for the TBR estimator, with `avg_lift` and `sum_lift` statistics,
+  `max_placebos`, `seed`, and `n_jobs` support.
+
 ## [0.17.0] - 2026-09-23
 
 ### Added
@@ -595,6 +607,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.17.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.1
 [0.17.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.0
 [0.16.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.16.0
 [0.15.3]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.15.3
