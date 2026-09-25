@@ -1,5 +1,6 @@
 """GeoX (time-based regression) method for geo-experiment causal inference."""
 
+import warnings
 from datetime import date as date_cls
 from itertools import combinations
 from math import ceil, comb
@@ -486,6 +487,161 @@ class GeoX(MLEstimator):
         if self.results is not None:
             self.results["placebo"] = result
         return result
+
+    def randomization_test(
+        self,
+        *,
+        statistic: str = "avg_lift",
+        seed: int | None = None,
+        max_placebos: int | None = None,
+        n_jobs: int = 1,
+    ) -> dict[str, Any]:
+        """Abadie-style placebo permutation test for GeoX.
+
+        For each control geo, temporarily treat it as the single treated unit
+        while the remaining control geos form the donor pool.  The full
+        ``pre_process().generate()`` pipeline is re-run for every placebo geo,
+        producing a null distribution of treatment effect statistics.
+
+        Parameters
+        ----------
+        statistic : {"avg_lift", "sum_lift"}, default "avg_lift"
+            The test statistic.
+
+            * ``"avg_lift"`` — mean of the per-period incrementality.
+            * ``"sum_lift"`` — total cumulative incrementality.
+        seed : int, optional
+            Seed controlling the random subset when ``max_placebos`` is set.
+        max_placebos : int, optional
+            Cap the number of placebo geos to run.  When the control pool is
+            very large, this draws a random subset.
+        n_jobs : int, default 1
+            Number of parallel workers for the placebo loop.  ``-1`` uses all
+            available cores.
+
+        Returns
+        -------
+        dict with keys ``observed_statistic``, ``placebo_statistics``,
+        ``placebo_geos``, ``p_value``, ``n_placebos``, ``n_failed``, and
+        ``statistic``.
+        """
+        current_results = self.results
+        if current_results is None:
+            raise ValueError("Call generate() before randomization_test()")
+        valid_stats = ("avg_lift", "sum_lift")
+        if statistic not in valid_stats:
+            raise ValueError(f"statistic must be one of {valid_stats}, got {statistic!r}")
+
+        observed = self._ri_statistic(current_results, statistic)
+
+        treatment_var: str = self.treatment_variable or "is_test"
+        if self.test_geos is not None:
+            test_geo_set: set[str] = set(self.test_geos)
+        else:
+            test_geo_set = set(self.data.filter(nw.col(treatment_var) == 1)[self.geo_variable].unique().to_list())
+        if self.control_geos is not None:
+            donor_geos: list[str] = list(self.control_geos)
+        else:
+            donor_geos = [g for g in sorted(self.data[self.geo_variable].unique().to_list()) if g not in test_geo_set]
+
+        if not donor_geos:
+            raise ValueError("No control geos available for placebo permutation")
+
+        if max_placebos is not None and max_placebos < len(donor_geos):
+            rng = np.random.default_rng(seed)
+            donor_geos = list(rng.choice(donor_geos, size=max_placebos, replace=False))
+
+        native_data = self.data.to_native()
+        all_geos = sorted(self.data[self.geo_variable].unique().to_list())
+        geo_var = self.geo_variable
+        date_var = self.date_variable
+        pre_per = self.pre_period
+        post_per = self.post_period
+        y_var = self.y_variable
+        alpha_val = self.alpha
+        non_neg = self.non_negative
+        alt = self.alternative
+
+        def _fit_placebo(placebo_geo: str) -> tuple[str, float] | None:
+            placebo_control = [g for g in all_geos if g != placebo_geo and g not in test_geo_set]
+            try:
+                m = GeoX(
+                    native_data,
+                    geo_variable=geo_var,
+                    test_geos=[placebo_geo],
+                    control_geos=placebo_control,
+                    date_variable=date_var,
+                    pre_period=pre_per,
+                    post_period=post_per,
+                    y_variable=y_var,
+                    alpha=alpha_val,
+                    non_negative=non_neg,
+                    alternative=alt,
+                )
+                m.pre_process().generate()
+                r = m.results
+                if r is None:
+                    return None
+                return (placebo_geo, self._ri_statistic(r, statistic))
+            except Exception:
+                return None
+
+        if n_jobs == 1:
+            raw = [_fit_placebo(g) for g in donor_geos]
+        else:
+            from joblib import Parallel, delayed
+
+            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(g) for g in donor_geos)
+
+        placebo_stats: list[float] = []
+        placebo_geos: list[str] = []
+        n_failed = 0
+        for r in raw:
+            if r is None:
+                n_failed += 1
+            else:
+                placebo_geos.append(r[0])
+                placebo_stats.append(r[1])
+
+        if not placebo_stats:
+            warnings.warn("All placebo runs failed; cannot compute a p-value", stacklevel=2)
+            result: dict[str, Any] = {
+                "observed_statistic": observed,
+                "placebo_statistics": [],
+                "placebo_geos": [],
+                "p_value": float("nan"),
+                "n_placebos": 0,
+                "n_failed": n_failed,
+                "statistic": statistic,
+            }
+            current_results["randomization_test"] = result
+            return result
+
+        n_placebos = len(placebo_stats)
+        n_extreme = sum(1 for s in placebo_stats if abs(s) >= abs(observed))
+        p_value = (n_extreme + 1) / (n_placebos + 1)
+
+        result = {
+            "observed_statistic": observed,
+            "placebo_statistics": placebo_stats,
+            "placebo_geos": placebo_geos,
+            "p_value": p_value,
+            "n_placebos": n_placebos,
+            "n_failed": n_failed,
+            "statistic": statistic,
+        }
+        current_results["randomization_test"] = result
+        return result
+
+    @staticmethod
+    def _ri_statistic(results: dict[str, Any], statistic: str) -> float:
+        """Extract the test statistic from a GeoX results dict."""
+        incr = np.asarray(results["incrementality"], dtype=float).ravel()
+        if statistic == "avg_lift":
+            return float(np.mean(incr))
+        if statistic == "sum_lift":
+            return float(np.sum(incr))
+        raise ValueError(f"Unknown statistic: {statistic!r}")
 
     def plot(self) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
