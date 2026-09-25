@@ -318,5 +318,83 @@ class TestPlaceboTest:
         assert np.isfinite(result["real_t_stat"])
 
 
+class TestRandomizationInference:
+    @staticmethod
+    def test_requires_generate(data_df: pd.DataFrame) -> None:
+        model = geox.GeoX(
+            data_df,
+            geo_variable="zipcode",
+            treatment_variable="is_test",
+            date_variable="date",
+            pre_period="2022-06-30",
+            post_period="2022-07-01",
+            y_variable="orders",
+        )
+        with pytest.raises(ValueError, match="generate"):
+            model.randomization_test()
+
+    @staticmethod
+    def test_returns_expected_keys(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.randomization_test(max_placebos=5, seed=0)
+        expected = {
+            "observed_statistic",
+            "placebo_statistics",
+            "placebo_geos",
+            "p_value",
+            "n_placebos",
+            "n_failed",
+            "statistic",
+        }
+        assert expected == set(result.keys())
+
+    @staticmethod
+    def test_n_placebos_capped(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.randomization_test(max_placebos=5, seed=0)
+        assert result["n_placebos"] <= 5
+
+    @staticmethod
+    def test_p_value_in_range(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.randomization_test(max_placebos=5, seed=0)
+        assert 0.0 < result["p_value"] <= 1.0
+
+    @staticmethod
+    def test_stored_in_results(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        model.randomization_test(max_placebos=5, seed=0)
+        assert "randomization_test" in model.results
+
+    @staticmethod
+    def test_sum_lift_statistic(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        result = model.randomization_test(statistic="sum_lift", max_placebos=5, seed=0)
+        assert result["statistic"] == "sum_lift"
+
+    @staticmethod
+    def test_invalid_statistic_raises(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        with pytest.raises(ValueError, match="statistic"):
+            model.randomization_test(statistic="mspe_ratio")
+
+    @staticmethod
+    def test_seed_reproducibility(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        a = model.randomization_test(max_placebos=5, seed=42)
+        b = model.randomization_test(max_placebos=5, seed=42)
+        assert a["placebo_geos"] == b["placebo_geos"]
+        assert a["placebo_statistics"] == b["placebo_statistics"]
+
+    @staticmethod
+    def test_parallel_matches_sequential(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        seq = model.randomization_test(max_placebos=5, seed=0, n_jobs=1)
+        par = model.randomization_test(max_placebos=5, seed=0, n_jobs=2)
+        assert seq["placebo_geos"] == par["placebo_geos"]
+        assert seq["placebo_statistics"] == pytest.approx(par["placebo_statistics"])
+        assert seq["p_value"] == par["p_value"]
+
+
 if __name__ == "__main__":
     pytest.main()
