@@ -3,7 +3,7 @@
 import warnings
 from datetime import date as date_cls
 from itertools import combinations
-from math import ceil, comb
+from math import comb
 from typing import Any
 
 import narwhals as nw
@@ -15,7 +15,7 @@ from plotly.subplots import make_subplots
 from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
-from GeoCausality._base import MLEstimator
+from GeoCausality._base import MLEstimator, date_key, period_key
 
 
 class GeoX(MLEstimator):
@@ -75,7 +75,10 @@ class GeoX(MLEstimator):
         alternative : str, default="two-sided"
             The sidedness of the hypothesis test. One of ``"two-sided"``,
             ``"greater"`` (treatment > control) or ``"less"`` (treatment <
-            control).
+            control). It applies to every interval and p-value: cumulative and
+            pointwise intervals, percent-lift intervals, and the placebo and
+            randomization-test p-values. One-sided intervals are unbounded on
+            the other side.
 
         Notes
         -----
@@ -146,7 +149,18 @@ class GeoX(MLEstimator):
         self.model = self._fit_tbr(pre_test_np, intercept_train)
 
         self.intercept_test = sm.add_constant(self.post_control[self.y_variable].to_numpy())
-        model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
+        # Pointwise prediction intervals follow ``alternative``: a one-sided
+        # interval at level 1 - alpha is one side of the two-sided interval at
+        # 1 - 2 * alpha, with the other side unbounded.
+        one_sided = self.alternative != "two-sided"
+        model_summary = self.model.get_prediction(self.intercept_test).summary_frame(
+            alpha=2 * self.alpha if one_sided else self.alpha
+        )
+        if self.alternative == "greater":
+            # Effect > 0: bound the counterfactual from above only.
+            model_summary["obs_ci_lower"] = -np.inf
+        elif self.alternative == "less":
+            model_summary["obs_ci_upper"] = np.inf
         # Add counterfactual column via pandas (we're at a statsmodels boundary already)
         post_test_pd = self.post_test.to_pandas()
         post_test_pd = post_test_pd.assign(counterfactual=model_summary["mean"].values)
@@ -179,13 +193,15 @@ class GeoX(MLEstimator):
         safe_cf = np.where(counterfactual > 0, counterfactual, np.nan)
         log_ratio = np.log(actual / safe_cf)
         log_rmse = float(np.sqrt(self.model.scale)) / float(np.nanmean(safe_cf))
-        q = t_dist.ppf(1 - self.alpha / 2, self.model.df_resid)
+        q = t_dist.ppf(1 - (self.alpha if one_sided else self.alpha / 2), self.model.df_resid)
+        lower_shift = np.inf if self.alternative == "less" else q * log_rmse
+        upper_shift = np.inf if self.alternative == "greater" else q * log_rmse
         self.results["percent_lift"] = np.where(np.isnan(log_ratio), np.nan, np.exp(log_ratio) - 1)
         self.results["percent_lift_ci_lower"] = np.where(
-            np.isnan(log_ratio), np.nan, np.exp(log_ratio - q * log_rmse) - 1
+            np.isnan(log_ratio), np.nan, np.exp(log_ratio - lower_shift) - 1
         )
         self.results["percent_lift_ci_upper"] = np.where(
-            np.isnan(log_ratio), np.nan, np.exp(log_ratio + q * log_rmse) - 1
+            np.isnan(log_ratio), np.nan, np.exp(log_ratio + upper_shift) - 1
         )
         return self
 
@@ -280,12 +296,9 @@ class GeoX(MLEstimator):
     def _get_cost_per(self) -> tuple[float, float, float]:
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = ceil(self.results["cumulative_incrementality"][-1])
-        cost_per = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["cumulative_incrementality_ci_upper"][-1])
-        cost_per_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["cumulative_incrementality_ci_lower"][-1])
-        cost_per_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        cost_per = self._cost_per_value(self.results["cumulative_incrementality"][-1])
+        cost_per_lower = self._cost_per_value(self.results["cumulative_incrementality_ci_upper"][-1])
+        cost_per_upper = self._cost_per_value(self.results["cumulative_incrementality_ci_lower"][-1])
         return cost_per, cost_per_lower, cost_per_upper
 
     def _cumulative_distribution(self, rescale: float = 1.0) -> Any:
@@ -431,7 +444,9 @@ class GeoX(MLEstimator):
                 seen.add(pick)
             splits = list(seen)
 
-        date_str = nw.col(self.date_variable).cast(nw.String)
+        key = date_key(self.data, self.date_variable)
+        in_pre = key <= period_key(self.pre_period)
+        in_post = key >= period_key(self.post_period)
         control_data = self.data.filter(nw.col(self.geo_variable).is_in(control_geos))
 
         placebo_stats: list[float] = []
@@ -440,25 +455,25 @@ class GeoX(MLEstimator):
             is_pseudo_test = nw.col(self.geo_variable).is_in(list(pseudo_test_set))
 
             pre_pseudo_test = (
-                control_data.filter((date_str <= self.pre_period) & is_pseudo_test)
+                control_data.filter(in_pre & is_pseudo_test)
                 .group_by(self.date_variable)
                 .agg(nw.col(self.y_variable).sum())
                 .sort(self.date_variable)
             )
             pre_pseudo_ctrl = (
-                control_data.filter((date_str <= self.pre_period) & ~is_pseudo_test)
+                control_data.filter(in_pre & ~is_pseudo_test)
                 .group_by(self.date_variable)
                 .agg(nw.col(self.y_variable).sum())
                 .sort(self.date_variable)
             )
             post_pseudo_test = (
-                control_data.filter((date_str >= self.post_period) & is_pseudo_test)
+                control_data.filter(in_post & is_pseudo_test)
                 .group_by(self.date_variable)
                 .agg(nw.col(self.y_variable).sum())
                 .sort(self.date_variable)
             )
             post_pseudo_ctrl = (
-                control_data.filter((date_str >= self.post_period) & ~is_pseudo_test)
+                control_data.filter(in_post & ~is_pseudo_test)
                 .group_by(self.date_variable)
                 .agg(nw.col(self.y_variable).sum())
                 .sort(self.date_variable)
@@ -495,8 +510,7 @@ class GeoX(MLEstimator):
 
         placebo_arr = np.asarray(placebo_stats, dtype=float)
         if len(placebo_arr) > 0:
-            n_extreme = np.sum(np.abs(placebo_arr) >= abs(real_t))
-            empirical_p = float((n_extreme + 1) / (len(placebo_arr) + 1))
+            empirical_p = self._rank_p_value(placebo_arr, real_t)
         else:
             empirical_p = np.nan
 
@@ -622,8 +636,7 @@ class GeoX(MLEstimator):
             return result
 
         n_placebos = len(placebo_stats)
-        n_extreme = sum(1 for s in placebo_stats if abs(s) >= abs(observed))
-        p_value = (n_extreme + 1) / (n_placebos + 1)
+        p_value = self._rank_p_value(np.asarray(placebo_stats, dtype=float), observed)
 
         result = {
             "observed_statistic": observed,
@@ -636,6 +649,30 @@ class GeoX(MLEstimator):
         }
         current_results["randomization_test"] = result
         return result
+
+    def _rank_p_value(self, placebo_stats: np.ndarray, observed: float) -> float:
+        """Rank-based placebo p-value honouring ``alternative``.
+
+        Parameters
+        ----------
+        placebo_stats : numpy array
+            The placebo statistics.
+        observed : float
+            The observed statistic.
+
+        Returns
+        -------
+        ``(#placebos at least as extreme + 1) / (#placebos + 1)``, where "as
+        extreme" is ``>=`` for ``"greater"``, ``<=`` for ``"less"`` and in
+        absolute value for ``"two-sided"``.
+        """
+        if self.alternative == "greater":
+            n_extreme = int(np.sum(placebo_stats >= observed))
+        elif self.alternative == "less":
+            n_extreme = int(np.sum(placebo_stats <= observed))
+        else:
+            n_extreme = int(np.sum(np.abs(placebo_stats) >= abs(observed)))
+        return float((n_extreme + 1) / (placebo_stats.shape[0] + 1))
 
     @staticmethod
     def _ri_statistic(results: dict[str, Any], statistic: str) -> float:

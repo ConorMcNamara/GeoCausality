@@ -93,10 +93,10 @@ class TestTrigger:
 
 class TestJackknifeQuantile:
     @staticmethod
-    def test_widens_to_max_when_rank_exceeds_n() -> None:
-        # alpha=0.1, n=5 -> k=ceil(0.9*6)=6 > 5 -> max residual.
+    def test_unbounded_when_rank_exceeds_n() -> None:
+        # alpha=0.1, n=5 -> k=ceil(0.9*6)=6 > 5 -> no finite (1 - alpha) quantile.
         resids = np.array([5.0, 1.0, 3.0, 2.0, 4.0])
-        assert SyntheticControl._jackknife_quantile(resids, 0.1) == 5.0
+        assert SyntheticControl._jackknife_quantile(resids, 0.1) == float("inf")
 
     @staticmethod
     def test_selects_rank_within_n() -> None:

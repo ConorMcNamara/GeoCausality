@@ -24,6 +24,7 @@ Running the grid at ``effect = 0`` also calibrates the false-positive rate
 against ``alpha`` -- a free validation of the underlying inference.
 """
 
+import warnings
 from typing import Any
 
 import narwhals as nw
@@ -32,7 +33,7 @@ import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
-from GeoCausality._base import Estimator
+from GeoCausality._base import Estimator, date_key, period_key
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 
 # Conventional target power for the minimum-detectable-effect search.
@@ -165,12 +166,12 @@ class PowerAnalysis:
         backend-agnostic comparison the estimators use internally.
         """
         dates = (
-            self.data.select(nw.col(self.date_variable).cast(nw.String).alias("d"))
+            self.data.select(date_key(self.data, self.date_variable).alias("d"))
             .unique(subset=["d"])
             .sort("d")["d"]
             .to_list()
         )
-        return [d for d in dates if d <= self.pre_period]
+        return [d for d in dates if d <= period_key(self.pre_period)]
 
     def _placebo_starts(self, duration: int, n_sims: int) -> np.ndarray:
         """Sample start indices for placebo post-windows of length ``duration``.
@@ -227,7 +228,7 @@ class PowerAnalysis:
         post_boundary = self.history[start_idx]
         last_post = post_dates[-1]
 
-        date_str = nw.col(self.date_variable).cast(nw.String)
+        date_str = date_key(self.data, self.date_variable)
         in_post = nw.col(self.geo_variable).is_in(self.test_geos) & date_str.is_in(post_dates)
         if self.injection == "multiplicative":
             injected = nw.when(in_post).then(nw.col(self.y_variable) * (1.0 + effect))
@@ -249,7 +250,11 @@ class PowerAnalysis:
             alpha=self.alpha,
             **self.estimator_kwargs,
         )
-        model.pre_process().generate()
+        # Only the p-value is used here, so warnings about the interval being
+        # unbounded on a short placebo pre-period are irrelevant noise.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="The pre-period is too short", category=RuntimeWarning)
+            model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")
         return float(model.results["p_value"]) <= self.alpha

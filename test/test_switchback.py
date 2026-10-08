@@ -88,7 +88,10 @@ class TestWashout:
     def test_washout_reduces_obs(data_df: pd.DataFrame) -> None:
         no_wash = _fit(data_df, washout=0)
         with_wash = _fit(data_df, washout=2)
-        assert with_wash.n_treated_obs < no_wash.n_treated_obs
+        assert with_wash.panel.shape[0] < no_wash.panel.shape[0]
+        # Washed-out periods were still treated, so they count toward the
+        # total incrementality.
+        assert with_wash.n_treated_obs == no_wash.n_treated_obs
 
     @staticmethod
     def test_washout_still_detects_effect(data_df: pd.DataFrame) -> None:

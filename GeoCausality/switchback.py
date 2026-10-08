@@ -104,6 +104,8 @@ class Switchback(Estimator):
         self.model: Any = None
         self.panel: nw.DataFrame | None = None
         self.n_treated_obs: int = 0
+        self._exposure_counts: dict[str, float] = {}
+        self._exposed_outcome: float = 0.0
 
     def pre_process(self) -> "Switchback":
         """Prepare the panel data: add washout flags and carryover lags.
@@ -115,25 +117,66 @@ class Switchback(Estimator):
         """
         df = self.data.sort([self.geo_variable, self.date_variable])
         treat_var: str = self.treatment_variable or "is_treatment"
-
-        if self.washout > 0:
-            treat_col = nw.col(treat_var)
-            shifted = treat_col.shift(1).over(self.geo_variable)
-            switch = (treat_col != shifted) & ~shifted.is_null()
-            df = df.with_columns(switch.alias("_switch"))
-            washout_mask = nw.lit(False)
-            for lag in range(self.washout):
-                washout_mask = washout_mask | nw.col("_switch").shift(lag).over(self.geo_variable).fill_null(False)
-            df = df.filter(~washout_mask).drop("_switch")
-
-        if self.carryover_lags > 0:
-            for lag in range(1, self.carryover_lags + 1):
-                lag_col = nw.col(treat_var).shift(lag).over(self.geo_variable).fill_null(0)
-                df = df.with_columns(lag_col.alias(f"treatment_lag_{lag}"))
-
-        self.panel = df
-        self.n_treated_obs = int(df.filter(nw.col(treat_var) == 1).shape[0])
+        full = self._add_lags(df)
+        self.panel = self._apply_washout(full)
+        # Exposure counts over the full schedule (washed-out periods were still
+        # treated), used to turn the per-period coefficients into a total effect.
+        self.n_treated_obs = int(full.filter(nw.col(treat_var) == 1).shape[0])
+        self._exposure_counts = {term: float(full[term].sum()) for term in [treat_var, *self._lag_terms()]}
+        exposed = nw.col(treat_var) == 1
+        for term in self._lag_terms():
+            exposed = exposed | (nw.col(term) == 1)
+        self._exposed_outcome = float(full.filter(exposed)[self.y_variable].sum())
         return self
+
+    def _lag_terms(self) -> list[str]:
+        """Names of the lagged-treatment regressors."""
+        return [f"treatment_lag_{lag}" for lag in range(1, self.carryover_lags + 1)]
+
+    def _add_lags(self, df: nw.DataFrame) -> nw.DataFrame:
+        """Add lagged treatment indicators, computed on the full (pre-washout) schedule.
+
+        Lags must be built before any rows are dropped: after a washout filter,
+        ``shift`` would read the previous *kept* row rather than period ``t - k``.
+
+        Parameters
+        ----------
+        df : narwhals DataFrame
+            The panel sorted by geo and date.
+
+        Returns
+        -------
+        The panel with ``treatment_lag_k`` columns (0 before a geo's first period).
+        """
+        treat_var: str = self.treatment_variable or "is_treatment"
+        for lag in range(1, self.carryover_lags + 1):
+            lag_col = nw.col(treat_var).shift(lag).over(self.geo_variable).fill_null(0)
+            df = df.with_columns(lag_col.alias(f"treatment_lag_{lag}"))
+        return df
+
+    def _apply_washout(self, df: nw.DataFrame) -> nw.DataFrame:
+        """Drop the ``washout`` periods following every treatment switch within a geo.
+
+        Parameters
+        ----------
+        df : narwhals DataFrame
+            The panel sorted by geo and date.
+
+        Returns
+        -------
+        The panel without the washout periods.
+        """
+        if self.washout <= 0:
+            return df
+        treat_var: str = self.treatment_variable or "is_treatment"
+        treat_col = nw.col(treat_var)
+        shifted = treat_col.shift(1).over(self.geo_variable)
+        switch = (treat_col != shifted) & ~shifted.is_null()
+        df = df.with_columns(switch.alias("_switch"))
+        washout_mask = nw.lit(False)
+        for lag in range(self.washout):
+            washout_mask = washout_mask | nw.col("_switch").shift(lag).over(self.geo_variable).fill_null(False)
+        return df.filter(~washout_mask).drop("_switch")
 
     def generate(self) -> "Switchback":
         """Fit the two-way fixed-effects model with cluster-robust standard errors.
@@ -163,13 +206,28 @@ class Switchback(Estimator):
         ci_upper = float(cis.loc[treat_var, "upper"])
         p_value = float(self.model.pvalues[treat_var])
 
+        # Total incrementality is the effect summed over every exposed period of
+        # the full schedule (washed-out periods were still treated): the
+        # contemporaneous effect times the treated periods plus each carryover
+        # effect times the periods it applies to. Its interval uses the same
+        # critical value as the coefficient interval.
+        terms = [treat_var, *self._lag_terms()]
+        counts = np.array([self._exposure_counts[term] for term in terms])
+        coefs = np.array([float(self.model.params[term]) for term in terms])
+        cov = np.asarray(self.model.cov.loc[terms, terms], dtype=float)
+        incrementality = float(counts @ coefs)
+        incr_se = float(np.sqrt(max(counts @ cov @ counts, 0.0)))
+        lift_se = float(self.model.std_errors[treat_var])
+        crit = (ci_upper - lift) / lift_se if lift_se > 0 else 0.0
+
         self.results = {
             "lift": lift,
             "lift_ci_lower": ci_lower,
             "lift_ci_upper": ci_upper,
-            "incrementality": lift * self.n_treated_obs,
-            "incrementality_ci_lower": ci_lower * self.n_treated_obs,
-            "incrementality_ci_upper": ci_upper * self.n_treated_obs,
+            "incrementality": incrementality,
+            "incrementality_ci_lower": incrementality - crit * incr_se,
+            "incrementality_ci_upper": incrementality + crit * incr_se,
+            "baseline": self._exposed_outcome - incrementality,
             "p_value": p_value,
             "n_treated_obs": self.n_treated_obs,
         }
@@ -234,7 +292,9 @@ class Switchback(Estimator):
         elif lift == "relative":
             table_dict["Metric"] = [self.y_variable]
             table_dict["Lift Type"] = ["Relative"]
-            cells = self._format_lift_cells(lift, incr, incr_lo, incr_hi, relative_divisor=incr)
+            # Relative to the untreated baseline of the exposed periods, not to
+            # the incrementality itself (which would always read 100%).
+            cells = self._format_lift_cells(lift, incr, incr_lo, incr_hi, relative_divisor=self.results["baseline"])
         elif lift == "revenue":
             table_dict["Metric"] = ["Revenue"]
             table_dict["Lift Type"] = ["Incremental"]
@@ -314,8 +374,11 @@ class Switchback(Estimator):
 
         rng = np.random.default_rng(seed)
         observed = self.results["lift"]
-        panel_pd = self.panel.to_pandas()
-        geos = panel_pd[self.geo_variable].unique()
+        # Permute the full (pre-washout) schedule, then rebuild lags and re-apply
+        # the washout, so each permuted panel is processed exactly like the real
+        # one (no lag values wrapped around from the end of the series).
+        full_pd = self.data.sort([self.geo_variable, self.date_variable]).to_pandas()
+        geos = full_pd[self.geo_variable].unique()
         treat_var: str = self.treatment_variable or "is_treatment"
 
         exog_terms: list[str] = [treat_var]
@@ -326,15 +389,14 @@ class Switchback(Estimator):
 
         perm_effects: list[float] = []
         for _ in range(n_permutations):
-            perm_df = panel_pd.copy()
+            perm_df = full_pd.copy()
             for geo in geos:
                 mask = perm_df[self.geo_variable] == geo
                 treat_vals = perm_df.loc[mask, treat_var].values
                 shift = rng.integers(1, len(treat_vals))
                 perm_df.loc[mask, treat_var] = np.roll(treat_vals, shift)
-                for lag in range(1, self.carryover_lags + 1):
-                    perm_df.loc[mask, f"treatment_lag_{lag}"] = np.roll(perm_df.loc[mask, treat_var].values, lag)
-            perm_indexed = perm_df.set_index([self.geo_variable, self.date_variable])
+            perm_panel = self._apply_washout(self._add_lags(nw.from_native(perm_df, eager_only=True)))
+            perm_indexed = perm_panel.to_pandas().set_index([self.geo_variable, self.date_variable])
             try:
                 perm_model = PanelOLS.from_formula(formula, data=perm_indexed)
                 perm_fit = perm_model.fit(cov_type="clustered", cluster_entity=True)

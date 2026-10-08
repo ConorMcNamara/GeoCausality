@@ -1,10 +1,14 @@
 """Difference-in-differences method for geo-experiment causal inference."""
 
+from typing import Any
+
 import narwhals as nw
 import numpy as np
 import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 from narwhals.typing import IntoDataFrame
+from scipy.linalg import toeplitz
+from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
@@ -60,8 +64,10 @@ class DiffinDiff(EconometricEstimator):
             The amount we spent on our treatment. Used to calculate ROAS (return on ad spend)
              or cost-per-acquisition.
         inference : str, default="ols"
-            How to compute p-values and confidence intervals. ``"ols"`` uses the
-            closed-form standard errors of the interaction coefficient. The other
+            How to compute p-values and confidence intervals. ``"ols"`` uses
+            standard errors of the interaction coefficient that allow AR(1)
+            autocorrelation within each group's daily series (see
+            ``_ar1_standard_error``). The other
             options attach distribution-free inference to the parallel-trends
             counterfactual via the shared conformal engine: ``"conformal"`` runs
             the Chernozhukov-Wuthrich-Zhu moving-block permutation test,
@@ -139,10 +145,8 @@ class DiffinDiff(EconometricEstimator):
             raise ValueError("groupby_data must not be None")
         if self.n_dates is None:
             raise ValueError("n_dates must not be None")
-        self.model = smf.ols(
-            f"{self.y_variable} ~ {self.treatment_variable} * treatment_period",
-            data=self.groupby_data.to_pandas(),
-        ).fit()
+        frame = self.groupby_data.to_pandas()
+        self.model = smf.ols(f"{self.y_variable} ~ {self.treatment_variable} * treatment_period", data=frame).fit()
         self.results = dict(
             test=float(self.model.params["treatment_period"]),
             control=float(self.model.params["Intercept"]),
@@ -150,16 +154,75 @@ class DiffinDiff(EconometricEstimator):
         )
         self.results["incrementality"] = self.results["lift"] * self.n_dates
         if self.inference == "ols":
-            cis = self.model.conf_int(alpha=self.alpha, cols=None).iloc[-1]
-            self.results["lift_ci_lower"] = float(cis[0])
-            self.results["lift_ci_upper"] = float(cis[1])
-            self.results["incrementality_ci_lower"] = self.results["lift_ci_lower"] * self.n_dates
-            self.results["incrementality_ci_upper"] = self.results["lift_ci_upper"] * self.n_dates
-            self.results["p_value"] = float(self.model.pvalues[f"{self.treatment_variable}:treatment_period"])
+            interaction = f"{self.treatment_variable}:treatment_period"
+            se, df_resid = self._ar1_standard_error(frame, interaction)
+            if df_resid > 0 and np.isfinite(se) and se > 0:
+                crit = float(t_dist.ppf(1 - self.alpha / 2, df_resid))
+                lower = self.results["lift"] - crit * se
+                upper = self.results["lift"] + crit * se
+                p_value = float(2.0 * t_dist.sf(abs(self.results["lift"]) / se, df_resid))
+            else:
+                # e.g. a saturated 2x2: no residual degrees of freedom.
+                lower = upper = p_value = float("nan")
+            self.results["standard_error"] = se
+            self.results["lift_ci_lower"] = lower
+            self.results["lift_ci_upper"] = upper
+            self.results["incrementality_ci_lower"] = lower * self.n_dates
+            self.results["incrementality_ci_upper"] = upper * self.n_dates
+            self.results["p_value"] = p_value
         else:
             actual_pre, prediction_pre, actual_post, prediction_post = self._counterfactual_from_parallel_trends()
             self.results.update(self._conformal_inference(actual_pre, prediction_pre, actual_post, prediction_post))
         return self
+
+    def _ar1_standard_error(self, frame: Any, term: str) -> tuple[float, int]:
+        """Compute the standard error of an OLS coefficient under AR(1) errors within each group.
+
+        The regression runs on one per-date series per group, whose errors are
+        typically autocorrelated, so iid standard errors are far too small
+        (Bertrand, Duflo & Mullainathan, 2004). This keeps the OLS estimate and
+        uses the sandwich ``(X'X)^-1 X' Sigma X (X'X)^-1``, where ``Sigma`` is
+        block-diagonal over groups with an AR(1) correlation in date order. The
+        AR(1) coefficient is pooled from the within-group residual
+        autocorrelation, with the ``(1 + 3 rho) / T`` small-sample bias
+        correction. Very persistent series can still be under-covered; use
+        ``inference="conformal"`` for those.
+
+        Parameters
+        ----------
+        frame : pandas DataFrame
+            The regression data, sorted by group and then date.
+        term : str
+            The coefficient name.
+
+        Returns
+        -------
+        A tuple of (standard error, residual degrees of freedom).
+        """
+        if self.treatment_variable is None:
+            raise ValueError("treatment_variable must not be None")
+        exog = np.asarray(self.model.model.exog, dtype=float)
+        resid = np.asarray(self.model.resid, dtype=float)
+        n_obs, n_params = exog.shape
+        df_resid = n_obs - n_params
+        if df_resid <= 0:
+            return float("nan"), df_resid
+        groups = frame[self.treatment_variable].to_numpy()
+        blocks = [np.flatnonzero(groups == g) for g in np.unique(groups)]
+        num = float(np.sum([resid[idx][1:] @ resid[idx][:-1] for idx in blocks]))
+        den = float(np.sum([resid[idx] @ resid[idx] for idx in blocks]))
+        rho = num / den if den > 0 else 0.0
+        mean_len = n_obs / len(blocks)
+        rho = float(np.clip(rho + (1 + 3 * rho) / mean_len, -0.99, 0.99))
+        sigma2 = float(resid @ resid) / df_resid
+        meat = np.zeros((n_params, n_params))
+        for idx in blocks:
+            corr = toeplitz(rho ** np.arange(idx.shape[0]))
+            meat += exog[idx].T @ corr @ exog[idx]
+        bread = np.linalg.pinv(exog.T @ exog)
+        cov = sigma2 * bread @ meat @ bread
+        j = list(self.model.model.exog_names).index(term)
+        return float(np.sqrt(max(cov[j, j], 0.0))), df_resid
 
     def _counterfactual_from_parallel_trends(
         self,
@@ -208,7 +271,13 @@ class DiffinDiff(EconometricEstimator):
         lift = self._validate_lift(lift)
         ci_alpha = self._get_ci_print()
         lo_key, hi_key = f"{ci_alpha} Lower CI", f"{ci_alpha} Upper CI"
-        base_level = self.results["control"] * self.n_dates
+        # The baseline is the treated group's counterfactual over the
+        # post-period: its pre-period level plus the control group's pre-to-post
+        # change (Intercept + treated + period coefficients), not the control
+        # group's level.
+        params = self.model.params
+        counterfactual_level = float(params["Intercept"] + params[self.treatment_variable] + params["treatment_period"])
+        base_level = counterfactual_level * self.n_dates
         incrementality = (
             self.results["incrementality"],
             self.results["incrementality_ci_lower"],
