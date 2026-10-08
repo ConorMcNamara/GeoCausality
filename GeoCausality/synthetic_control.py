@@ -193,8 +193,11 @@ class SyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        An array containing the weights to be applied to each control geo
+        An array containing the weights to be applied to each control geo. They
+        sum to the number of treated geos, since the simplex weights are fitted
+        to the per-geo average treated series.
         """
+        x, y, n_treated = self._per_geo_problem(x, y)
         n_r, n_c = x.shape
         bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
         constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
@@ -215,8 +218,8 @@ class SyntheticControl(EconometricEstimator):
                 constraints=constraints,
                 method="SLSQP",
             )
-        weights = res["x"]
-        return weights
+        self._warn_unconverged(res, "SyntheticControl")
+        return res["x"] * n_treated
 
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
         """Refit the simplex synthetic-control weights on a subset and predict.
@@ -455,8 +458,13 @@ class SyntheticControlV(EconometricEstimator):
         -------
         Itself, to be chained with other methods.
         """
+        # Fit the per-geo average treated series; the simplex weights are then
+        # scaled by the treated count to predict the summed series.
+        n_treated = float(self._n_treated)
+        daily_y = np.asarray(daily_y, dtype=float) / n_treated
         x0_scaled, x1_scaled = self._scale_predictors(daily_x, daily_y)
-        self.V, self.model = self._solve_v_weights(x0_scaled, x1_scaled, daily_x, daily_y)
+        self.V, weights = self._solve_v_weights(x0_scaled, x1_scaled, daily_x, daily_y)
+        self.model = weights * n_treated
         return self
 
     @staticmethod
@@ -550,12 +558,14 @@ class SyntheticControlV(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
+        n_treated = float(self._n_treated)
+        y_train = np.asarray(y_train, dtype=float) / n_treated
         x0_scaled, x1_scaled = self._scale_predictors(x_train, y_train)
         if self.V is not None and x_train.shape[0] == self.V.shape[0]:
             weights = self._create_model(v=self.V, x=x0_scaled, y=x1_scaled)
         else:
             _, weights = self._solve_v_weights(x0_scaled, x1_scaled, x_train, y_train)
-        return x_eval @ weights
+        return x_eval @ weights * n_treated
 
     def _loss_v(
         self,

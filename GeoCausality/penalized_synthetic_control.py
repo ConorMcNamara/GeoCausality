@@ -204,8 +204,13 @@ class PenalizedSyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        An array containing the weights to be applied to each control geo.
+        An array containing the weights to be applied to each control geo. They
+        sum to the number of treated geos: the simplex weights (and the
+        discrepancies ``D_j``) are fitted against the per-geo average treated
+        series. Both terms are fitted on a common rescaling, so ``lambda_``
+        keeps its meaning while SLSQP works at unit magnitude.
         """
+        x, y, n_treated = self._per_geo_problem(x, y)
         _, n_c = x.shape
         discrepancy = np.mean((y.reshape(-1, 1) - x) ** 2, axis=0)
         bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
@@ -218,7 +223,8 @@ class PenalizedSyntheticControl(EconometricEstimator):
             constraints=constraints,
             method="SLSQP",
         )
-        return res["x"]
+        self._warn_unconverged(res, "PenalizedSyntheticControl")
+        return res["x"] * n_treated
 
     def _loss_w(self, w: np.ndarray, x: np.ndarray, y: np.ndarray, discrepancy: np.ndarray) -> float:
         """Penalized synthetic-control loss for a candidate weight vector.

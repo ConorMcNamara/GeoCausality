@@ -187,7 +187,9 @@ class NonlinearSyntheticControl(EconometricEstimator):
         if self.a is not None and self.b is not None:
             self._fit_a, self._fit_b = float(self.a), float(self.b)
         else:
-            self._fit_a, self._fit_b = self._select_penalties(self._jk_y_pre, control_pre_mat)
+            # Select on the per-geo average treated series, the target the
+            # sum-to-one weights are fitted to in ``_create_model``.
+            self._fit_a, self._fit_b = self._select_penalties(self._jk_y_pre / self._n_treated, control_pre_mat)
 
         self.model = self._create_model(control_pre_mat, self._jk_y_pre)
         prediction_pre_arr = control_pre_mat @ self.model
@@ -254,12 +256,16 @@ class NonlinearSyntheticControl(EconometricEstimator):
 
         Returns
         -------
-        The affine (sum-to-one, possibly negative) donor weights.
+        The affine (possibly negative) donor weights. They are fitted, summing
+        to one, against the per-geo average treated series and returned scaled
+        by the number of treated geos, so they predict the summed series.
         """
         a = self._fit_a if self._fit_a is not None else 0.0
         b = self._fit_b if self._fit_b is not None else 0.0
-        weights, _converged = self._solve_nsc(np.asarray(y, dtype=float).ravel(), np.asarray(x, dtype=float), a, b)
-        return weights
+        n_treated = float(self._n_treated)
+        y_unit = np.asarray(y, dtype=float).ravel() / n_treated
+        weights, _converged = self._solve_nsc(y_unit, np.asarray(x, dtype=float), a, b)
+        return weights * n_treated
 
     @staticmethod
     def _solve_nsc(y: np.ndarray, x: np.ndarray, a: float, b: float) -> tuple[np.ndarray, bool]:

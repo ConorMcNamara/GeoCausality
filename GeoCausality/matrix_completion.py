@@ -195,15 +195,20 @@ class MatrixCompletion(EconometricEstimator):
         control_mat = self.daily_x.drop(self.date_variable).to_numpy().astype(float)  # (T, n_ctrl)
         treated = self.daily_y[self.y_variable].to_numpy().astype(float)  # (T,)
 
-        # Panel oriented units x time: donors first, aggregated treated last. The
+        # Panel oriented units x time: donors first, then the treated row last. The
+        # treated row is the per-geo average of the treated geos, so it shares the
+        # donors' scale (a summed row would load on the common time effect once
+        # per treated geo, which the additive model cannot carry into the masked
+        # cells); the imputed row is scaled back up to the summed series. The
         # treated post-period is masked -- those are the cells we impute.
-        panel = np.vstack([control_mat.T, treated[None, :]])  # (n_ctrl + 1, T)
+        n_treated = float(self._n_treated)
+        panel = np.vstack([control_mat.T, treated[None, :] / n_treated])  # (n_ctrl + 1, T)
         treated_idx = panel.shape[0] - 1
         mask = np.ones_like(panel, dtype=bool)
         mask[treated_idx, n_pre:] = False
 
         fitted = self._solve(panel, mask)
-        prediction = fitted[treated_idx]
+        prediction = fitted[treated_idx] * n_treated
 
         pre_dates = date_list[:n_pre]
         post_dates = date_list[n_pre:]

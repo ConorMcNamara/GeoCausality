@@ -182,8 +182,8 @@ class TestPowerAnalytical:
     @staticmethod
     def test_more_geos_increases_power(data_df: pd.DataFrame) -> None:
         model = _fit(data_df)
-        fewer = model.power_analytical(mde=3.0, n_geos=5)
-        more = model.power_analytical(mde=3.0, n_geos=50)
+        fewer = model.power_analytical(mde=0.5, n_geos=5)
+        more = model.power_analytical(mde=0.5, n_geos=50)
         assert more["power"] > fewer["power"]
 
 
