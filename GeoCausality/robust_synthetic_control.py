@@ -265,6 +265,11 @@ class RobustSyntheticControl(EconometricEstimator):
         -------
         M_hat, a matrix based on our SVD.
         """
+        # Missing cells (NaN) are zero-filled and the denoised matrix rescaled by
+        # the observed fraction p_hat (Amjad, Shah & Shen, 2018). Genuine zero
+        # outcomes are observations, not missing values.
+        observed = np.isfinite(groupby_x_transposed)
+        groupby_x_transposed = np.where(observed, groupby_x_transposed, 0.0)
         u, s, v = np.linalg.svd(groupby_x_transposed)
         s_shape = s.shape[0]
         if self.threshold:
@@ -282,6 +287,6 @@ class RobustSyntheticControl(EconometricEstimator):
         s_res = np.zeros_like(groupby_x_transposed)
         s_res[:idx, :idx] = np.diag(s[:idx])
         r, c = groupby_x_transposed.shape
-        p_hat = max(np.count_nonzero(groupby_x_transposed) / (r * c), 1 / (r * c))
+        p_hat = max(np.count_nonzero(observed) / (r * c), 1 / (r * c))
         M_hat = (1 / p_hat) * (u @ s_res @ v)
         return M_hat

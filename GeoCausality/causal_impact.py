@@ -214,8 +214,9 @@ class CausalImpact(EconometricEstimator):
 
         Draws ``n_sim`` counterfactual post-period paths from the fitted model
         (:meth:`_simulate_counterfactual`) and forms the cumulative-effect
-        distribution ``sum(actual) - sum(path)`` across draws. This is the proper
-        analogue of CausalImpact's posterior predictive: the interval is the
+        distribution ``sum(actual) - sum(path)`` across draws. This approximates
+        CausalImpact's posterior predictive (parameters are drawn from the MLE's
+        asymptotic distribution rather than an MCMC posterior): the interval is the
         percentile interval of the cumulative-effect draws (so it captures the
         serial correlation in the state and the observation noise, not just summed
         per-period variances), and the p-value is the two-sided posterior tail-area
@@ -262,14 +263,44 @@ class CausalImpact(EconometricEstimator):
             "method": "structural-ts",
         }
 
+    def _draw_parameters(self, rng: np.random.Generator) -> np.ndarray | None:
+        """Draw model parameters from their asymptotic sampling distribution.
+
+        BSTS averages over parameter uncertainty (regression coefficients and
+        variances); holding the MLE fixed would leave that uncertainty out and
+        make the intervals too narrow. Draws come from ``N(params, cov_params)``;
+        variance parameters are reflected to stay positive.
+
+        Parameters
+        ----------
+        rng : numpy Generator
+            The random generator for the draws.
+
+        Returns
+        -------
+        An ``(n_sim, n_params)`` array of parameter draws, or None when the
+        parameter covariance is unavailable (the MLE is then held fixed).
+        """
+        params = np.asarray(self.model.params, dtype=float)
+        cov = np.asarray(self.model.cov_params(), dtype=float)
+        if not np.all(np.isfinite(cov)):
+            return None
+        cov = 0.5 * (cov + cov.T)
+        draws = rng.multivariate_normal(params, cov, size=self.n_sim, check_valid="ignore")
+        names = list(self.model.model.param_names)
+        variance_cols = [i for i, name in enumerate(names) if name.startswith("sigma2")]
+        draws[:, variance_cols] = np.abs(draws[:, variance_cols])
+        return draws
+
     def _simulate_counterfactual(self, exog_post: np.ndarray, steps: int) -> np.ndarray:
         """Draw post-period counterfactual paths from the fitted state posterior.
 
-        Each draw seeds the simulation with an initial state sampled from the fitted
-        model's final predicted-state distribution (mean ``predicted_state`` and
-        covariance ``predicted_state_cov`` at the end of the pre-period), so the
-        paths carry the uncertainty in where the level/trend ended -- not just the
-        forward measurement and state shocks -- then rolls forward ``steps`` periods
+        Each draw first samples the model parameters (see ``_draw_parameters``)
+        and re-runs the filter with them, then seeds the simulation with an
+        initial state sampled from that filter's final predicted-state
+        distribution, so the paths carry parameter uncertainty and the
+        uncertainty in where the level/trend ended -- not just the forward
+        measurement and state shocks -- then rolls forward ``steps`` periods
         conditioned on the donors' observed post-period values.
 
         Parameters
@@ -284,24 +315,32 @@ class CausalImpact(EconometricEstimator):
         A ``(n_sim, steps)`` array of simulated counterfactual observation paths.
         """
         res = self.model
-        state_mean = np.asarray(res.predicted_state[:, -1], dtype=float)
-        state_cov = np.asarray(res.predicted_state_cov[:, :, -1], dtype=float)
-        state_cov = 0.5 * (state_cov + state_cov.T)  # symmetrise against round-off
-        # Derive independent, reproducible seeds for the initial-state draws and for
-        # each path's forward shocks: statsmodels' simulate() otherwise draws those
-        # shocks from the global RNG, which would make runs non-reproducible.
-        init_seq, sim_seq = np.random.SeedSequence(self.sim_seed).spawn(2)
+        # Derive independent, reproducible seeds for the parameter draws, the
+        # initial-state draws and each path's forward shocks: statsmodels'
+        # simulate() otherwise draws those shocks from the global RNG, which would
+        # make runs non-reproducible.
+        param_seq, init_seq, sim_seq = np.random.SeedSequence(self.sim_seed).spawn(3)
+        param_draws = self._draw_parameters(np.random.default_rng(param_seq))
         init_rng = np.random.default_rng(init_seq)
-        init_states = init_rng.multivariate_normal(state_mean, state_cov, size=self.n_sim, check_valid="ignore")
         sim_seeds = sim_seq.generate_state(self.n_sim)
         sims = np.empty((self.n_sim, steps))
         for m in range(self.n_sim):
+            draw = res
+            if param_draws is not None:
+                try:
+                    draw = res.model.smooth(param_draws[m])
+                except (ValueError, np.linalg.LinAlgError):
+                    draw = res
+            state_mean = np.asarray(draw.predicted_state[:, -1], dtype=float)
+            state_cov = np.asarray(draw.predicted_state_cov[:, :, -1], dtype=float)
+            state_cov = 0.5 * (state_cov + state_cov.T)  # symmetrise against round-off
+            init_state = init_rng.multivariate_normal(state_mean, state_cov, check_valid="ignore")
             sims[m] = np.asarray(
-                res.simulate(
+                draw.simulate(
                     steps,
                     anchor="end",
                     exog=exog_post,
-                    initial_state=init_states[m],
+                    initial_state=init_state,
                     random_state=int(sim_seeds[m]),
                 ),
                 dtype=float,

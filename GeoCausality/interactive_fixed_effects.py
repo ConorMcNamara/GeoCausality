@@ -112,7 +112,11 @@ class InteractiveFixedEffects(EconometricEstimator):
         max_iter : int, default=500
             The maximum number of alternating-least-squares iterations.
         tol : float, default=1e-6
-            Convergence tolerance on the treatment coefficient between iterations.
+            Convergence tolerance between iterations. In coefficient mode it is a
+            relative tolerance on the treatment coefficient,
+            ``|delta_new - delta| <= tol * (1 + |delta|)``; in projection mode it
+            is an absolute tolerance on the largest change in the factor matrix,
+            so it depends on the outcome's scale.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).

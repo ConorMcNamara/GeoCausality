@@ -25,8 +25,11 @@ class ElasticNetSyntheticControl(EconometricEstimator):
     The counterfactual is ``mu + donor_matrix @ w``, with ``(mu, w)`` fit on the
     pre-period by penalised least squares::
 
-        min_{mu, w}  sum_t (y_t - mu - sum_j w_j x_{jt})^2
+        min_{mu, w}  1 / (2 T) * sum_t (y_t - mu - sum_j w_j x_{jt})^2
                      + lambda * [ (1 - l1_ratio)/2 * ||w||_2^2 + l1_ratio * ||w||_1 ]
+
+    (scikit-learn's scaling, with ``T`` pre-period dates: the squared error is
+    averaged and halved, so ``lambda_`` is on that per-observation scale).
 
     This MVP solves the unconstrained regime (the Doudchenko-Imbens default) with
     scikit-learn's elastic net: the intercept is toggled by ``intercept``,

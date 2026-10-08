@@ -279,12 +279,19 @@ class AugmentedSyntheticControl(EconometricEstimator):
     def _select_lambda(self, x: np.ndarray, y: np.ndarray, lambdas: np.ndarray) -> float:
         """Select the ridge penalty by the one-standard-error rule.
 
-        Leave-one-out cross-validation over the pre-period gives a mean squared
-        error and its standard error per candidate lambda; each fold refits the
-        synthetic-control weights and then the ridge correction. The chosen lambda
-        is the largest whose mean error is within one standard error of the
-        minimum. That favours more regularisation -- weights closer to synthetic
-        control, with less extrapolation -- than the bare CV minimum.
+        Leave-one-out cross-validation over the pre-period dates gives a mean
+        squared error and its standard error per candidate lambda; each fold
+        refits the synthetic-control weights and then the ridge correction. The
+        chosen lambda is the largest whose mean error is within one standard
+        error of the minimum. That favours more regularisation -- weights closer
+        to synthetic control, with less extrapolation -- than the bare CV minimum.
+
+        This follows augsynth's ``cv_lambda`` (and reproduces its Proposition 99
+        estimate): the data are de-meaned on the full pre-period before the
+        folds, so a held-out date contributes to the means it is predicted from,
+        and held-out dates are not separated from their autocorrelated
+        neighbours. Both make the CV error somewhat optimistic; the one-SE rule
+        partly offsets this by favouring more regularisation.
 
         Parameters
         ----------

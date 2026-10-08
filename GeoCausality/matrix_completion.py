@@ -23,13 +23,14 @@ class MatrixCompletion(EconometricEstimator):
     whole matrix under a low-rank (nuclear-norm) penalty. The imputed treated
     post-period cells are the counterfactual.
 
-    The estimator standardizes each unit's series over its observed cells (which
-    absorbs unit-level location and scale, so the summed treated row and the
-    individual donor rows are comparable), then alternates a soft-impute step
-    (fill the missing cells, SVD, soft-threshold the singular values) with a
-    time fixed-effect update, following Athey, Bayati, Doudchenko, Imbens & Khosravi
-    :cite:`athey2021matrix`. The nuclear-norm penalty ``lambda_`` is chosen by
-    cross-validation over a warm-started decreasing path unless supplied.
+    The treated row is the per-geo average of the treated geos, on the donors'
+    scale. The estimator works on the raw outcome scale: it fits additive unit
+    (row) and, optionally, time (column) fixed effects on the observed cells and
+    alternates them with a soft-impute step (fill the missing cells, SVD,
+    soft-threshold the singular values), following Athey, Bayati, Doudchenko,
+    Imbens & Khosravi :cite:`athey2021matrix`. The nuclear-norm penalty
+    ``lambda_`` is chosen by cross-validation over a decreasing path (each
+    penalty solved from scratch) unless supplied.
 
     Inference reuses the shared conformal p-values and confidence intervals from
     ``EconometricEstimator`` (with the residual-only jackknife+ fallback for
@@ -109,8 +110,7 @@ class MatrixCompletion(EconometricEstimator):
             the cross-validation path.
         use_time_effect : bool, default=True
             Whether to fit an additive time (column) fixed effect alongside the
-            low-rank term. Unit (row) effects are always absorbed by the per-unit
-            standardization.
+            low-rank term. Unit (row) fixed effects are always fitted.
         seed : int, default=0
             Seed for the cross-validation hold-out mask, so the fit is
             reproducible.
@@ -323,7 +323,7 @@ class MatrixCompletion(EconometricEstimator):
         Parameters
         ----------
         target : numpy array
-            The matrix to complete (standardized panel minus the time effect).
+            The matrix to complete (the panel minus the fitted fixed effects).
         mask : numpy array of bool
             True where observed.
         lambda_ : float
@@ -369,7 +369,7 @@ class MatrixCompletion(EconometricEstimator):
         """Pick the penalty minimizing held-out error on masked observed cells.
 
         Randomly holds out ``cv_fraction`` of the observed cells, fits the
-        completion on the rest along a warm-started decreasing path, and returns
+        completion on the rest for each penalty on a decreasing path, and returns
         the penalty with the lowest mean-squared error on the held-out cells.
 
         Parameters

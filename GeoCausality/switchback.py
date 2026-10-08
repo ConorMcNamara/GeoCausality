@@ -28,13 +28,20 @@ class Switchback(Estimator):
     explicitly by including lagged treatment indicators.
 
     A randomization-inference p-value is available via ``permutation_test()``:
-    the switchback schedule is re-randomised across geos and the empirical null
+    each geo's schedule is circularly shifted at random and the empirical null
     distribution of test statistics is compared to the observed statistic.
+    This is exact only if the real assignment mechanism was a uniformly random
+    circular shift of each geo's schedule; for other designs it is an
+    approximation.
 
     Notes
     -----
-    Based on Bojinov & Shephard (2019), "Time Series Experiments and Causal
-    Estimands: Exact Randomization Tests and Trading" and Xiong et al. (2019),
+    The estimator is two-way fixed-effects regression, not the Horvitz-Thompson
+    estimator of Bojinov, Simchi-Levi & Zhao (2023), "Design and Analysis of
+    Switchback Experiments": it does not weight by exposure probabilities and is
+    biased under carryover beyond the modelled lags. The design motivation
+    follows Bojinov & Shephard (2019), "Time Series Experiments and Causal
+    Estimands: Exact Randomization Tests and Trading", and Xiong et al. (2019),
     "Optimal Experimental Design for Staggered Rollouts" (Uber switchback
     framework).
     """
@@ -350,7 +357,9 @@ class Switchback(Estimator):
 
         For each permutation, the treatment assignment within each geo is
         circularly shifted by a random offset, preserving the autocorrelation
-        structure of the schedule. The two-way FE model is refit and its
+        structure of the schedule. The p-value is exact only when the real
+        schedule was assigned by such a random shift; otherwise it approximates
+        the design's randomization distribution. The two-way FE model is refit and its
         treatment coefficient collected. The empirical p-value is the fraction
         of permuted coefficients at least as extreme as the observed one.
 
@@ -540,6 +549,43 @@ class Switchback(Estimator):
         }
 
     @staticmethod
+    def _schedule(
+        n_periods: int,
+        treatment_fraction: float,
+        switching_freq: int,
+        phases: np.ndarray,
+    ) -> np.ndarray:
+        """Build block switchback schedules.
+
+        Each geo alternates ``switching_freq`` treated periods with control
+        blocks sized so the geo is treated for ``treatment_fraction`` of the
+        time. A geo with phase 1 is shifted by one treated block (it starts in
+        control).
+
+        Parameters
+        ----------
+        n_periods : int
+            Number of periods per geo.
+        treatment_fraction : float
+            Share of periods treated, strictly between 0 and 1.
+        switching_freq : int
+            Length of each treated block.
+        phases : numpy array of int
+            One phase (0 or 1) per geo.
+
+        Returns
+        -------
+        A ``(n_geos, n_periods)`` 0/1 array.
+        """
+        if not 0.0 < treatment_fraction < 1.0:
+            raise ValueError("treatment_fraction must be strictly between 0 and 1")
+        on = max(int(switching_freq), 1)
+        off = max(int(round(on * (1 - treatment_fraction) / treatment_fraction)), 1)
+        t = np.arange(n_periods)
+        shifts = np.asarray(phases, dtype=int)[:, None] * on
+        return (((t[None, :] + shifts) % (on + off)) < on).astype(float)
+
+    @staticmethod
     def _twfe_standard_error(
         n_geos: int,
         n_periods: int,
@@ -569,16 +615,9 @@ class Switchback(Estimator):
         """
         from scipy.linalg import toeplitz
 
-        if not 0.0 < treatment_fraction < 1.0:
-            raise ValueError("treatment_fraction must be strictly between 0 and 1")
-        on = max(int(switching_freq), 1)
-        off = max(int(round(on * (1 - treatment_fraction) / treatment_fraction)), 1)
-        t = np.arange(n_periods)
-        schedule = np.empty((n_geos, n_periods))
-        for g in range(n_geos):
-            # Alternate geos start in opposite phases, balancing each period.
-            shift = 0 if g % 2 == 0 else on
-            schedule[g] = ((t + shift) % (on + off)) < on
+        # Alternate geos start in opposite phases, balancing each period.
+        phases = np.arange(n_geos) % 2
+        schedule = Switchback._schedule(n_periods, treatment_fraction, switching_freq, phases)
         demeaned = schedule - schedule.mean(axis=1, keepdims=True) - schedule.mean(axis=0, keepdims=True)
         demeaned += schedule.mean()
         rho = float(np.clip(rho, -0.99, 0.99))
@@ -624,7 +663,7 @@ class Switchback(Estimator):
             Within-geo AR(1) autocorrelation. Estimated from the model if not
             given.
         treatment_fraction : float, default=0.5
-            Approximate proportion of periods in treatment.
+            Proportion of periods each simulated geo spends in treatment.
         switching_freq : int, default=7
             Number of consecutive periods in each on/off window.
         seed : int, default=0
@@ -638,7 +677,8 @@ class Switchback(Estimator):
         -------
         dict
             ``mde``, ``power``, ``n_simulations``, ``n_rejections``,
-            ``sigma``, ``rho``, ``power_ci_lower``, ``power_ci_upper``.
+            ``sigma``, ``rho``, ``power_ci_lower``, ``power_ci_upper`` (a
+            ``1 - alpha`` Monte Carlo interval for the power).
         """
         if self.panel is None or self.model is None:
             raise ValueError("Call pre_process().generate() before power_simulation()")
@@ -671,16 +711,16 @@ class Switchback(Estimator):
         def _run_sim(sim_seed: int) -> bool:
             sim_rng = np.random.default_rng(sim_seed)
             rows = []
+            schedule = self._schedule(n_periods, treatment_fraction, switching_freq, sim_rng.integers(0, 2, n_geos))
             for g in range(n_geos):
                 geo_fe = sim_rng.normal(0, 10)
-                phase = sim_rng.integers(0, 2)
                 noise = np.zeros(n_periods)
                 noise[0] = sim_rng.normal(0, sigma)
                 for t in range(1, n_periods):
                     noise[t] = rho * noise[t - 1] + sim_rng.normal(0, sigma * np.sqrt(1 - rho**2))
                 for t in range(n_periods):
                     time_fe = 2.0 * np.sin(2 * np.pi * t / 30)
-                    treat = int((t // switching_freq + phase) % 2)
+                    treat = int(schedule[g, t])
                     y = geo_fe + time_fe + mde * treat + noise[t]
                     rows.append({"geo": f"g{g}", "date": t, treat_var: treat, "y": y})
             sim_df = pd.DataFrame(rows)
@@ -704,7 +744,8 @@ class Switchback(Estimator):
         power = n_rejections / n_simulations
         from scipy.stats import norm
 
-        z = float(norm.ppf(0.975))
+        # Monte Carlo interval for the simulated power, at the estimator's level.
+        z = float(norm.ppf(1 - alpha_val / 2))
         se_power = np.sqrt(power * (1 - power) / n_simulations)
         return {
             "mde": mde,
