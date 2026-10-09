@@ -302,3 +302,12 @@ def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_candidate_sets_leave_a_control_geo(history: pl.DataFrame) -> None:
+    ms = _selection(history)
+    with pytest.raises(ValueError, match="No valid candidate sizes"):
+        ms._candidate_sets(n_test_geos=[len(ms.all_geos)], include=[], exclude=[])
+    # Excluded geos are still controls, so every non-excluded geo may be tested.
+    cands = ms._candidate_sets(n_test_geos=[len(ms.all_geos) - 1], include=[], exclude=["g0"])
+    assert cands == [tuple(g for g in ms.all_geos if g != "g0")]

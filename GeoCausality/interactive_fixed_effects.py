@@ -299,8 +299,10 @@ class InteractiveFixedEffects(EconometricEstimator):
         # The two-way demeaned control panel has rank at most min(t, n0) - 1, and
         # the eigenvalue ratio for r factors needs the (r + 1)-th singular value
         # to be non-zero, so r can be at most min(t, n0) - 2. Allowing one more
-        # divides by a numerically-zero eigenvalue and always picks the cap.
-        max_r = max(0, min(self.max_factors, min(t, n0) - 2, n_pre - 1))
+        # divides by a numerically-zero eigenvalue and always picks the cap. The
+        # projection below regresses the treated series on r + 2 columns over the
+        # n_pre pre-period rows, so r <= n_pre - 3 keeps it over-determined.
+        max_r = max(0, min(self.max_factors, min(t, n0) - 2, n_pre - 3))
         if self.n_factors is not None:
             r = min(self.n_factors, max_r)
         else:

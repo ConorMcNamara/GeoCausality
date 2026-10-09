@@ -251,3 +251,15 @@ class TestPlot:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_projection_factor_cap_leaves_pre_period_overdetermined() -> None:
+    """The projection fits r + 2 columns on n_pre rows, so r must stay below n_pre - 2."""
+    rng = np.random.default_rng(0)
+    y = rng.normal(size=(10, 12)).cumsum(axis=0)
+    treated = np.zeros(12, dtype=bool)
+    treated[:2] = True
+    model = object.__new__(InteractiveFixedEffects)
+    model.max_factors, model.n_factors, model.max_iter, model.tol = 5, 3, 200, 1e-8
+    _, r = model._fit_interactive_fe(y, treated, n_pre=4)
+    assert r + 2 < 4

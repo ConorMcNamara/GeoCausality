@@ -1,5 +1,6 @@
 """Utility helpers for cross-validating synthetic-control time series."""
 
+import numpy as np
 import pandas as pd
 
 
@@ -57,8 +58,12 @@ class HoldoutSplitter:
         df_holdout = self.df.iloc[holdout,]  # fmt: skip
         ser_holdout = self.ser.iloc[holdout]
 
-        df = self.df.drop(index=self.df.index[holdout].tolist())
-        ser = self.ser.drop(index=self.ser.index[holdout].tolist())
+        # Drop by position: dropping by label would also drop any other rows that
+        # share a label with the holdout when the index has duplicates.
+        keep = np.ones(self.df.shape[0], dtype=bool)
+        keep[holdout] = False
+        df = self.df.iloc[keep]
+        ser = self.ser.iloc[keep]
 
         self.idx += 1
         return df, df_holdout, ser, ser_holdout

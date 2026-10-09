@@ -707,11 +707,14 @@ class Switchback(Estimator):
         alpha_val = self.alpha
         ss = np.random.SeedSequence(seed)
         sim_seeds = ss.generate_state(n_simulations)
+        # Alternate geos start in opposite phases, as in ``power_analytical``; random
+        # phases can give every geo the same schedule, which is collinear with
+        # ``TimeEffects`` and makes the fit fail.
+        schedule = self._schedule(n_periods, treatment_fraction, switching_freq, np.arange(n_geos) % 2)
 
         def _run_sim(sim_seed: int) -> bool:
             sim_rng = np.random.default_rng(sim_seed)
             rows = []
-            schedule = self._schedule(n_periods, treatment_fraction, switching_freq, sim_rng.integers(0, 2, n_geos))
             for g in range(n_geos):
                 geo_fe = sim_rng.normal(0, 10)
                 noise = np.zeros(n_periods)

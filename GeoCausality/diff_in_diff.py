@@ -147,10 +147,16 @@ class DiffinDiff(EconometricEstimator):
             raise ValueError("n_dates must not be None")
         frame = self.groupby_data.to_pandas()
         self.model = smf.ols(f"{self.y_variable} ~ {self.treatment_variable} * treatment_period", data=frame).fit()
+        params = self.model.params
+        lift = float(params[f"{self.treatment_variable}:treatment_period"])
+        # ``test`` and ``control`` are each group's fitted post-period per-date
+        # outcome; the bare ``treatment_period`` coefficient is only the control
+        # group's pre-to-post change, and ``Intercept`` its pre-period level.
+        control_post = float(params["Intercept"] + params["treatment_period"])
         self.results = dict(
-            test=float(self.model.params["treatment_period"]),
-            control=float(self.model.params["Intercept"]),
-            lift=float(self.model.params[f"{self.treatment_variable}:treatment_period"]),
+            test=control_post + float(params[self.treatment_variable]) + lift,
+            control=control_post,
+            lift=lift,
         )
         self.results["incrementality"] = self.results["lift"] * self.n_dates
         if self.inference == "ols":
