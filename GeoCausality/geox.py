@@ -190,9 +190,14 @@ class GeoX(MLEstimator):
             self.results["validation_rmse"] = val_rmse
 
         # --- Log-ratio percent lift CIs ---
+        # Per-day delta-method standard error of log(counterfactual): the full
+        # prediction standard error (residual noise plus parameter uncertainty)
+        # divided by that day's counterfactual, not one residual sigma over the
+        # mean counterfactual for every day.
         safe_cf = np.where(counterfactual > 0, counterfactual, np.nan)
         log_ratio = np.log(actual / safe_cf)
-        log_rmse = float(np.sqrt(self.model.scale)) / float(np.nanmean(safe_cf))
+        prediction_se = np.sqrt(model_summary["mean_se"].to_numpy() ** 2 + float(self.model.scale))
+        log_rmse = prediction_se / safe_cf
         q = t_dist.ppf(1 - (self.alpha if one_sided else self.alpha / 2), self.model.df_resid)
         lower_shift = np.inf if self.alternative == "less" else q * log_rmse
         upper_shift = np.inf if self.alternative == "greater" else q * log_rmse

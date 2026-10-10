@@ -221,7 +221,10 @@ class PowerAnalysis:
 
         Returns
         -------
-        True if the estimator's conformal ``p_value`` is at most ``alpha``.
+        True if the estimator's ``p_value`` is at most ``alpha`` and, for a
+        non-zero injected effect, the estimated incrementality has the same sign
+        (a significant estimate in the wrong direction is not a detection). With
+        ``effect == 0`` any significant result counts, as a false positive.
         """
         post_dates = self.history[start_idx : start_idx + duration]
         pre_boundary = self.history[start_idx - 1]
@@ -257,7 +260,10 @@ class PowerAnalysis:
             model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")
-        return float(model.results["p_value"]) <= self.alpha
+        significant = float(model.results["p_value"]) <= self.alpha
+        if effect == 0:
+            return significant
+        return significant and float(np.sign(model.results["incrementality"])) == float(np.sign(effect))
 
     def simulate(
         self,
@@ -304,9 +310,12 @@ class PowerAnalysis:
     def mde(self, target_power: float = DEFAULT_TARGET_POWER) -> "PowerAnalysis":
         """Compute the Minimum Detectable Effect per duration at a target power.
 
-        For each duration the MDE is the smallest effect whose power reaches
-        ``target_power``, linearly interpolated between the two bracketing tested
-        effects. When no tested effect reaches the target, the MDE is ``None``.
+        For each duration the MDE is the smallest effect *magnitude* whose power
+        reaches ``target_power``, linearly interpolated between the two
+        bracketing tested effects. Positive effects (with ``0`` as the starting
+        point) are searched first; if none were tested, negative effects are
+        searched by magnitude and the MDE is reported as a negative number. When
+        no tested effect reaches the target, the MDE is ``None``.
 
         Parameters
         ----------
@@ -323,11 +332,17 @@ class PowerAnalysis:
         table: list[dict[str, Any]] = []
         durations = sorted({row["duration"] for row in self.power_curve})
         for duration in durations:
-            points = sorted(
-                ((r["effect"], r["power"]) for r in self.power_curve if r["duration"] == duration),
-                key=lambda p: p[0],
-            )
-            table.append({"duration": duration, "mde": self._interpolate_mde(points, target_power)})
+            rows = [(r["effect"], r["power"]) for r in self.power_curve if r["duration"] == duration]
+            # Search one direction by magnitude, so a large effect of the other
+            # sign can never be reported as the minimum detectable effect.
+            positive = sorted((e, p) for e, p in rows if e >= 0)
+            if any(e > 0 for e, _ in positive):
+                mde: float | None = self._interpolate_mde(positive, target_power)
+            else:
+                negative = sorted((-e, p) for e, p in rows if e <= 0)
+                magnitude = self._interpolate_mde(negative, target_power)
+                mde = -magnitude if magnitude is not None else None
+            table.append({"duration": duration, "mde": mde})
         self.mde_table = table
         if self.results is None:
             self.results = {}

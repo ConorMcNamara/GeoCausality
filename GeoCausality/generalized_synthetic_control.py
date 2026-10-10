@@ -24,8 +24,10 @@ class GeneralizedSyntheticControl(EconometricEstimator):
     treated), the treated unit's loadings are recovered from its pre-period fit to
     those factors, and the counterfactual is the loadings projected through the
     factors over the post-period. This relaxes the parallel-trends assumption of
-    two-way fixed effects, to which it reduces when the factor structure is
-    trivial.
+    two-way fixed effects. With zero factors the design is intercept-only, so the
+    counterfactual is the treated unit's pre-period mean (a flat line); it does
+    not reduce to two-way fixed effects, which would also track the controls'
+    common time effects (see ``InteractiveFixedEffects``).
     """
 
     def __init__(

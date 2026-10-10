@@ -306,7 +306,7 @@ class Estimator(abc.ABC):
         return numerator / denominator if denominator else float(np.inf)
 
     def _cost_per_value(self, incrementality: float) -> float:
-        """Spend per (rounded-up) incremental unit, tolerating unbounded CIs.
+        """Spend per incremental unit, tolerating unbounded CIs.
 
         Parameters
         ----------
@@ -315,16 +315,16 @@ class Estimator(abc.ABC):
 
         Returns
         -------
-        ``spend / ceil(incrementality)``; ``inf`` when it is not positive, ``0``
-        when it is ``+inf`` and ``nan`` when it is NaN.
+        ``spend / incrementality``; ``inf`` when it is not positive, ``0`` when
+        it is ``+inf`` and ``nan`` when it is NaN. The incrementality is not
+        rounded first: rounding up (e.g. 0.3 -> 1) biased the cost downward.
         """
         incrementality = float(incrementality)
         if np.isnan(incrementality):
             return float("nan")
         if incrementality == float("inf"):
             return 0.0
-        units = ceil(incrementality) if incrementality > 0 else 0
-        return self.spend / units if units > 0 else float("inf")
+        return self.spend / incrementality if incrementality > 0 else float("inf")
 
     def _format_lift_cells(
         self,
@@ -1267,9 +1267,14 @@ class EconometricEstimator(Estimator, ABC):
     ) -> tuple[float, float, float]:
         """Residual-only jackknife+ interval for a constant per-period effect.
 
-        Holds the counterfactual fixed and calibrates a band from the pre-period
-        residuals (every point used for both fit and calibration), centred on the
-        mean post-period residual.
+        Holds the counterfactual fixed and centres the interval on the mean
+        post-period residual. The interval is for that *mean*, so it is
+        calibrated on the means of every cyclic block of ``t1`` consecutive
+        pre-period residuals (as in the moving-block conformal test), which keeps
+        their autocorrelation. A per-observation residual quantile would treat
+        the mean of ``t1`` residuals as one residual and be about ``sqrt(t1)``
+        times too wide under independence. The returned ``band`` is still the
+        per-period quantile, for the pointwise prediction band.
 
         Parameters
         ----------
@@ -1286,7 +1291,12 @@ class EconometricEstimator(Estimator, ABC):
             alpha = self.alpha
         band = self._jackknife_quantile(pre_resid, alpha)
         center = float(np.mean(post_resid))
-        return center - band, center + band, band
+        t1 = post_resid.shape[0]
+        n = pre_resid.shape[0]
+        offsets = np.arange(t1)
+        block_means = np.array([np.mean(pre_resid[(start + offsets) % n]) for start in range(n)])
+        half_width = self._jackknife_quantile(block_means, alpha)
+        return center - half_width, center + half_width, band
 
     def _jackknife_plus_interval(
         self,
@@ -1302,6 +1312,14 @@ class EconometricEstimator(Estimator, ABC):
         leave-one-out model's prediction at that point with that model's held-out
         residual; the per-period lift bounds are aggregated into a per-period
         effect CI (so ``lift_ci * t1`` recovers the incrementality CI).
+
+        Each fold holds out a single pre-period point, so only per-point
+        residuals are available for calibration. Summing per-period bounds is
+        therefore deliberately conservative for the mean effect (roughly
+        ``sqrt(t1)`` too wide under independent errors); narrowing it would need
+        an assumption about the residuals' dependence that the per-point folds
+        cannot check. The residual-only fallback, which has the whole residual
+        series, calibrates on block means instead.
 
         Parameters
         ----------
@@ -1582,7 +1600,8 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        The selected factor count, in ``0..max_r``.
+        The selected factor count, in ``1..max_r``; ``0`` only when ``max_r < 1``.
+        The ratio criterion cannot itself select a zero-factor model.
         """
         if max_r < 1:
             return 0

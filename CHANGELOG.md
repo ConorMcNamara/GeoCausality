@@ -77,6 +77,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cumulative interval.
 - **`GeoLift`** — the p-value tests the ASC estimate against the GSC
   bootstrap null, so it agrees with the ASC-centred interval.
+- **Residual jackknife+ interval** — the interval for the mean effect is now
+  calibrated on means of `t1`-length blocks of pre-period residuals. The
+  per-observation quantile was about `sqrt(t1)` times too wide. The faithful
+  jackknife+ interval remains deliberately conservative; its docstring now
+  says why.
+- **Cost-per** — the incrementality is no longer rounded up before dividing,
+  which biased the cost per acquisition downward.
+- **`GeoX` percent-lift CI** — uses each day's full prediction standard error
+  (including parameter uncertainty) over that day's counterfactual, instead
+  of one residual sigma over the mean counterfactual.
+- **`NonlinearSyntheticControl`** warns when the weight optimizer does not
+  converge.
+- **`RobustSyntheticControl`** treats only NaN cells as missing. Genuine zero
+  outcomes no longer change the `p_hat` rescaling.
+- **`KernelSyntheticControl`** — the leave-one-out leverage used to select
+  the penalty now accounts for the fitted intercept.
+- **`PowerAnalysis`** — a significant estimate with the wrong sign no longer
+  counts as a detection. The MDE is searched by magnitude in one direction,
+  so a negative effect is never reported as the MDE when positive effects
+  were tested.
+- **`CausalImpact`** — simulated counterfactual paths now draw the model
+  parameters from their asymptotic distribution, so intervals include
+  parameter uncertainty (null coverage of a nominal 90% interval went from
+  ~0.80 to ~0.95 in simulation).
+- **`Switchback.power_simulation()`** honours `treatment_fraction`, shares the
+  analytical schedule, and reports a `1 - alpha` Monte Carlo interval for the
+  power.
+- **Docstrings** corrected for `ElasticNetSyntheticControl` (scikit-learn's
+  `1/(2T)` loss scaling), `GeneralizedSyntheticControl` (zero factors gives a
+  flat counterfactual), `MatrixCompletion` (no per-unit standardization or
+  warm-started path), `InteractiveFixedEffects` (`tol` semantics), the
+  factor-count range, `Switchback` (two-way FE, not the Horvitz-Thompson
+  estimator; permutation-test assumptions) and `AugmentedSyntheticControl`
+  (the penalty CV follows augsynth and is somewhat optimistic).
 
 ## [0.17.1] - 2026-09-25
 

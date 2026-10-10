@@ -1,5 +1,6 @@
 """Nonlinear Synthetic Control (Tian 2023) for geo-experiment causal inference."""
 
+import warnings
 from typing import Any
 
 import narwhals as nw
@@ -264,7 +265,13 @@ class NonlinearSyntheticControl(EconometricEstimator):
         b = self._fit_b if self._fit_b is not None else 0.0
         n_treated = float(self._n_treated)
         y_unit = np.asarray(y, dtype=float).ravel() / n_treated
-        weights, _converged = self._solve_nsc(y_unit, np.asarray(x, dtype=float), a, b)
+        weights, converged = self._solve_nsc(y_unit, np.asarray(x, dtype=float), a, b)
+        if not converged:
+            warnings.warn(
+                "NonlinearSyntheticControl: weight optimizer did not converge; the fitted weights may be unreliable",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         return weights * n_treated
 
     @staticmethod

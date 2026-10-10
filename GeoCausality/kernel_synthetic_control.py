@@ -346,7 +346,14 @@ class KernelSyntheticControl(NonLinearEstimator):
         for j, lambda_ in enumerate(lambdas):
             shrink = eigvals / (eigvals + lambda_)
             y_hat = eigvecs @ (shrink * coords)  # S @ y_centered
-            leverage = eigvecs_sq @ shrink  # diagonal of S
+            # The fit is y_bar + S (y - y_bar), i.e. the hat matrix
+            # H = J/n + S (I - J/n), so its diagonal is
+            # 1/n + S_ii - (S 1)_i / n. Using S_ii alone ignores the fitted
+            # intercept. Because the mean is estimated before the kernel fit, the
+            # e_i / (1 - H_ii) shortcut is still an approximation to exact
+            # leave-one-out, but a much closer one.
+            row_sums = eigvecs @ (shrink * eigvecs.sum(axis=0))  # S @ 1
+            leverage = 1.0 / n + eigvecs_sq @ shrink - row_sums / n
             denom = np.clip(1.0 - leverage, 1e-8, None)
             fold_err[:, j] = ((y_centered - y_hat) / denom) ** 2
         mean_err = fold_err.mean(axis=0)
