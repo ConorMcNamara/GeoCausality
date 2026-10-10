@@ -42,6 +42,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variance under AR(1) errors for the switching schedule (new
   `switching_freq` argument). The earlier cluster design effect was far off
   and gave NaN for slightly negative autocorrelation.
+- **Date handling** — dates are compared by calendar day via a shared
+  `date_key`, so datetime columns (`"2021-01-01 00:00:00"`) no longer drop the
+  last pre-period day. Dates strictly between `pre_period` and `post_period`
+  are now dropped by every estimator. Before, they were trained on (most
+  estimators) or counted as post-period (`MatrixCompletion`).
+- **Conformal interval** — when the point estimate itself is rejected, the
+  test inversion now searches for the accepted region instead of returning a
+  zero-width interval, and it expands past the old ±10·spread cap. An empty
+  region is reported as NaN with a warning.
+- **Jackknife+ / split-conformal quantiles** — when there are too few
+  pre-period points for a finite `(1 - alpha)` quantile, the interval is now
+  unbounded (with a warning) instead of being clamped to the extreme
+  residual, which voided the coverage guarantee.
+- **Parametric bootstrap p-value** — the null replicates are centred on zero
+  (removing the refit bias) and the p-value includes the +1 correction. The
+  noise scale uses `ddof=1`.
+- **`DiffinDiff`** — the relative lift and "Baseline" use the treated
+  group's counterfactual level instead of the control group's. With
+  `inference="ols"`, standard errors now allow AR(1) autocorrelation within
+  each group's series; iid errors gave badly anti-conservative p-values.
+- **`InteractiveFixedEffects`** — the automatic factor count is capped at
+  `min(T, N0) - 2`. The old cap made the eigenvalue ratio divide by zero, so
+  it always picked the maximum when there were few controls.
+- **`Switchback`**:
+  - Relative lift is measured against the untreated baseline. Before, it
+    divided the incrementality by itself and always read 100%.
+  - Carryover lags are built before washout rows are dropped.
+  - `permutation_test()` re-applies lags and washout to each permuted schedule.
+  - Incrementality counts every treated period, including washed-out ones,
+    plus the carryover effects.
+- **`GeoX`** — `alternative` now applies to pointwise and percent-lift
+  intervals and to the placebo and randomization p-values, not only the
+  cumulative interval.
+- **`GeoLift`** — the p-value tests the ASC estimate against the GSC
+  bootstrap null, so it agrees with the ASC-centred interval.
 
 ## [0.17.1] - 2026-09-25
 

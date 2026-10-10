@@ -186,12 +186,11 @@ class MatrixCompletion(EconometricEstimator):
         """
         if self.daily_x is None or self.daily_y is None:
             raise ValueError("pre_process must be called before generate")
-        # Split the sorted panel into the leading pre-period block and the
-        # trailing post-period block. Compare dates as ISO strings so the split
-        # is backend- and format-agnostic (matches the base class; integer years
-        # like "1989" are not valid ``date.fromisoformat`` input).
+        # Split the date-sorted panel into the leading pre-period block and the
+        # trailing post-period block, using the base class's period labels
+        # (gap dates between the periods were dropped in ``pre_process``).
         date_list = self.daily_x[self.date_variable].to_list()
-        n_pre = sum(1 for d in date_list if str(d) <= self.pre_period)
+        n_pre = self.data.filter(nw.col("treatment_period") == 0)[self.date_variable].n_unique()
         control_mat = self.daily_x.drop(self.date_variable).to_numpy().astype(float)  # (T, n_ctrl)
         treated = self.daily_y[self.y_variable].to_numpy().astype(float)  # (T,)
 

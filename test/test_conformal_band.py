@@ -29,10 +29,10 @@ def test_split_conformal_band_is_kth_smallest(alpha: float, expected: float) -> 
     assert model._split_conformal_band(scores) == expected
 
 
-def test_split_conformal_band_saturates_to_max() -> None:
-    # n=3, alpha=0.1: k=ceil(0.9*4)=4 > 3 -> widen to the maximum residual.
+def test_split_conformal_band_unbounded_when_saturated() -> None:
+    # n=3, alpha=0.1: k=ceil(0.9*4)=4 > 3 -> no finite (1 - alpha) band.
     model = _estimator(0.1)
-    assert model._split_conformal_band(np.array([2.0, 5.0, 1.0])) == 5.0
+    assert model._split_conformal_band(np.array([2.0, 5.0, 1.0])) == float("inf")
 
 
 def test_split_conformal_band_matches_jackknife_quantile() -> None:
