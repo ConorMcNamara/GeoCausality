@@ -138,16 +138,12 @@ class GeoX(MLEstimator):
             train_y = pre_test_np[:-post_len]
             val_x = intercept_train[-post_len:]
             val_y = pre_test_np[-post_len:]
-            val_model = sm.OLS(train_y, train_x).fit()
-            if self.non_negative and val_model.params[1] < 0:
-                val_model.params[1] = 0.0
+            val_model = self._fit_tbr(train_y, train_x)
             val_pred = val_model.predict(val_x)
             val_rmse = float(np.sqrt(np.mean((val_y - val_pred) ** 2)))
 
         # --- Full pre-period fit ---
-        self.model = sm.OLS(pre_test_np, intercept_train).fit()
-        if self.non_negative and self.model.params[1] < 0:
-            self.model.params[1] = 0.0
+        self.model = self._fit_tbr(pre_test_np, intercept_train)
 
         self.intercept_test = sm.add_constant(self.post_control[self.y_variable].to_numpy())
         model_summary = self.model.get_prediction(self.intercept_test).summary_frame(alpha=self.alpha)
@@ -192,6 +188,35 @@ class GeoX(MLEstimator):
             np.isnan(log_ratio), np.nan, np.exp(log_ratio + q * log_rmse) - 1
         )
         return self
+
+    def _fit_tbr(self, y: np.ndarray, x_const: np.ndarray) -> Any:
+        """Fit the TBR regression of test on control, honouring ``non_negative``.
+
+        When ``non_negative`` is set and the OLS slope is negative, the
+        constrained least-squares optimum has slope zero, which is the
+        intercept-only model (intercept = mean of ``y``). That model is refit
+        with the control column zeroed, so its parameters, covariance, residual
+        variance and degrees of freedom all describe the clamped fit -- merely
+        setting the slope to zero would keep the OLS intercept
+        ``mean(y) - slope * mean(x)`` and the unclamped variance terms.
+
+        Parameters
+        ----------
+        y : numpy array, shape (n,)
+            The test-group series.
+        x_const : numpy array, shape (n, 2)
+            The control-group series with a leading constant column.
+
+        Returns
+        -------
+        The fitted statsmodels OLS results.
+        """
+        model = sm.OLS(y, x_const).fit()
+        if self.non_negative and model.params[1] < 0:
+            restricted = np.array(x_const, dtype=float, copy=True)
+            restricted[:, 1] = 0.0
+            model = sm.OLS(y, restricted).fit()
+        return model
 
     def summarize(self, lift: str) -> None:
         """Print a tabulated summary of the GeoX results.
@@ -444,9 +469,7 @@ class GeoX(MLEstimator):
             x_post = post_pseudo_ctrl[self.y_variable].to_numpy()
             y_post = post_pseudo_test[self.y_variable].to_numpy().flatten()
 
-            model = sm.OLS(y_pre, sm.add_constant(x_pre)).fit()
-            if self.non_negative and model.params[1] < 0:
-                model.params[1] = 0.0
+            model = self._fit_tbr(y_pre, sm.add_constant(x_pre))
 
             if model.rsquared < min_placebo_r2:
                 continue
@@ -498,10 +521,11 @@ class GeoX(MLEstimator):
     ) -> dict[str, Any]:
         """Abadie-style placebo permutation test for GeoX.
 
-        For each control geo, temporarily treat it as the single treated unit
-        while the remaining control geos form the donor pool.  The full
-        ``pre_process().generate()`` pipeline is re-run for every placebo geo,
-        producing a null distribution of treatment effect statistics.
+        Each placebo treats a set of control geos the same size as the real
+        test group, while the remaining control geos form the donor pool (the
+        real test geos are excluded). The full ``pre_process().generate()``
+        pipeline is re-run for every placebo, producing a null distribution of
+        treatment effect statistics.
 
         Parameters
         ----------
@@ -513,8 +537,9 @@ class GeoX(MLEstimator):
         seed : int, optional
             Seed controlling the random subset when ``max_placebos`` is set.
         max_placebos : int, optional
-            Cap the number of placebo geos to run.  When the control pool is
-            very large, this draws a random subset.
+            Cap the number of placebos to run.  When there are more candidate
+            placebos than this, a random subset is drawn. Defaults to every
+            control geo with one test geo, and to 200 subsets otherwise.
         n_jobs : int, default 1
             Number of parallel workers for the placebo loop.  ``-1`` uses all
             available cores.
@@ -546,55 +571,34 @@ class GeoX(MLEstimator):
 
         if not donor_geos:
             raise ValueError("No control geos available for placebo permutation")
-
-        if max_placebos is not None and max_placebos < len(donor_geos):
-            rng = np.random.default_rng(seed)
-            donor_geos = list(rng.choice(donor_geos, size=max_placebos, replace=False))
+        # Placebos treat as many donors as there are real test geos, so the
+        # placebo statistic aggregates the same number of geos as the observed.
+        placebo_sets = self._placebo_sets(donor_geos, len(test_geo_set), max_placebos, seed)
 
         native_data = self.data.to_native()
-        all_geos = sorted(self.data[self.geo_variable].unique().to_list())
-        geo_var = self.geo_variable
-        date_var = self.date_variable
-        pre_per = self.pre_period
-        post_per = self.post_period
-        y_var = self.y_variable
-        alpha_val = self.alpha
-        non_neg = self.non_negative
-        alt = self.alternative
 
-        def _fit_placebo(placebo_geo: str) -> tuple[str, float] | None:
-            placebo_control = [g for g in all_geos if g != placebo_geo and g not in test_geo_set]
+        def _fit_placebo(placebo_set: tuple[str, ...]) -> tuple[Any, float] | None:
+            placebo_control = [g for g in donor_geos if g not in placebo_set]
+            label: Any = placebo_set[0] if len(placebo_set) == 1 else placebo_set
             try:
-                m = GeoX(
-                    native_data,
-                    geo_variable=geo_var,
-                    test_geos=[placebo_geo],
-                    control_geos=placebo_control,
-                    date_variable=date_var,
-                    pre_period=pre_per,
-                    post_period=post_per,
-                    y_variable=y_var,
-                    alpha=alpha_val,
-                    non_negative=non_neg,
-                    alternative=alt,
-                )
+                m = self._clone(data=native_data, test_geos=list(placebo_set), control_geos=placebo_control)
                 m.pre_process().generate()
                 r = m.results
                 if r is None:
                     return None
-                return (placebo_geo, self._ri_statistic(r, statistic))
+                return (label, self._ri_statistic(r, statistic))
             except Exception:
                 return None
 
         if n_jobs == 1:
-            raw = [_fit_placebo(g) for g in donor_geos]
+            raw = [_fit_placebo(s) for s in placebo_sets]
         else:
             from joblib import Parallel, delayed
 
-            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(g) for g in donor_geos)
+            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(s) for s in placebo_sets)
 
         placebo_stats: list[float] = []
-        placebo_geos: list[str] = []
+        placebo_geos: list[Any] = []
         n_failed = 0
         for r in raw:
             if r is None:

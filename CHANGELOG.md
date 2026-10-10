@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Multiple treated geos** — `SyntheticControl`, `SyntheticControlV`,
+  `PenalizedSyntheticControl`, `NonlinearSyntheticControl`,
+  `SyntheticDiffInDiff` and `MatrixCompletion` now fit the per-geo average
+  treated series and scale the counterfactual back up by the treated count.
+  Sum-to-one weights cannot reproduce a sum of several geos, which badly biased
+  estimates whenever more than one geo was treated. SDID's zeta rule now
+  includes the treated count, and its placebo variance draws as many
+  pseudo-treated donors as there are treated geos.
+- **SLSQP failures** — `SyntheticControl` and `PenalizedSyntheticControl`
+  rescale the weight problem to unit magnitude before solving and warn when the
+  optimizer does not converge. Before this fix, outcomes in the thousands
+  silently returned equal donor weights.
+- **`AugmentedSyntheticControl`** now implements ridge ASCM (Ben-Michael,
+  Feller & Rothstein): simplex synthetic-control weights plus a ridge
+  correction, so the penalty shrinks toward synthetic control instead of
+  toward zero.
+- **`randomization_test()`** (all estimators and `GeoX`) excludes the real
+  treated geos from placebo donor pools, keeps the estimator's hyperparameters,
+  and uses placebos with the same number of geos as the treated group, so
+  placebo and observed statistics share a scale.
+- **`diagnose()` placebo-in-time** refits on pre-period data only. Before this
+  fix, its fake post-period ran into the real post-period and picked up the
+  treatment effect.
+- **`control_geos`** is honoured when `test_geos` is also given: geos in
+  neither list are dropped instead of silently joining the donor pool.
+- **`GeoX`** derives its treatment indicator from `test_geos`/`control_geos`
+  (so `randomization_test()` no longer fails on every placebo). With
+  `non_negative=True` and a negative slope, it now refits the intercept-only
+  model instead of keeping the OLS intercept.
+- **`Switchback.power_analytical()`** uses the exact two-way fixed-effects
+  variance under AR(1) errors for the switching schedule (new
+  `switching_freq` argument). The earlier cluster design effect was far off
+  and gave NaN for slightly negative autocorrelation.
+
 ## [0.17.1] - 2026-09-25
 
 ### Added

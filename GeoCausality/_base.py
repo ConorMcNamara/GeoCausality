@@ -1,10 +1,12 @@
 import abc
+import inspect
 import warnings
 from abc import ABC
 from collections.abc import Callable
 from datetime import date as date_cls
-from math import ceil
-from typing import Any
+from itertools import combinations
+from math import ceil, comb
+from typing import Any, Self
 
 import narwhals as nw
 import numpy as np
@@ -12,6 +14,7 @@ import plotly.graph_objects as go
 import polars as pl
 from narwhals.typing import IntoDataFrame
 from plotly.subplots import make_subplots
+from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
 
 # The lift types every ``summarize`` accepts. ``FixedEffects`` allows a subset.
@@ -19,6 +22,29 @@ _LIFT_TYPES: tuple[str, ...] = ("absolute", "relative", "incremental", "cost-per
 
 
 class Estimator(abc.ABC):
+    # Constructor arguments, recorded by ``__new__`` so placebo refits
+    # (randomization inference, placebo-in-time) can rebuild the estimator with
+    # the same hyperparameters (penalties, ranks, bandwidths, ...) rather than
+    # the defaults.
+    _init_kwargs: dict[str, Any]
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        obj = super().__new__(cls)
+        init_kwargs: dict[str, Any] = {}
+        signature = inspect.signature(cls.__init__)
+        try:
+            bound = signature.bind(obj, *args, **kwargs)
+        except TypeError:
+            bound = None
+        if bound is not None:
+            for name, value in list(bound.arguments.items())[1:]:
+                if signature.parameters[name].kind is inspect.Parameter.VAR_KEYWORD:
+                    init_kwargs.update(value)
+                else:
+                    init_kwargs[name] = value
+        obj._init_kwargs = init_kwargs
+        return obj
+
     def __init__(
         self,
         data: IntoDataFrame,
@@ -81,6 +107,83 @@ class Estimator(abc.ABC):
         self.msrp = msrp
         self.spend = spend
         self.results: dict[str, Any] | None = None
+
+    def _clone(self, **overrides: Any) -> Self:
+        """Build a fresh estimator of this class with the same constructor arguments.
+
+        Parameters
+        ----------
+        **overrides : Any
+            Constructor arguments to replace (e.g. ``data``, ``test_geos``).
+
+        Returns
+        -------
+        A new, un-fitted estimator.
+        """
+        return type(self)(**{**self._init_kwargs, **overrides})
+
+    def _restrict_to_listed_geos(self) -> None:
+        """Drop geos outside ``test_geos`` and ``control_geos`` when both are given.
+
+        Otherwise every non-test geo would silently enter the donor pool,
+        including geos the caller deliberately left out (e.g. holdouts or
+        markets exposed to spillover).
+        """
+        if self.test_geos is not None and self.control_geos is not None:
+            listed = list(self.test_geos) + list(self.control_geos)
+            self.data = self.data.filter(nw.col(self.geo_variable).is_in(listed))
+
+    @staticmethod
+    def _placebo_sets(
+        donor_geos: list[Any],
+        n_treated: int,
+        max_placebos: int | None,
+        seed: int | None,
+    ) -> list[tuple[Any, ...]]:
+        """Draw the placebo treatment assignments for randomization inference.
+
+        Each placebo is a set of ``n_treated`` donor geos, so a placebo's
+        statistic is on the same scale as the observed one (which aggregates
+        ``n_treated`` geos). At least one donor is always left as a control.
+
+        Parameters
+        ----------
+        donor_geos : list of str
+            The control geos available for placebo assignment.
+        n_treated : int
+            The number of geos in the real treated group.
+        max_placebos : int, optional
+            Cap on the number of placebos. Defaults to every donor when
+            ``n_treated == 1`` and to 200 subsets otherwise.
+        seed : int, optional
+            Seed for sampling placebos when they are not enumerated.
+
+        Returns
+        -------
+        A list of placebo geo tuples.
+
+        Raises
+        ------
+        ValueError
+            If there are not enough donors to form a placebo and its controls.
+        """
+        k = max(int(n_treated), 1)
+        if len(donor_geos) <= k:
+            raise ValueError(
+                f"Need more than {k} control geos to form placebos of {k} geos with a remaining donor pool"
+            )
+        limit = max_placebos if max_placebos is not None else (len(donor_geos) if k == 1 else 200)
+        n_candidates = comb(len(donor_geos), k)
+        if n_candidates <= limit:
+            return list(combinations(donor_geos, k))
+        # Sample donor indices (not labels) so geo labels keep their own type.
+        rng = np.random.default_rng(seed)
+        if k == 1:
+            return [(donor_geos[i],) for i in rng.choice(len(donor_geos), size=limit, replace=False)]
+        seen: set[tuple[int, ...]] = set()
+        while len(seen) < limit:
+            seen.add(tuple(sorted(int(i) for i in rng.choice(len(donor_geos), size=k, replace=False))))
+        return [tuple(donor_geos[i] for i in idx) for idx in sorted(seen)]
 
     @abc.abstractmethod
     def pre_process(self) -> "Estimator":
@@ -289,8 +392,14 @@ class EconometricEstimator(Estimator, ABC):
         self._jk_x_pre: np.ndarray | None = None
         self._jk_y_pre: np.ndarray | None = None
         self._jk_x_post: np.ndarray | None = None
+        # Number of treated geos summed into the treated series. Estimators whose
+        # donor weights are constrained to sum to one fit the per-geo average
+        # (treated series / n) and scale the counterfactual back up by n, since
+        # sum-to-one weights cannot reproduce a sum of several geos.
+        self._n_treated: int = 1
 
     def pre_process(self) -> "EconometricEstimator":
+        self._restrict_to_listed_geos()
         if self.test_geos is not None:
             if self.treatment_variable is not None:
                 self.data: nw.DataFrame = self.data.with_columns(
@@ -316,6 +425,9 @@ class EconometricEstimator(Estimator, ABC):
             .otherwise(nw.when(date_as_str >= self.post_period).then(1).otherwise(0))
             .alias("treatment_period")
         )
+        if self.treatment_variable is not None:
+            n_treated = self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].n_unique()
+            self._n_treated = max(int(n_treated), 1)
 
         return self
 
@@ -1180,6 +1292,93 @@ class EconometricEstimator(Estimator, ABC):
         return lower / t1, upper / t1, band, p_value
 
     # ------------------------------------------------------------------
+    # Sum-to-one donor weights
+    #
+    # Synthetic-control weights constrained to sum to one cannot reproduce a
+    # treated series that sums several geos (the donors' common dynamics would
+    # need to be scaled up by the number of treated geos). These estimators
+    # therefore fit the per-geo average treated series, as augsynth and
+    # Arkhangelsky et al. do, and scale the weights back up by the treated
+    # count. The same helper rescales the problem to unit magnitude so SLSQP's
+    # absolute tolerances do not stop it early on outcomes in the thousands.
+    # ------------------------------------------------------------------
+    def _per_geo_problem(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+        """Rescale a sum-to-one weight fit to the per-geo, unit-magnitude problem.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_rows, n_donors)
+            Donor outcomes.
+        y : numpy array, shape (n_rows,)
+            The treated series (a sum over the treated geos).
+
+        Returns
+        -------
+        A tuple ``(x / s, y / (n * s), n)`` where ``n`` is the number of treated
+        geos and ``s`` the largest absolute donor value. Weights fitted on the
+        rescaled problem are multiplied by ``n`` to predict the summed series.
+        """
+        n = float(self._n_treated)
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float) / n
+        scale = float(np.max(np.abs(x))) if x.size else 1.0
+        if not np.isfinite(scale) or scale == 0.0:
+            scale = 1.0
+        return x / scale, y / scale, n
+
+    def _simplex_fit(self, x: np.ndarray, y: np.ndarray, name: str) -> np.ndarray:
+        """Simplex-constrained least-squares donor weights for the summed treated series.
+
+        Solves ``min ||y / n - x w||^2`` subject to ``w >= 0, sum(w) = 1`` on the
+        rescaled per-geo problem (see ``_per_geo_problem``) and returns ``n * w``.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_rows, n_donors)
+            Donor outcomes.
+        y : numpy array, shape (n_rows,)
+            The treated series.
+        name : str
+            The estimator name for the convergence warning.
+
+        Returns
+        -------
+        The donor weights, summing to the number of treated geos.
+        """
+        xs, ys, n_treated = self._per_geo_problem(x, y)
+        n_c = xs.shape[1]
+        gram = xs.T @ xs
+        cross = xs.T @ ys
+        res = minimize(
+            fun=lambda w: float(w @ gram @ w - 2.0 * cross @ w),
+            x0=np.full(n_c, 1.0 / n_c),
+            jac=lambda w: 2.0 * (gram @ w - cross),
+            bounds=Bounds(lb=np.zeros(n_c), ub=np.ones(n_c)),
+            constraints=LinearConstraint(A=np.ones(n_c), lb=1.0, ub=1.0),
+            method="SLSQP",
+        )
+        self._warn_unconverged(res, name)
+        return res["x"] * n_treated
+
+    @staticmethod
+    def _warn_unconverged(res: Any, name: str) -> None:
+        """Warn when a scipy optimizer did not report success.
+
+        Parameters
+        ----------
+        res : scipy.optimize.OptimizeResult
+            The optimizer result.
+        name : str
+            The estimator name for the message.
+        """
+        if not res.success:
+            warnings.warn(
+                f"{name}: weight optimizer did not converge ({res.message}); the fitted weights may be unreliable",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
+    # ------------------------------------------------------------------
     # Shared factor-model helpers
     #
     # The factor-based estimators (``GeneralizedSyntheticControl`` and
@@ -1469,13 +1668,19 @@ class EconometricEstimator(Estimator, ABC):
     ) -> dict[str, Any]:
         """Placebo permutation test in the style of Abadie, Diamond & Hainmueller (2010).
 
-        For each donor (control) geo, temporarily treat it as the single
-        treated unit while the remaining geos (original donors minus the
-        placebo geo, plus the original treated geos) form the control pool.
-        The full ``pre_process().generate()`` pipeline is re-run for every
-        placebo geo, producing a null distribution of treatment effect
-        statistics.  The rank-based p-value is the fraction of placebos whose
-        absolute statistic is at least as large as the observed one.
+        Each placebo reassigns treatment to a set of donor (control) geos the
+        same size as the real treated group, while the remaining donors form
+        the control pool. The originally treated geos are excluded from every
+        placebo, since their post-period outcomes carry the real effect. With
+        one treated geo every donor is a placebo in turn; with ``k > 1`` the
+        placebos are ``k``-subsets of the donors (all of them when there are at
+        most ``max_placebos``, otherwise a random sample), so the placebo and
+        observed statistics are on the same scale. The full
+        ``pre_process().generate()`` pipeline is re-run for every placebo with
+        the estimator's own hyperparameters, producing a null distribution of
+        treatment effect statistics.  The rank-based p-value is the fraction
+        of placebos whose absolute statistic is at least as large as the
+        observed one.
 
         Parameters
         ----------
@@ -1491,12 +1696,12 @@ class EconometricEstimator(Estimator, ABC):
               automatically by this ratio, so it does not need an explicit
               fit filter.
         seed : int, optional
-            If ``max_placebos`` is set and fewer than the full donor pool are
-            sampled, this seed controls which subset is drawn.
+            Seed controlling which placebos are drawn when they are sampled
+            rather than enumerated.
         max_placebos : int, optional
-            Cap the number of placebo geos to run. When the donor pool is very
-            large, this draws a random subset rather than exhaustively iterating
-            every donor.
+            Cap the number of placebos to run. When there are more candidate
+            placebos than this, a random subset is drawn. Defaults to every
+            donor with one treated geo, and to 200 donor subsets otherwise.
         n_jobs : int, default 1
             Number of parallel workers for the placebo loop. ``-1`` uses all
             available cores.  ``1`` (the default) runs sequentially with no
@@ -1508,7 +1713,8 @@ class EconometricEstimator(Estimator, ABC):
 
         * ``observed_statistic`` — the test statistic on the real treated unit.
         * ``placebo_statistics`` — list of per-geo placebo statistics.
-        * ``placebo_geos`` — the corresponding geo labels.
+        * ``placebo_geos`` — the corresponding geo labels (a tuple of labels
+          per placebo when more than one geo is treated).
         * ``p_value`` — two-sided rank-based p-value.
         * ``n_placebos`` — number of successful placebos.
         * ``n_failed`` — number of placebos that raised during fitting.
@@ -1538,53 +1744,36 @@ class EconometricEstimator(Estimator, ABC):
             else self.data.filter(nw.col(treat_var) == 1)[self.geo_variable].unique().to_list()
         )
         donor_geos = [g for g in all_geos if g not in test_geos_set]
-        if not donor_geos:
-            raise ValueError("No control geos available for placebo permutation")
-
-        if max_placebos is not None and max_placebos < len(donor_geos):
-            rng = np.random.default_rng(seed)
-            donor_geos = list(rng.choice(donor_geos, size=max_placebos, replace=False))
+        placebo_sets = self._placebo_sets(donor_geos, len(test_geos_set), max_placebos, seed)
 
         native_data = self.data.to_native()
-        estimator_cls = type(self)
-        geo_var = self.geo_variable
-        date_var = self.date_variable
-        pre_per = self.pre_period
-        post_per = self.post_period
-        y_var = self.y_variable
-        alpha_val = self.alpha
 
-        def _fit_placebo(placebo_geo: str) -> tuple[str, float] | None:
-            placebo_control = [g for g in all_geos if g != placebo_geo]
+        def _fit_placebo(placebo_set: tuple[str, ...]) -> tuple[Any, float] | None:
+            placebo_control = [g for g in donor_geos if g not in placebo_set]
+            label: Any = placebo_set[0] if len(placebo_set) == 1 else placebo_set
             try:
-                m = estimator_cls(
-                    native_data,
-                    geo_variable=geo_var,
-                    test_geos=[placebo_geo],
+                m = self._clone(
+                    data=native_data,
+                    test_geos=list(placebo_set),
                     control_geos=placebo_control,
-                    date_variable=date_var,
-                    pre_period=pre_per,
-                    post_period=post_per,
-                    y_variable=y_var,
-                    alpha=alpha_val,
                 )
                 m.pre_process().generate()
                 r = m.results
                 if r is None:
                     return None
-                return (placebo_geo, self._ri_statistic(r, statistic))
+                return (label, self._ri_statistic(r, statistic))
             except Exception:
                 return None
 
         if n_jobs == 1:
-            raw = [_fit_placebo(g) for g in donor_geos]
+            raw = [_fit_placebo(s) for s in placebo_sets]
         else:
             from joblib import Parallel, delayed
 
-            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(g) for g in donor_geos)
+            raw = Parallel(n_jobs=n_jobs)(delayed(_fit_placebo)(s) for s in placebo_sets)
 
         placebo_stats: list[float] = []
-        placebo_geos: list[str] = []
+        placebo_geos: list[Any] = []
         n_failed = 0
         for r in raw:
             if r is None:
@@ -1722,32 +1911,27 @@ class EconometricEstimator(Estimator, ABC):
     def _placebo_in_time(self) -> dict[str, Any] | None:
         """Split the pre-period and re-fit on the first 70% as a placebo test.
 
-        Returns ``None`` when the pre-period is too short (< 10 dates) to
-        produce a meaningful split.
+        The placebo sees only pre-period data, so its fake post-period is the
+        last 30% of the real pre-period. Returns ``None`` when the pre-period is
+        too short (< 10 dates) to produce a meaningful split.
         """
-        date_str = nw.col(self.date_variable).cast(nw.String)
-        pre_dates = sorted(self.data.filter(date_str <= self.pre_period)[self.date_variable].unique().to_list())
+        # Only the real pre-period goes to the placebo fit: passing the full panel
+        # would make the fake post-period run on through the real post-period and
+        # pick up the real treatment effect.
+        pre_data = self.data.filter(nw.col("treatment_period") == 0)
+        pre_dates = sorted(pre_data[self.date_variable].unique().to_list())
         if len(pre_dates) < 10:
             return None
 
         split_idx = int(len(pre_dates) * 0.7)
         fake_pre = str(pre_dates[split_idx - 1])
         fake_post = str(pre_dates[split_idx])
-        native_data = self.data.to_native()
-        estimator_cls = type(self)
 
         try:
-            placebo = estimator_cls(
-                native_data,
-                geo_variable=self.geo_variable,
-                test_geos=list(self.test_geos) if self.test_geos is not None else None,
-                control_geos=list(self.control_geos) if self.control_geos is not None else None,
-                treatment_variable=self.treatment_variable,
-                date_variable=self.date_variable,
+            placebo = self._clone(
+                data=pre_data.to_native(),
                 pre_period=fake_pre,
                 post_period=fake_post,
-                y_variable=self.y_variable,
-                alpha=self.alpha,
             )
             placebo.pre_process().generate()
             r = placebo.results
@@ -2003,6 +2187,20 @@ class MLEstimator(Estimator, abc.ABC):
         self.test_dates: nw.Series | None = None
 
     def pre_process(self) -> "MLEstimator":
+        self._restrict_to_listed_geos()
+        # Derive the treatment indicator from explicit geo lists, as
+        # ``EconometricEstimator.pre_process`` does.
+        if self.treatment_variable is not None:
+            if self.test_geos is not None:
+                self.data: nw.DataFrame = self.data.with_columns(
+                    nw.col(self.geo_variable).is_in(self.test_geos).cast(nw.Int64).alias(self.treatment_variable)
+                )
+            elif self.control_geos is not None:
+                self.data: nw.DataFrame = self.data.with_columns(
+                    (1 - nw.col(self.geo_variable).is_in(self.control_geos).cast(nw.Int64)).alias(
+                        self.treatment_variable
+                    )
+                )
         if self.treatment_variable is not None:
             # Cast the date column to ISO strings so the comparison is backend
             # agnostic: polars `Date` columns cannot be compared to a string

@@ -381,12 +381,22 @@ class Switchback(Estimator):
         rho: float | None = None,
         treatment_fraction: float = 0.5,
         power_target: float = 0.8,
+        switching_freq: int = 7,
     ) -> dict[str, float]:
         """Analytical power calculation for the switchback design.
 
         When ``mde`` is provided, returns the statistical power for that effect
         size. When ``mde`` is ``None``, inverts the formula to return the
         minimum detectable effect at ``power_target``.
+
+        The standard error is the exact sampling standard deviation of the
+        two-way fixed-effects treatment coefficient, ``sqrt(d' Sigma d) / (d' d)``,
+        where ``d`` is the two-way demeaned treatment schedule and ``Sigma`` is
+        block-diagonal with an AR(1) correlation within each geo. The schedule
+        mirrors ``power_simulation``: blocks of ``switching_freq`` treated
+        periods alternate with control blocks (sized so each geo is treated for
+        ``treatment_fraction`` of the periods), with alternate geos starting in
+        opposite phases.
 
         If ``sigma`` and ``rho`` (residual standard deviation and AR(1)
         autocorrelation) are not supplied, they are estimated from the fitted
@@ -413,6 +423,8 @@ class Switchback(Estimator):
         power_target : float, default=0.8
             Target power when computing the MDE (ignored when ``mde`` is
             given).
+        switching_freq : int, default=7
+            Number of consecutive periods in each treated window.
 
         Returns
         -------
@@ -443,11 +455,7 @@ class Switchback(Estimator):
                 residuals_by_geo.append(geo_resids.values)
             rho = self._estimate_autocorrelation(residuals_by_geo)
 
-        p = treatment_fraction
-        effective_n = n_geos * n_periods * p * (1 - p)
-        inflation = 1 + (n_periods - 1) * rho
-        var_tau = sigma**2 * inflation / effective_n
-        se_tau = float(np.sqrt(var_tau))
+        se_tau = self._twfe_standard_error(n_geos, n_periods, sigma, rho, treatment_fraction, switching_freq)
 
         z_alpha = float(norm.ppf(1 - self.alpha / 2))
 
@@ -468,6 +476,56 @@ class Switchback(Estimator):
             "n_periods": n_periods,
             "se_tau": se_tau,
         }
+
+    @staticmethod
+    def _twfe_standard_error(
+        n_geos: int,
+        n_periods: int,
+        sigma: float,
+        rho: float,
+        treatment_fraction: float,
+        switching_freq: int,
+    ) -> float:
+        """Compute the standard error of the two-way FE treatment effect under AR(1) errors.
+
+        Parameters
+        ----------
+        n_geos, n_periods : int
+            Panel dimensions.
+        sigma : float
+            Marginal standard deviation of the errors.
+        rho : float
+            Within-geo AR(1) autocorrelation (clipped to (-1, 1)).
+        treatment_fraction : float
+            Share of periods each geo is treated.
+        switching_freq : int
+            Length of each treated window.
+
+        Returns
+        -------
+        ``sqrt(d' Sigma d) / (d' d)`` for the two-way demeaned schedule ``d``.
+        """
+        from scipy.linalg import toeplitz
+
+        if not 0.0 < treatment_fraction < 1.0:
+            raise ValueError("treatment_fraction must be strictly between 0 and 1")
+        on = max(int(switching_freq), 1)
+        off = max(int(round(on * (1 - treatment_fraction) / treatment_fraction)), 1)
+        t = np.arange(n_periods)
+        schedule = np.empty((n_geos, n_periods))
+        for g in range(n_geos):
+            # Alternate geos start in opposite phases, balancing each period.
+            shift = 0 if g % 2 == 0 else on
+            schedule[g] = ((t + shift) % (on + off)) < on
+        demeaned = schedule - schedule.mean(axis=1, keepdims=True) - schedule.mean(axis=0, keepdims=True)
+        demeaned += schedule.mean()
+        rho = float(np.clip(rho, -0.99, 0.99))
+        corr = toeplitz(rho ** np.arange(n_periods))
+        ss = float(np.sum(demeaned**2))
+        if ss == 0.0:
+            return float("inf")
+        quad = float(np.einsum("gt,ts,gs->", demeaned, corr, demeaned))
+        return float(sigma * np.sqrt(max(quad, 0.0)) / ss)
 
     def power_simulation(
         self,

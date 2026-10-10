@@ -92,6 +92,7 @@ class AugmentedSyntheticControl(EconometricEstimator):
         self._y_bar: float | None = None
         self.dates: list[Any] | None = None
         self.lambda_ = lambda_
+        self.scm_weights: np.ndarray | None = None
         self.prediction_pre: nw.DataFrame | None = None
         self.prediction_post: nw.DataFrame | None = None
         self.actual_pre: nw.DataFrame | None = None
@@ -178,32 +179,56 @@ class AugmentedSyntheticControl(EconometricEstimator):
             raise ValueError("daily_x must not be None")
         if self.daily_y is None:
             raise ValueError("daily_y must not be None")
-        # Intercept-augmented ridge ASCM (Ben-Michael et al.): fit ridge-penalised
-        # donor weights on the time-de-meaned pre-period (subtracting each donor's
-        # and the treated unit's pre-period mean). The level is carried by the
-        # stored means and the weights are NOT constrained to the simplex, so they
-        # can match an aggregated treated unit outside the donor convex hull. Plain
-        # simplex weights produce a raw weighted average of donor levels and bias
-        # the counterfactual low. lambda is chosen by the one-standard-error rule,
-        # which favours the more-regularised fit within one SE of the CV minimum --
-        # the bare minimum under-regularises and inflates post-period extrapolation.
+        # Intercept-augmented ridge ASCM (Ben-Michael, Feller & Rothstein): on the
+        # time-de-meaned pre-period (subtracting each donor's and the treated
+        # unit's pre-period mean), fit simplex synthetic-control weights, then add
+        # a ridge correction fitted to the synthetic control's remaining imbalance:
+        #     w = w_scm + (X'X + lambda I)^-1 X'(y - X w_scm).
+        # The ridge term lets the weights leave the simplex to fix the pre-period
+        # fit, and the penalty shrinks the weights toward w_scm (lambda -> inf
+        # recovers synthetic control), not toward zero. The level is carried by
+        # the stored means. lambda is chosen by the one-standard-error rule, which
+        # favours the more-regularised fit -- i.e. the one closer to synthetic
+        # control -- within one SE of the CV minimum.
         daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
         self._x_bar = daily_x_mat.mean(axis=0, keepdims=True)
         self._y_bar = float(self.daily_y.mean())
         daily_x_dm = daily_x_mat - self._x_bar
         daily_y_dm = self.daily_y - self._y_bar
+        self.scm_weights = self._simplex_fit(daily_x_dm, daily_y_dm, "AugmentedSyntheticControl")
         if self.lambda_ is None:
             lambdas = self._generate_lambdas(daily_x_dm)
             self.lambda_ = self._select_lambda(daily_x_dm, daily_y_dm, lambdas)
-        return self._ridge_weights(daily_x_dm, daily_y_dm, self.lambda_)
+        return self._augmented_weights(daily_x_dm, daily_y_dm, self.scm_weights, self.lambda_)
+
+    def _augmented_weights(self, x: np.ndarray, y: np.ndarray, scm_weights: np.ndarray, lambda_: float) -> np.ndarray:
+        """Ridge-augmented synthetic-control weights.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_periods, n_donors)
+            De-meaned donor matrix.
+        y : numpy array, shape (n_periods,)
+            De-meaned treated series.
+        scm_weights : numpy array, shape (n_donors,)
+            Synthetic-control (simplex) weights fitted on ``(x, y)``.
+        lambda_ : float
+            Ridge penalty.
+
+        Returns
+        -------
+        ``scm_weights`` plus the ridge regression of the synthetic control's
+        pre-period residual on the donors.
+        """
+        return scm_weights + self._ridge_weights(x, y - x @ scm_weights, lambda_)
 
     @staticmethod
     def _ridge_weights(x: np.ndarray, y: np.ndarray, lambda_: float) -> np.ndarray:
-        """Ridge-regression donor weights on the de-meaned pre-period.
+        """Ridge-regression coefficients on the de-meaned pre-period.
 
-        Solves ``min_w ||y - x w||^2 + lambda ||w||^2`` in closed form. The weights
-        are unconstrained (off-simplex), matching the augmented synthetic control
-        formulation of Ben-Michael et al.
+        Solves ``min_w ||y - x w||^2 + lambda ||w||^2`` in closed form. Applied to
+        the synthetic control's residual, this is the augmentation term of
+        Ben-Michael et al.
 
         Parameters
         ----------
@@ -222,10 +247,11 @@ class AugmentedSyntheticControl(EconometricEstimator):
         return np.linalg.solve(x.T @ x + lambda_ * np.identity(n_c), x.T @ y)
 
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
-        """Refit the intercept-augmented ridge weights on a subset and predict.
+        """Refit the intercept-augmented ridge ASCM weights on a subset and predict.
 
-        The penalty ``self.lambda_`` is held at its full-fit value (not re-selected
-        per fold) so the leave-one-out counterfactuals reflect the same model.
+        The synthetic-control weights are refit on the subset; the penalty
+        ``self.lambda_`` is held at its full-fit value (not re-selected per fold)
+        so the leave-one-out counterfactuals reflect the same model.
 
         Parameters
         ----------
@@ -244,18 +270,21 @@ class AugmentedSyntheticControl(EconometricEstimator):
         y_bar = float(y_train.mean())
         if self.lambda_ is None:
             raise ValueError("lambda_ must not be None")
-        w = self._ridge_weights(x_train - x_bar, y_train - y_bar, self.lambda_)
+        x_dm = x_train - x_bar
+        y_dm = y_train - y_bar
+        scm_weights = self._simplex_fit(x_dm, y_dm, "AugmentedSyntheticControl")
+        w = self._augmented_weights(x_dm, y_dm, scm_weights, self.lambda_)
         return y_bar + (x_eval - x_bar.flatten()) @ w
 
     def _select_lambda(self, x: np.ndarray, y: np.ndarray, lambdas: np.ndarray) -> float:
         """Select the ridge penalty by the one-standard-error rule.
 
         Leave-one-out cross-validation over the pre-period gives a mean squared
-        error and its standard error per candidate lambda; the chosen lambda is the
-        largest whose mean error is within one standard error of the minimum. That
-        favours more regularisation (less extrapolation) than the bare CV minimum,
-        which under-regularises and inflates the counterfactual's post-period
-        movement.
+        error and its standard error per candidate lambda; each fold refits the
+        synthetic-control weights and then the ridge correction. The chosen lambda
+        is the largest whose mean error is within one standard error of the
+        minimum. That favours more regularisation -- weights closer to synthetic
+        control, with less extrapolation -- than the bare CV minimum.
 
         Parameters
         ----------
@@ -275,11 +304,12 @@ class AugmentedSyntheticControl(EconometricEstimator):
         fold_err = np.empty((n, lambdas.shape[0]))
         for i in range(n):
             mask = np.arange(n) != i
+            scm_weights = self._simplex_fit(x[mask], y[mask], "AugmentedSyntheticControl")
             gram = x[mask].T @ x[mask]
-            rhs = x[mask].T @ y[mask]
+            rhs = x[mask].T @ (y[mask] - x[mask] @ scm_weights)
             identity = np.identity(gram.shape[0])
             for j, lambda_ in enumerate(lambdas):
-                w = np.linalg.solve(gram + lambda_ * identity, rhs)
+                w = scm_weights + np.linalg.solve(gram + lambda_ * identity, rhs)
                 fold_err[i, j] = (y[i] - x[i] @ w) ** 2
         mean = fold_err.mean(axis=0)
         se = fold_err.std(axis=0, ddof=1) / np.sqrt(n)

@@ -147,9 +147,14 @@ class SyntheticDiffInDiff(EconometricEstimator):
         x_post = self.synthetic_test_df.drop([self.date_variable, self.y_variable]).to_numpy()
         self.actual_post = self.synthetic_test_df[self.y_variable].to_numpy()
 
+        # The treated series sums the treated geos. The simplex unit weights are
+        # fitted to the per-geo average (as in Arkhangelsky et al.) and scaled
+        # back up by the treated count to predict the summed series.
+        n_treated = float(self._n_treated)
         zeta = self.zeta if self.zeta is not None else self._default_zeta(x_pre)
-        self.unit_intercept, self.unit_weights = self._solve_weights(x_pre, self.actual_pre, zeta)
+        self.unit_intercept, self.unit_weights = self._solve_weights(x_pre, self.actual_pre / n_treated, zeta)
         self.time_weights = self._solve_time_weights(x_pre, x_post)
+        scaled_weights = self.unit_weights * n_treated
         # Cache the donor matrices for the shared faithful jackknife+ loop.
         self._jk_x_pre = x_pre
         self._jk_x_post = x_post
@@ -160,9 +165,9 @@ class SyntheticDiffInDiff(EconometricEstimator):
         # treated series and its synthetic control. The per-period gap of this
         # trajectory averages to the SDID ATT (the doubly-weighted DID), so the
         # summed lift matches the reported incrementality.
-        alpha = float(self.time_weights @ (self.actual_pre - x_pre @ self.unit_weights))
-        self.prediction_pre = x_pre @ self.unit_weights + alpha
-        self.prediction_post = x_post @ self.unit_weights + alpha
+        alpha = float(self.time_weights @ (self.actual_pre - x_pre @ scaled_weights))
+        self.prediction_pre = x_pre @ scaled_weights + alpha
+        self.prediction_post = x_post @ scaled_weights + alpha
 
         self.att = float(np.mean(self.actual_post - self.prediction_post))
         t1 = self.actual_post.shape[0]
@@ -179,9 +184,8 @@ class SyntheticDiffInDiff(EconometricEstimator):
     def _default_zeta(self, x_pre: np.ndarray) -> float:
         """Arkhangelsky et al. (2021) default for the unit-weight L2 penalty.
 
-        ``zeta = (n_post_periods) ** (1 / 4) * sd(first-differences of the donor
-        outcomes over the pre-period)``. With a single (aggregated) treated unit
-        the treated-unit factor drops out of the rule.
+        ``zeta = (n_treated * n_post_periods) ** (1 / 4) * sd(first-differences
+        of the donor outcomes over the pre-period)``.
 
         Parameters
         ----------
@@ -193,13 +197,7 @@ class SyntheticDiffInDiff(EconometricEstimator):
         The regularization strength.
         """
         n_post = self.actual_post.shape[0] if self.actual_post is not None else 1
-        if x_pre.shape[0] < 2:
-            return 1.0
-        diffs = np.diff(x_pre, axis=0)
-        sigma = float(np.std(diffs))
-        if sigma == 0.0:
-            sigma = 1.0
-        return float(n_post**0.25) * sigma
+        return self._default_zeta_for(x_pre, n_post, self._n_treated)
 
     def _solve_weights(self, x: np.ndarray, y: np.ndarray, zeta: float) -> tuple[float, np.ndarray]:
         """Fit a free intercept and simplex-constrained, L2-penalized donor weights.
@@ -284,7 +282,12 @@ class SyntheticDiffInDiff(EconometricEstimator):
         return weights
 
     def _sdid_att(
-        self, x_pre: np.ndarray, x_post: np.ndarray, treated_pre: np.ndarray, treated_post: np.ndarray
+        self,
+        x_pre: np.ndarray,
+        x_post: np.ndarray,
+        treated_pre: np.ndarray,
+        treated_post: np.ndarray,
+        n_treated: int = 1,
     ) -> float:
         """Compute the doubly-weighted difference-in-differences from scratch.
 
@@ -297,13 +300,17 @@ class SyntheticDiffInDiff(EconometricEstimator):
         x_pre, x_post : numpy array
             Donor pre- and post-period outcome matrices.
         treated_pre, treated_post : numpy array
-            Treated pre- and post-period series.
+            Treated pre- and post-period series (the per-geo average when several
+            geos are treated).
+        n_treated : int, default=1
+            Number of treated geos averaged into the treated series (enters the
+            zeta rule).
 
         Returns
         -------
         The SDID average treatment effect on the treated.
         """
-        zeta = self._default_zeta_for(x_pre, treated_post.shape[0])
+        zeta = self._default_zeta_for(x_pre, treated_post.shape[0], n_treated)
         _, unit_w = self._solve_weights(x_pre, treated_pre, zeta)
         time_w = self._solve_time_weights(x_pre, x_post)
         treated_did = float(np.mean(treated_post) - time_w @ treated_pre)
@@ -311,7 +318,7 @@ class SyntheticDiffInDiff(EconometricEstimator):
         return treated_did - control_did
 
     @staticmethod
-    def _default_zeta_for(x_pre: np.ndarray, n_post: int) -> float:
+    def _default_zeta_for(x_pre: np.ndarray, n_post: int, n_treated: int = 1) -> float:
         """Compute the Arkhangelsky et al. zeta rule for an arbitrary donor pool.
 
         Parameters
@@ -320,6 +327,8 @@ class SyntheticDiffInDiff(EconometricEstimator):
             Donor pre-period outcome matrix.
         n_post : int
             Number of post-periods.
+        n_treated : int, default=1
+            Number of treated geos.
 
         Returns
         -------
@@ -330,17 +339,21 @@ class SyntheticDiffInDiff(EconometricEstimator):
         sigma = float(np.std(np.diff(x_pre, axis=0)))
         if sigma == 0.0:
             sigma = 1.0
-        return float(max(n_post, 1) ** 0.25) * sigma
+        return float((max(n_treated, 1) * max(n_post, 1)) ** 0.25) * sigma
 
     def _placebo_inference(self, x_pre: np.ndarray, x_post: np.ndarray, t1: int) -> dict[str, Any]:
         """Placebo variance of the SDID ATT (Arkhangelsky et al. 2021, section 5).
 
         With a single (aggregated) treated unit the leave-one-out jackknife is
-        undefined, so we use the placebo estimator: each donor is treated as a
-        pseudo-treated unit against the remaining donors, and the variance of the
-        resulting placebo ATTs estimates the sampling variance of the real ATT.
-        Every placebo refits its own unit and time weights, so the inference is
-        time-weighted exactly as the point estimate is.
+        undefined, so we use the placebo estimator: each placebo assigns
+        treatment to as many donors as there are treated geos, compares their
+        average against the remaining donors, and the variance of the resulting
+        placebo ATTs estimates the sampling variance of the real ATT. With one
+        treated geo every donor is a placebo in turn; otherwise up to 200 donor
+        subsets are used. Placebo ATTs are per-geo and are scaled by the treated
+        count to match the summed treated series. Every placebo refits its own
+        unit and time weights, so the inference is time-weighted exactly as the
+        point estimate is.
 
         Parameters
         ----------
@@ -356,12 +369,16 @@ class SyntheticDiffInDiff(EconometricEstimator):
         """
         att = float(self.att) if self.att is not None else 0.0
         n_donors = x_pre.shape[1]
+        n_treated = self._n_treated
         placebos: list[float] = []
-        for j in range(n_donors):
-            mask = np.arange(n_donors) != j
-            if not mask.any():
-                continue
-            placebos.append(self._sdid_att(x_pre[:, mask], x_post[:, mask], x_pre[:, j], x_post[:, j]))
+        if n_donors > n_treated:
+            for pseudo in self._placebo_sets(list(range(n_donors)), n_treated, None, 0):
+                mask = np.ones(n_donors, dtype=bool)
+                mask[list(pseudo)] = False
+                treated_pre = x_pre[:, ~mask].mean(axis=1)
+                treated_post = x_post[:, ~mask].mean(axis=1)
+                placebo_att = self._sdid_att(x_pre[:, mask], x_post[:, mask], treated_pre, treated_post, n_treated)
+                placebos.append(placebo_att * n_treated)
         z = float(norm.ppf(1 - self.alpha / 2))
         placebo_arr = np.asarray(placebos, dtype=float)
         if placebo_arr.shape[0] >= 2:
@@ -402,6 +419,7 @@ class SyntheticDiffInDiff(EconometricEstimator):
         -------
         The counterfactual for each ``x_eval`` row.
         """
-        zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_eval.shape[0])
-        intercept, weights = self._solve_weights(x_train, y_train, zeta)
-        return x_eval @ weights + intercept
+        n_treated = float(self._n_treated)
+        zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_eval.shape[0], self._n_treated)
+        intercept, weights = self._solve_weights(x_train, np.asarray(y_train, dtype=float) / n_treated, zeta)
+        return (x_eval @ weights + intercept) * n_treated
