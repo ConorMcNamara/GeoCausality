@@ -5,9 +5,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import pytest
 
 from GeoCausality import geox
+from GeoCausality._plotting import DARK_THEME
 
 LIFT_TYPES = ("incremental", "absolute", "relative", "cost-per", "revenue", "roas")
 
@@ -111,6 +113,16 @@ class TestGeoX:
         geo_x = _fit(data_df)
         monkeypatch.setattr(go.Figure, "show", lambda self: None)
         geo_x.plot()
+
+    @staticmethod
+    def test_plot_dark_mode(data_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured = {}
+        geo_x = _fit(data_df)
+        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
+        geo_x.plot(dark_mode=True)
+        fig = captured["fig"]
+        assert fig.layout.template.layout.paper_bgcolor == pio.templates["plotly_dark"].layout.paper_bgcolor
+        assert all(shape.line.color == DARK_THEME.reference for shape in fig.layout.shapes)
 
 
 def _make_negative_slope_data() -> pd.DataFrame:

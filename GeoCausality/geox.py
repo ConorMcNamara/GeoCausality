@@ -16,6 +16,7 @@ from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import MLEstimator
+from GeoCausality._plotting import apply_theme, get_theme
 
 
 class GeoX(MLEstimator):
@@ -647,8 +648,13 @@ class GeoX(MLEstimator):
             return float(np.sum(incr))
         raise ValueError(f"Unknown statistic: {statistic!r}")
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Returns
         -------
@@ -677,6 +683,7 @@ class GeoX(MLEstimator):
         marketing_start = [date for date in self.dates if _as_date(date) >= post_period_date]
         control_data = nw.concat([self.pre_control, self.post_control])
         counterfactual = self.model.predict(sm.add_constant(control_data[self.y_variable].to_numpy()))
+        theme = get_theme(dark_mode)
         total_fig = make_subplots(
             rows=3,
             cols=1,
@@ -693,14 +700,14 @@ class GeoX(MLEstimator):
                     y=np.concatenate(
                         [self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()]
                     ),
-                    marker={"color": "blue"},
+                    marker={"color": theme.actual},
                     mode="lines",
                     name="Actual",
                 ),
                 go.Scatter(
                     x=self.dates,
                     y=counterfactual,
-                    marker={"color": "red"},
+                    marker={"color": theme.counterfactual},
                     mode="lines",
                     name="Counterfactual",
                 ),
@@ -709,7 +716,7 @@ class GeoX(MLEstimator):
                     x=marketing_start,
                     y=self.results["counterfactual_ci_upper"],
                     mode="lines",
-                    marker=dict(color="red"),
+                    marker=dict(color=theme.counterfactual),
                     line=dict(width=0),
                     showlegend=False,
                 ),
@@ -717,10 +724,10 @@ class GeoX(MLEstimator):
                     name="Counterfactual Lower Bound",
                     x=marketing_start,
                     y=self.results["counterfactual_ci_lower"],
-                    marker=dict(color="red"),
+                    marker=dict(color=theme.counterfactual),
                     line=dict(width=0),
                     mode="lines",
-                    fillcolor="rgba(68, 68, 68, 0.3)",
+                    fillcolor=theme.band(0.3),
                     fill="tonexty",
                     showlegend=False,
                 ),
@@ -735,7 +742,7 @@ class GeoX(MLEstimator):
                 go.Scatter(
                     x=self.dates,
                     y=residuals,
-                    marker={"color": "purple"},
+                    marker={"color": theme.difference},
                     mode="lines",
                     name="Residuals",
                 ),
@@ -744,7 +751,7 @@ class GeoX(MLEstimator):
                     x=marketing_start,
                     y=self.results["incrementality_ci_upper"],
                     mode="lines",
-                    marker=dict(color="purple"),
+                    marker=dict(color=theme.difference),
                     line=dict(width=0),
                     showlegend=False,
                 ),
@@ -752,10 +759,10 @@ class GeoX(MLEstimator):
                     name="Pointwise Difference Lower Bound",
                     x=marketing_start,
                     y=self.results["incrementality_ci_lower"],
-                    marker=dict(color="purple"),
+                    marker=dict(color=theme.difference),
                     line=dict(width=0),
                     mode="lines",
-                    fillcolor="rgba(68, 68, 68, 0.3)",
+                    fillcolor=theme.band(0.3),
                     fill="tonexty",
                     showlegend=False,
                 ),
@@ -767,7 +774,7 @@ class GeoX(MLEstimator):
                 go.Scatter(
                     x=marketing_start,
                     y=cum_resids,
-                    marker={"color": "orange"},
+                    marker={"color": theme.cumulative},
                     mode="lines",
                     name="Cumulative Incrementality",
                 ),
@@ -776,7 +783,7 @@ class GeoX(MLEstimator):
                     x=marketing_start,
                     y=self.results["cumulative_incrementality_ci_upper"],
                     mode="lines",
-                    marker=dict(color="orange"),
+                    marker=dict(color=theme.cumulative),
                     line=dict(width=0),
                     showlegend=False,
                 ),
@@ -784,10 +791,10 @@ class GeoX(MLEstimator):
                     name="Cumulative Difference Lower Bound",
                     x=marketing_start,
                     y=self.results["cumulative_incrementality_ci_lower"],
-                    marker=dict(color="orange"),
+                    marker=dict(color=theme.cumulative),
                     line=dict(width=0),
                     mode="lines",
-                    fillcolor="rgba(68, 68, 68, 0.3)",
+                    fillcolor=theme.band(0.3),
                     fill="tonexty",
                     showlegend=False,
                 ),
@@ -801,8 +808,9 @@ class GeoX(MLEstimator):
                 x=self.post_period,
                 line_width=1,
                 line_dash="dash",
-                line_color="black",
+                line_color=theme.reference,
                 row=i + 1,
                 col=1,
             )
+        apply_theme(total_fig, theme)
         total_fig.show()

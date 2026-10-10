@@ -33,6 +33,7 @@ from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator
+from GeoCausality._plotting import apply_theme, get_theme
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 
 # Conventional target power for the minimum-detectable-effect search.
@@ -385,8 +386,13 @@ class PowerAnalysis:
             }
             print(tabulate(mde_table, headers="keys", tablefmt="grid"))
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot power as a function of effect size, one line per duration.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Raises
         ------
@@ -419,10 +425,16 @@ class PowerAnalysis:
             yaxis_title="Power",
             yaxis_range=[0, 1],
         )
+        apply_theme(fig, get_theme(dark_mode))
         fig.show()
 
-    def plot_mde_sensitivity(self) -> None:
+    def plot_mde_sensitivity(self, dark_mode: bool = False) -> None:
         """Plot the Minimum Detectable Effect as a function of experiment duration.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Raises
         ------
@@ -446,10 +458,16 @@ class PowerAnalysis:
             xaxis_title="Experiment duration (periods)",
             yaxis_title=f"Minimum Detectable Effect ({unit})",
         )
+        apply_theme(fig, get_theme(dark_mode))
         fig.show()
 
-    def plot_power_heatmap(self) -> None:
+    def plot_power_heatmap(self, dark_mode: bool = False) -> None:
         """Plot a heatmap of power over the (effect size x duration) grid.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Raises
         ------
@@ -481,4 +499,5 @@ class PowerAnalysis:
             xaxis_title=f"Effect size ({unit})",
             yaxis_title="Experiment duration (periods)",
         )
+        apply_theme(fig, get_theme(dark_mode))
         fig.show()
