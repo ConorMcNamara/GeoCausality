@@ -306,6 +306,14 @@ class NonlinearSyntheticControl(EconometricEstimator):
             cross-validated penalty search off those degenerate cells.
         """
         n_donors = x.shape[1]
+        # Solve at unit magnitude: SLSQP's tolerances are absolute, and on raw
+        # outcomes in the thousands the objective is ~1e8 and it fails
+        # ("Inequality constraints incompatible") for most a > 0. Dividing x and
+        # y by s scales the fit by 1 / s^2, so a / s and b / s^2 keep the argmin.
+        scale = float(np.max(np.abs(x))) if x.size else 1.0
+        if not np.isfinite(scale) or scale == 0.0:
+            scale = 1.0
+        x, y, a, b = x / scale, y / scale, a / scale, b / scale**2
         distance = np.linalg.norm(y.reshape(-1, 1) - x, axis=0)
         # Tiny ridge floor keeps the QP strictly convex when b == 0 and donors
         # outnumber pre-period points.

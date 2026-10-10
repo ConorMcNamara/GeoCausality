@@ -198,28 +198,10 @@ class SyntheticControl(EconometricEstimator):
         to the per-geo average treated series.
         """
         x, y, n_treated = self._per_geo_problem(x, y)
-        n_r, n_c = x.shape
-        bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
-        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
-        x0 = np.full(n_c, 1 / n_c)
-        if n_r < n_c:
-            res = minimize(
-                fun=lambda w: self.loss_root(w, x, y),
-                x0=x0,
-                bounds=bounds,
-                constraints=constraints,
-                method="SLSQP",
-            )
-        else:
-            res = minimize(
-                fun=lambda w: self.loss_square(w, x, y),
-                x0=x0,
-                bounds=bounds,
-                constraints=constraints,
-                method="SLSQP",
-            )
-        self._warn_unconverged(res, "SyntheticControl")
-        return res["x"] * n_treated
+        # The squared and root losses share their argmin, so solve the
+        # (well-conditioned, analytic-gradient) squared problem.
+        weights = self._solve_simplex_qp(x.T @ x, x.T @ y, float(y @ y), "SyntheticControl")
+        return weights * n_treated
 
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
         """Refit the simplex synthetic-control weights on a subset and predict.
@@ -392,6 +374,34 @@ class SyntheticControlV(EconometricEstimator):
             q=self.conformal_q,
         )
         return self
+
+    def _refit_counterfactual(self, y_full: np.ndarray, train: np.ndarray) -> np.ndarray | None:
+        """Refit simplex donor weights on a subset of periods and predict every period.
+
+        The V matrix weights pre-period predictors, so it has no entries for the
+        post-period rows that the conformal null refits fit on. These refits
+        (and the cross-fitted band) therefore use the unweighted simplex
+        synthetic control, which also avoids re-running the Nelder-Mead V search
+        for every candidate effect.
+
+        Parameters
+        ----------
+        y_full : numpy array, shape (T,)
+            The treated series over every period.
+        train : numpy array of bool, shape (T,)
+            The periods to fit on.
+
+        Returns
+        -------
+        The counterfactual over every period, or None if the donor matrices are
+        not cached.
+        """
+        if self._jk_x_pre is None or self._jk_x_post is None:
+            return None
+        x_full = np.vstack([self._jk_x_pre, self._jk_x_post]).astype(float)
+        if x_full.shape[0] != y_full.shape[0]:
+            return None
+        return x_full @ self._simplex_fit(x_full[train], y_full[train], "SyntheticControlV")
 
     def _create_model(self, v: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """Create our synthetic control using v, x and y.

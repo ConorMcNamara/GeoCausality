@@ -278,6 +278,30 @@ class GeneralizedSyntheticControl(EconometricEstimator):
             return None
         return np.array(loo_resid), np.array(loo_post)
 
+    def _refit_counterfactual(self, y_full: np.ndarray, train: np.ndarray) -> np.ndarray | None:
+        """Refit the loadings on a subset of periods and project through every period.
+
+        The factors come from the controls and are unchanged by the treated
+        series, so the conformal null refits and the cross-fitted band only
+        re-solve the loading regression on the cached design.
+
+        Parameters
+        ----------
+        y_full : numpy array, shape (T,)
+            The treated series over every period.
+        train : numpy array of bool, shape (T,)
+            The periods to fit on.
+
+        Returns
+        -------
+        The counterfactual over every period, or None if the model is not fit
+        or the subset is too short to identify the loadings.
+        """
+        design = self._jk_design
+        if design is None or design.shape[0] != y_full.shape[0] or train.sum() <= design.shape[1]:
+            return None
+        return design @ self._ols(design[train], y_full[train])
+
     def _bootstrap_refit(self, treated_pre: np.ndarray) -> np.ndarray | None:
         """Refit the counterfactual over the post-period from a resampled pre-period.
 

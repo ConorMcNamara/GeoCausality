@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Conformal test refits under the null** — the Chernozhukov, Wüthrich & Zhu
+  moving-block test now refits the counterfactual on all pre- and post-period
+  dates, with the post-period outcome reduced by each candidate effect, before
+  permuting residuals. The test was fitted on the pre-period only and shifted
+  the post-period residuals, so in-sample pre residuals were systematically
+  smaller than post residuals. In simulation with no true effect and nominal
+  10%, `SyntheticControl` rejected 35% of the time and
+  `ElasticNetSyntheticControl` 48%. They now reject 12.5% and 9.5%, and CI
+  coverage rose from 0.73 to 0.93 and from 0.62 to 0.98. The refit uses a new
+  `_refit_counterfactual` hook:
+  - the donor-weight estimators use it automatically;
+  - `GeneralizedSyntheticControl` refits its loadings;
+  - `DiffinDiff` and `FixedEffects` refit the parallel-trends gap;
+  - `SyntheticControlV` refits unweighted simplex weights, because V only
+    covers pre-period predictors.
+
+  `InteractiveFixedEffects`, `MatrixCompletion` and `CausalImpact` have no hook
+  yet and keep the old approximation. `results["conformal_refit"]` reports
+  which path was used.
+- **Prediction band** — the conformal band is calibrated on cross-fitted,
+  out-of-sample pre-period residuals: blocks are held out and the model is
+  refit without them. In-sample residuals made the band too narrow, worst with
+  many donors: pointwise coverage was 0.44 against a nominal 0.90 for an OLS fit
+  with 20 donors. On a 10-donor factor panel, `SyntheticControl`'s coverage
+  rose from 0.80 to 0.86.
+- **`DiffinDiff` with unequal group sizes** — groups are now averaged rather
+  than summed per date before the 2x2 regression. With sums, a common trend
+  entered each group scaled by its geo count and only cancelled when the groups
+  were the same size. With 3 treated and 10 control geos and a true total
+  effect of 600, the estimate was −7,800 and is now 600.
+- **SLSQP stopping early** — `SyntheticControl`, `PenalizedSyntheticControl`
+  and the shared simplex fit used by `AugmentedSyntheticControl` share a
+  simplex QP solver. It normalises the objective by its starting value and uses
+  an analytic gradient and a tight tolerance. On the rescaled problem the
+  default absolute `ftol` let SLSQP report success near its uniform starting
+  point: objective gaps reached 19% at the default penalty and 974% with no
+  penalty, giving a counterfactual bias of about 1%.
+- **`NonlinearSyntheticControl`** solves its QP at unit magnitude, with the
+  penalties rescaled to keep the same minimiser. On raw outcomes SLSQP failed
+  for almost every positive L1 penalty, so cross-validation could never select
+  Tian's distance-weighted penalty.
+
+### Changed
+
+- **`DiffinDiff` results:**
+  - `results["att"]` is new: the per-geo, per-date effect.
+  - `results["lift"]` is `att` times the number of treated geos.
+  - `results["test"]` and `results["control"]` are now per-geo group levels.
+- **Fewer significant results for flexible estimators.** Ridge, elastic-net,
+  kernel, factor-loading and penalized fits can absorb part of the post-period
+  effect into the null refit, so the valid test is less powerful for them than
+  the old, over-rejecting one. On Prop 99, the ASCM, elastic-net, penalized,
+  GSC, Robust and Kernel estimates still match the published effect but are no
+  longer significant at 10%. Plain synthetic control still is.
+- **Runtime:** conformal inference costs a few dozen extra weight fits per
+  `generate()`, about 1.3–1.4x the previous time for the synthetic-control
+  estimators.
+
 ## [0.18.0] - 2026-10-09
 
 ### Fixed

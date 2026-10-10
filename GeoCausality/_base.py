@@ -798,9 +798,18 @@ class EconometricEstimator(Estimator, ABC):
     #   * The Chernozhukov, Wuthrich & Zhu (2021) moving-block permutation
     #     test, which gives an exact p-value for the sharp null of no effect
     #     and confidence intervals for a constant per-period effect via test
-    #     inversion.
-    #   * Split-conformal prediction bands, calibrated on the pre-period
-    #     residuals, which give a pointwise band around the counterfactual.
+    #     inversion. Exactness needs the pre- and post-period residuals to be
+    #     exchangeable, so under each null ``theta`` the counterfactual is refit
+    #     on all T periods with the post-period outcome set to ``y - theta``
+    #     (``_refit_counterfactual``). Fitting on the pre-period only and
+    #     shifting the post-period residuals makes the in-sample pre residuals
+    #     systematically smaller than the out-of-sample post residuals, and the
+    #     test over-rejects badly as donors are added.
+    #   * Conformal prediction bands, calibrated on out-of-sample (cross-fitted)
+    #     pre-period residuals, which give a pointwise band around the
+    #     counterfactual.
+    # Estimators that cannot refit fall back to the fitted residuals, which is
+    # only approximate.
     # ------------------------------------------------------------------
     @staticmethod
     def _conformal_residuals(
@@ -907,7 +916,10 @@ class EconometricEstimator(Estimator, ABC):
         """
         if p_func(x_out) >= alpha:
             return x_out
+        tol = 1e-6 * abs(x_out - x_in)
         for _ in range(iters):
+            if abs(x_out - x_in) <= tol:
+                break
             mid = 0.5 * (x_in + x_out)
             if p_func(mid) >= alpha:
                 x_in = mid
@@ -921,22 +933,29 @@ class EconometricEstimator(Estimator, ABC):
         post_resid: np.ndarray,
         q: float = 1.0,
         alpha: float | None = None,
+        resid_fn: Callable[[float], tuple[np.ndarray, np.ndarray]] | None = None,
     ) -> tuple[float, float]:
         """Confidence interval for a constant per-period effect by test inversion.
 
         Inverts the moving-block permutation test: the interval is the set of
         constant per-period effects ``theta`` for which the sharp null is not
-        rejected at level ``alpha`` after subtracting ``theta`` from the
-        post-period residuals.
+        rejected at level ``alpha``. Under each ``theta``, ``resid_fn`` returns
+        the residuals of the counterfactual refit on all periods with the
+        post-period outcome reduced by ``theta`` (Chernozhukov, Wuthrich & Zhu,
+        2021). Without it, ``theta`` is subtracted from the fixed post-period
+        residuals, which is only an approximation.
 
         Parameters
         ----------
         pre_resid, post_resid : numpy array
-            Pre- and post-period residuals.
+            Pre- and post-period residuals of the original fit; they set the
+            search's starting point and scale.
         q : float, default=1.0
             The exponent of the moving-block test statistic.
         alpha : float, optional
             The significance level. Defaults to ``self.alpha``.
+        resid_fn : callable, optional
+            Maps ``theta`` to the null-imposed ``(pre, post)`` residuals.
 
         Returns
         -------
@@ -948,9 +967,13 @@ class EconometricEstimator(Estimator, ABC):
         spread = float(np.std(np.concatenate([pre_resid, post_resid])))
         if spread == 0.0:
             spread = abs(center) if center != 0.0 else 1.0
+        if resid_fn is None:
+
+            def resid_fn(theta: float) -> tuple[np.ndarray, np.ndarray]:
+                return pre_resid, post_resid - theta
 
         def p_func(theta: float) -> float:
-            return self._conformal_p_value(pre_resid, post_resid - theta, q)
+            return self._conformal_p_value(*resid_fn(theta), q)
 
         # Bisection needs a point inside the acceptance region. The mean
         # post-period residual usually is, but not always (e.g. when the
@@ -958,7 +981,7 @@ class EconometricEstimator(Estimator, ABC):
         # back to a grid search for the accepted points nearest each end.
         lo_in = hi_in = center
         if p_func(center) < alpha:
-            grid = center + spread * np.linspace(-10.0, 10.0, 401)
+            grid = center + spread * np.linspace(-10.0, 10.0, 81)
             accepted = [theta for theta in grid if p_func(theta) >= alpha]
             if not accepted:
                 warnings.warn(
@@ -1021,16 +1044,18 @@ class EconometricEstimator(Estimator, ABC):
         pre_resid: np.ndarray,
         alpha: float | None = None,
     ) -> float:
-        """Half-width of a split-conformal prediction band around the counterfactual.
+        """Half-width of a conformal prediction band around the counterfactual.
 
-        Uses the absolute pre-period residuals as the calibration set and
-        returns the conformalized ``(1 - alpha)`` quantile, so a pointwise
-        ``(1 - alpha)`` prediction interval is ``counterfactual +/- band``.
+        Returns the conformalized ``(1 - alpha)`` quantile of the absolute
+        calibration residuals, so a pointwise ``(1 - alpha)`` prediction interval
+        is ``counterfactual +/- band``. The residuals must be out-of-sample
+        (``_cross_fit_residuals``): in-sample residuals of the fitted model are
+        too small, and the band under-covers.
 
         Parameters
         ----------
         pre_resid : numpy array
-            Pre-period residuals used for calibration.
+            Out-of-sample pre-period residuals used for calibration.
         alpha : float, optional
             The significance level. Defaults to ``self.alpha``.
 
@@ -1085,7 +1110,11 @@ class EconometricEstimator(Estimator, ABC):
         """
         pre_resid, post_resid = self._conformal_residuals(actual_pre, prediction_pre, actual_post, prediction_post)
         t1 = post_resid.shape[0]
-        p_value = self._conformal_p_value(pre_resid, post_resid, q)
+        resid_fn = self._null_residual_fn(actual_pre, actual_post)
+        if resid_fn is None:
+            p_value = self._conformal_p_value(pre_resid, post_resid, q)
+        else:
+            p_value = self._conformal_p_value(*resid_fn(0.0), q)
 
         boot = None
         if self.inference_method == "bootstrap":
@@ -1116,8 +1145,9 @@ class EconometricEstimator(Estimator, ABC):
                 )
         else:
             method = "conformal"
-            lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q)
-            band = self._split_conformal_band(pre_resid)
+            lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q, resid_fn=resid_fn)
+            calibration = self._cross_fit_residuals(actual_pre, t1)
+            band = self._split_conformal_band(pre_resid if calibration is None else calibration)
 
         return {
             "p_value": p_value,
@@ -1127,7 +1157,118 @@ class EconometricEstimator(Estimator, ABC):
             "incrementality_ci_upper": lift_upper * t1,
             "conformal_band": band,
             "method": method,
+            "conformal_refit": resid_fn is not None,
         }
+
+    def _refit_counterfactual(self, y_full: np.ndarray, train: np.ndarray) -> np.ndarray | None:
+        """Refit the counterfactual on a subset of periods and predict every period.
+
+        The hook behind the null-imposed conformal refits and the cross-fitted
+        band. The default refits the donor weights through
+        ``_fit_predict_weights`` on the cached pre- and post-period donor
+        matrices (``_jk_x_pre`` / ``_jk_x_post``); an estimator with a different
+        design overrides it. Returns ``None`` when refitting is unsupported.
+
+        Parameters
+        ----------
+        y_full : numpy array, shape (T,)
+            The treated series over every period (pre then post). Post-period
+            values may be null-adjusted, or arbitrary when ``train`` excludes them.
+        train : numpy array of bool, shape (T,)
+            The periods to fit on.
+
+        Returns
+        -------
+        The counterfactual over every period, shape (T,), or None.
+        """
+        if self._jk_x_pre is None or self._jk_x_post is None:
+            return None
+        x_full = np.vstack([np.asarray(self._jk_x_pre, dtype=float), np.asarray(self._jk_x_post, dtype=float)])
+        if x_full.shape[0] != y_full.shape[0]:
+            return None
+        pred = self._fit_predict_weights(x_full[train], y_full[train], x_full)
+        return None if pred is None else np.asarray(pred, dtype=float).ravel()
+
+    def _null_residual_fn(
+        self, actual_pre: Any, actual_post: Any
+    ) -> Callable[[float], tuple[np.ndarray, np.ndarray]] | None:
+        """Build the null-imposed residual function for the conformal test.
+
+        Under the null of a constant per-period effect ``theta``, the post-period
+        outcome without treatment is ``y - theta``, so the counterfactual is refit
+        on all T periods of that series and the residuals are split back into
+        pre- and post-period parts (Chernozhukov, Wuthrich & Zhu, 2021, Algorithm
+        1). Results are cached per ``theta``.
+
+        Parameters
+        ----------
+        actual_pre, actual_post : array-like
+            Observed pre- and post-period treated series.
+
+        Returns
+        -------
+        A function mapping ``theta`` to ``(pre_residuals, post_residuals)``, or
+        None when the estimator cannot refit.
+        """
+        y_pre = np.asarray(self._counterfactual_series(actual_pre), dtype=float).ravel()
+        y_post = np.asarray(self._counterfactual_series(actual_post), dtype=float).ravel()
+        n_pre = y_pre.shape[0]
+        train = np.ones(n_pre + y_post.shape[0], dtype=bool)
+        cache: dict[float, tuple[np.ndarray, np.ndarray]] = {}
+
+        def resid_fn(theta: float) -> tuple[np.ndarray, np.ndarray]:
+            if theta not in cache:
+                y_full = np.concatenate([y_pre, y_post - theta])
+                cf = self._refit_counterfactual(y_full, train)
+                if cf is None:
+                    raise RuntimeError("counterfactual refit failed")
+                resid = y_full - cf
+                cache[theta] = (resid[:n_pre], resid[n_pre:])
+            return cache[theta]
+
+        try:
+            resid_fn(0.0)
+        except (RuntimeError, ValueError, np.linalg.LinAlgError):
+            return None
+        return resid_fn
+
+    def _cross_fit_residuals(self, actual_pre: Any, t1: int, n_folds: int = 10) -> np.ndarray | None:
+        """Out-of-sample pre-period residuals from blocked cross-fitting.
+
+        Splits the pre-period into up to ``n_folds`` contiguous blocks, refits
+        the counterfactual on the other pre-period blocks and predicts the
+        held-out one, so every residual comes from a model that did not see it.
+        These calibrate the conformal prediction band.
+
+        Parameters
+        ----------
+        actual_pre : array-like
+            Observed pre-period treated series.
+        t1 : int
+            The number of post-period periods.
+        n_folds : int, default=10
+            The maximum number of blocks.
+
+        Returns
+        -------
+        The held-out residuals, shape (n_pre,), or None when the estimator cannot
+        refit.
+        """
+        y_pre = np.asarray(self._counterfactual_series(actual_pre), dtype=float).ravel()
+        n_pre = y_pre.shape[0]
+        if n_pre < 2:
+            return None
+        y_full = np.concatenate([y_pre, np.zeros(t1)])
+        resid = np.empty(n_pre)
+        for idx in np.array_split(np.arange(n_pre), min(n_folds, n_pre)):
+            train = np.zeros(n_pre + t1, dtype=bool)
+            train[:n_pre] = True
+            train[idx] = False
+            cf = self._refit_counterfactual(y_full, train)
+            if cf is None:
+                return None
+            resid[idx] = y_pre[idx] - cf[idx]
+        return resid
 
     # ------------------------------------------------------------------
     # Jackknife+ fallback
@@ -1541,19 +1682,64 @@ class EconometricEstimator(Estimator, ABC):
         The donor weights, summing to the number of treated geos.
         """
         xs, ys, n_treated = self._per_geo_problem(x, y)
-        n_c = xs.shape[1]
-        gram = xs.T @ xs
-        cross = xs.T @ ys
+        weights = self._solve_simplex_qp(xs.T @ xs, xs.T @ ys, float(ys @ ys), name)
+        return weights * n_treated
+
+    def _solve_simplex_qp(
+        self,
+        gram: np.ndarray,
+        cross: np.ndarray,
+        const: float,
+        name: str,
+        linear: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Minimise a convex quadratic over the probability simplex.
+
+        Solves ``min_w w' G w - 2 c' w + const + l' w`` subject to ``w >= 0,
+        sum(w) = 1``. ``const`` makes the objective a (non-negative) loss so it
+        can be divided by its value at the uniform start: SLSQP's ``ftol`` is an
+        absolute tolerance on the objective, so on a rescaled problem whose loss
+        is ~1e-5 the default ``1e-6`` stops after a step or two, still near the
+        start, while reporting success. Normalising to 1 at the start and using a
+        tight tolerance with the analytic gradient makes the stop relative.
+
+        Parameters
+        ----------
+        gram : numpy array, shape (n, n)
+            The quadratic term ``G`` (e.g. ``X'X``).
+        cross : numpy array, shape (n,)
+            The linear term ``c`` (e.g. ``X'y``).
+        const : float
+            The constant term (e.g. ``y'y``).
+        name : str
+            The estimator name for the convergence warning.
+        linear : numpy array, shape (n,), optional
+            An additional linear penalty ``l`` (e.g. a pairwise-discrepancy
+            penalty).
+
+        Returns
+        -------
+        The simplex weights.
+        """
+        n_c = gram.shape[0]
+        lin = -2.0 * cross if linear is None else linear - 2.0 * cross
+        x0 = np.full(n_c, 1.0 / n_c)
+        start = float(x0 @ gram @ x0 + lin @ x0 + const)
+        scale = start if np.isfinite(start) and start > 0.0 else 1.0
         res = minimize(
-            fun=lambda w: float(w @ gram @ w - 2.0 * cross @ w),
-            x0=np.full(n_c, 1.0 / n_c),
-            jac=lambda w: 2.0 * (gram @ w - cross),
+            fun=lambda w: float(w @ gram @ w + lin @ w + const) / scale,
+            x0=x0,
+            jac=lambda w: (2.0 * gram @ w + lin) / scale,
             bounds=Bounds(lb=np.zeros(n_c), ub=np.ones(n_c)),
             constraints=LinearConstraint(A=np.ones(n_c), lb=1.0, ub=1.0),
             method="SLSQP",
+            options={"ftol": 1e-12, "maxiter": 1000},
         )
         self._warn_unconverged(res, name)
-        return res["x"] * n_treated
+        # SLSQP can step marginally outside the bounds; project back.
+        weights = np.clip(res["x"], 0.0, None)
+        total = weights.sum()
+        return weights / total if total > 0 else x0
 
     @staticmethod
     def _warn_unconverged(res: Any, name: str) -> None:
