@@ -211,6 +211,13 @@ class TestPowerSimulation:
         assert result["power"] >= 0.5
 
     @staticmethod
+    def test_large_effect_two_geos_not_capped(data_df: pd.DataFrame) -> None:
+        """With random phases, ~half of two-geo panels were collinear with TimeEffects."""
+        model = _fit(data_df)
+        result = model.power_simulation(mde=50.0, n_geos=2, n_simulations=20, seed=0)
+        assert result["power"] > 0.8
+
+    @staticmethod
     def test_stored_in_results(data_df: pd.DataFrame) -> None:
         model = _fit(data_df)
         model.power_simulation(mde=5.0, n_simulations=10, seed=0)

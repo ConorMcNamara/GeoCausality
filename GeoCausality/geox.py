@@ -1,7 +1,6 @@
 """GeoX (time-based regression) method for geo-experiment causal inference."""
 
 import warnings
-from datetime import date as date_cls
 from itertools import combinations
 from math import comb
 from typing import Any
@@ -451,8 +450,8 @@ class GeoX(MLEstimator):
             splits = list(seen)
 
         key = date_key(self.data, self.date_variable)
-        in_pre = key <= period_key(self.pre_period)
-        in_post = key >= period_key(self.post_period)
+        in_pre = key <= period_key(self.pre_period, self.data, self.date_variable)
+        in_post = key >= period_key(self.post_period, self.data, self.date_variable)
         control_data = self.data.filter(nw.col(self.geo_variable).is_in(control_geos))
 
         placebo_stats: list[float] = []
@@ -713,16 +712,10 @@ class GeoX(MLEstimator):
         if self.results is None:
             raise ValueError("results must not be None")
         self.dates = sorted(self.data[self.date_variable].unique().to_list())
-        # Compare on ``datetime.date`` so the filter is robust to the date column's
-        # backend type (str, ``datetime.date``, ``datetime``, or pandas ``Timestamp``).
-        post_period_date = date_cls.fromisoformat(self.post_period)
-
-        def _as_date(value: Any) -> Any:
-            if isinstance(value, str):
-                return date_cls.fromisoformat(value[:10])
-            return value.date() if hasattr(value, "date") else value
-
-        marketing_start = [date for date in self.dates if _as_date(date) >= post_period_date]
+        # Compare through ``period_key`` so the filter is robust to the date column's
+        # backend type (str, ``date``, ``datetime``, pandas ``Timestamp`` or numeric).
+        post_key = period_key(self.post_period, self.data, self.date_variable)
+        marketing_start = [d for d in self.dates if period_key(d, self.data, self.date_variable) >= post_key]
         control_data = nw.concat([self.pre_control, self.post_control])
         counterfactual = self.model.predict(sm.add_constant(control_data[self.y_variable].to_numpy()))
         theme = get_theme(dark_mode)

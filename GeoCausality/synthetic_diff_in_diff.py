@@ -402,24 +402,3 @@ class SyntheticDiffInDiff(EconometricEstimator):
             "conformal_band": band,
             "method": "placebo",
         }
-
-    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
-        """Refit the SDID unit weights on a subset and predict (with the fixed effect).
-
-        Parameters
-        ----------
-        x_train : numpy array, shape (n_train, n_donors)
-            Pre-period donor rows used to refit.
-        y_train : numpy array, shape (n_train,)
-            Treated pre-period series on the same rows.
-        x_eval : numpy array, shape (n_eval, n_donors)
-            Donor rows to predict.
-
-        Returns
-        -------
-        The counterfactual for each ``x_eval`` row.
-        """
-        n_treated = float(self._n_treated)
-        zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_eval.shape[0], self._n_treated)
-        intercept, weights = self._solve_weights(x_train, np.asarray(y_train, dtype=float) / n_treated, zeta)
-        return (x_eval @ weights + intercept) * n_treated

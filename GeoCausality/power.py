@@ -121,7 +121,7 @@ class PowerAnalysis:
         self.seed = seed
 
         self.test_geos, self.control_geos = self._resolve_geos(test_geos, control_geos, treatment_variable)
-        self.history: list[str] = self._clean_history()
+        self.history: list[Any] = self._clean_history()
         self.power_curve: list[dict[str, Any]] | None = None
         self.mde_table: list[dict[str, Any]] | None = None
         self.results: dict[str, Any] | None = None
@@ -158,13 +158,14 @@ class PowerAnalysis:
             raise ValueError("No control geos were identified")
         return list(test_geos), list(control_geos)
 
-    def _clean_history(self) -> list[str]:
-        """Return the sorted ISO-string dates on or before ``pre_period``.
+    def _clean_history(self) -> list[Any]:
+        """Return the sorted date keys on or before ``pre_period``.
 
         Returns
         -------
-        The clean-history dates as lexicographically sorted strings, matching the
-        backend-agnostic comparison the estimators use internally.
+        The clean-history dates as sorted ``YYYY-MM-DD`` strings (numbers for a
+        numeric date column), matching the backend-agnostic comparison the
+        estimators use internally.
         """
         dates = (
             self.data.select(date_key(self.data, self.date_variable).alias("d"))
@@ -172,7 +173,7 @@ class PowerAnalysis:
             .sort("d")["d"]
             .to_list()
         )
-        return [d for d in dates if d <= period_key(self.pre_period)]
+        return [d for d in dates if d <= period_key(self.pre_period, self.data, self.date_variable)]
 
     def _placebo_starts(self, duration: int, n_sims: int) -> np.ndarray:
         """Sample start indices for placebo post-windows of length ``duration``.
@@ -261,10 +262,14 @@ class PowerAnalysis:
             model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")
-        significant = float(model.results["p_value"]) <= self.alpha
+        # GeoX reports per-day arrays; its final cumulative value is the test-level
+        # result. The other estimators report scalars.
+        p_value = float(np.ravel(model.results["p_value"])[-1])
+        incrementality = model.results.get("cumulative_incrementality", model.results["incrementality"])
+        significant = p_value <= self.alpha
         if effect == 0:
             return significant
-        return significant and float(np.sign(model.results["incrementality"])) == float(np.sign(effect))
+        return significant and float(np.sign(np.ravel(incrementality)[-1])) == float(np.sign(effect))
 
     def simulate(
         self,

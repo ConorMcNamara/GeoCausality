@@ -154,7 +154,8 @@ class MarketSelection:
         per_size = {}
         for n in n_test_geos:
             k = n - len(include_set)
-            if k < 0 or k > len(free):
+            # Every geo outside the test set is a control, so at least one must remain.
+            if k < 0 or k > len(free) or n >= len(self.all_geos):
                 continue
             per_size[n] = comb(len(free), k)
         if not per_size:
@@ -224,7 +225,8 @@ class MarketSelection:
         array, sorted by date.
         """
         date_str = date_key(self.data, self.date_variable)
-        pre = self.data.filter(date_str <= period_key(self.pre_period)).sort(self.date_variable)
+        pre_key = period_key(self.pre_period, self.data, self.date_variable)
+        pre = self.data.filter(date_str <= pre_key).sort(self.date_variable)
         result: dict[str, np.ndarray] = {}
         for geo in self.all_geos:
             vals = pre.filter(nw.col(self.geo_variable) == geo)[self.y_variable].to_numpy().astype(float)

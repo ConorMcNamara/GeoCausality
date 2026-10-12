@@ -17,6 +17,7 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 import pytest
@@ -222,3 +223,11 @@ class TestPlotPowerHeatmap:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_geox_estimator_supported(history: pl.DataFrame) -> None:
+    """GeoX reports per-day arrays; the power loop must read its final cumulative value."""
+    from GeoCausality.geox import GeoX
+
+    pa = _power(pd.DataFrame(history.to_dicts()), estimator=GeoX).simulate([0.1], [5], n_sims=2)
+    assert 0.0 <= pa.power_curve[0]["power"] <= 1.0

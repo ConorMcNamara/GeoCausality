@@ -113,3 +113,14 @@ class TestDiffinDiff:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_test_and_control_are_group_post_outcomes(effect_panel) -> None:
+    """``test``/``control`` are each group's post-period per-date outcome, not raw coefficients."""
+    model = _fit(effect_panel)
+    data = model.groupby_data.to_pandas()
+    post = data[data["treatment_period"] == 1]
+    treated = post[post[model.treatment_variable] == 1][model.y_variable].mean()
+    control = post[post[model.treatment_variable] == 0][model.y_variable].mean()
+    assert model.results["test"] == pytest.approx(treated)
+    assert model.results["control"] == pytest.approx(control)

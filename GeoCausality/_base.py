@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import date as date_cls
 from datetime import datetime as datetime_cls
 from itertools import combinations
-from math import ceil, comb
+from math import comb
 from typing import Any, Self
 
 import narwhals as nw
@@ -31,7 +31,9 @@ def date_key(frame: nw.DataFrame, date_variable: str) -> nw.Expr:
     against ``pre_period`` / ``post_period`` by calendar date. A plain string
     cast would render a datetime as ``"2021-01-01 00:00:00"``, which sorts
     after ``"2021-01-01"`` and silently drops the boundary date from ``<=``
-    filters. Other columns (ISO strings, integer years) are cast to string.
+    filters. Numeric columns (integer years, week indices) are left numeric so
+    they compare numerically (a string cast would put ``"10"`` before ``"5"``).
+    Other columns (ISO strings) are cast to string.
 
     Parameters
     ----------
@@ -47,21 +49,37 @@ def date_key(frame: nw.DataFrame, date_variable: str) -> nw.Expr:
     column = nw.col(date_variable)
     if frame.schema[date_variable] in (nw.Datetime, nw.Date):
         return column.dt.to_string("%Y-%m-%d")
+    if frame.schema[date_variable].is_numeric():
+        return column
     return column.cast(nw.String)
 
 
-def period_key(value: Any) -> str:
-    """Normalise a date value to the string form produced by ``date_key``.
+def period_key(value: Any, frame: nw.DataFrame | None = None, date_variable: str | None = None) -> Any:
+    """Normalise a date value to the form produced by ``date_key``.
 
     Parameters
     ----------
-    value : str, date, datetime or other
+    value : str, date, datetime, number or other
         A period boundary or a value taken from the date column.
+    frame : narwhals DataFrame, optional
+        The frame holding the date column. When the column is numeric, the
+        value is coerced to a number so the comparison is numeric.
+    date_variable : str, optional
+        The name of the date column (required with ``frame``).
 
     Returns
     -------
-    ``YYYY-MM-DD`` for date and datetime values, otherwise ``str(value)``.
+    ``YYYY-MM-DD`` for date and datetime values, a number for a numeric date
+    column, otherwise ``str(value)``.
     """
+    if frame is not None and date_variable is not None and frame.schema[date_variable].is_numeric():
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Column '{date_variable}' is numeric, so period boundary {value!r} must be a number."
+            ) from exc
+        return int(number) if number.is_integer() else number
     if isinstance(value, datetime_cls):
         return value.date().isoformat()
     if isinstance(value, date_cls):
@@ -269,8 +287,7 @@ class Estimator(abc.ABC):
         pass
 
     def _get_ci_print(self) -> str:
-        percent = int((1 - self.alpha) * 100)
-        return f"{percent}%"
+        return f"{(1 - self.alpha) * 100:g}%"
 
     def _validate_lift(self, lift: str, allowed: tuple[str, ...] = _LIFT_TYPES) -> str:
         """Normalise and validate the requested lift type.
@@ -299,13 +316,18 @@ class Estimator(abc.ABC):
 
     @staticmethod
     def _safe_ratio(numerator: float, denominator: float) -> float:
-        """Divide, returning ``inf`` for a zero denominator.
+        """Divide, returning a signed ``inf`` (or ``nan``) for a zero denominator.
 
         Matches the guard in ``_get_roas`` / ``_get_cost_per`` so a degenerate
         summary (e.g. a counterfactual or treated post-period that sums to zero)
-        reports ``inf`` rather than raising ``ZeroDivisionError``.
+        reports ``inf`` rather than raising ``ZeroDivisionError``. The infinity
+        carries the sign of the numerator, and ``0 / 0`` is ``nan``.
         """
-        return numerator / denominator if denominator else float(np.inf)
+        if denominator:
+            return numerator / denominator
+        if numerator == 0 or np.isnan(numerator):
+            return float(np.nan)
+        return float(np.inf) if numerator > 0 else float(-np.inf)
 
     def _cost_per_value(self, incrementality: float) -> float:
         """Spend per incremental unit, tolerating unbounded CIs.
@@ -372,7 +394,7 @@ class Estimator(abc.ABC):
         else:
 
             def fmt(value: float) -> str:
-                return f"{ceil(value):,}" if np.isfinite(value) else str(float(value))
+                return f"{round(value):,}" if np.isfinite(value) else str(float(value))
 
         return [fmt(point)], [fmt(lower)], [fmt(upper)]
 
@@ -494,8 +516,8 @@ class EconometricEstimator(Estimator, ABC):
         # period and are dropped, so they are neither fitted on nor counted as
         # post-period.
         key = date_key(self.data, self.date_variable)
-        in_pre = key <= period_key(self.pre_period)
-        in_post = key >= period_key(self.post_period)
+        in_pre = key <= period_key(self.pre_period, self.data, self.date_variable)
+        in_post = key >= period_key(self.post_period, self.data, self.date_variable)
         self.data: nw.DataFrame = self.data.filter(in_pre | in_post).with_columns(
             nw.when(in_pre).then(0).otherwise(1).alias("treatment_period")
         )
@@ -684,17 +706,20 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        A tuple of (ROAS, lower CI, upper CI). Returns ``inf`` when spend is
-        zero.
+        A tuple of (ROAS, lower CI, upper CI). With zero spend, returns a
+        signed ``inf`` (``nan`` when the revenue is zero too).
         """
         if self.results is None:
             raise ValueError("results must not be None")
         incr = self.results["incrementality"]
-        roas_lift = self._safe_ratio(incr * self.msrp, self.spend)
-        ci_lower = self.results["incrementality_ci_lower"]
-        roas_ci_lower = self._safe_ratio(ci_lower * self.msrp, self.spend)
-        ci_upper = self.results["incrementality_ci_upper"]
-        roas_ci_upper = self._safe_ratio(ci_upper * self.msrp, self.spend)
+
+        def revenue(incrementality: float) -> float:
+            # ``inf * 0`` is nan; zero revenue per unit makes revenue zero.
+            return incrementality * self.msrp if self.msrp else 0.0
+
+        roas_lift = self._safe_ratio(revenue(incr), self.spend)
+        roas_ci_lower = self._safe_ratio(revenue(self.results["incrementality_ci_lower"]), self.spend)
+        roas_ci_upper = self._safe_ratio(revenue(self.results["incrementality_ci_upper"]), self.spend)
         return roas_lift, roas_ci_lower, roas_ci_upper
 
     def _get_cost_per(self) -> tuple[float, float, float]:
@@ -1742,8 +1767,8 @@ class EconometricEstimator(Estimator, ABC):
 
         # Bottom panel: cumulative post-period difference with a band that grows
         # linearly to the reported incrementality interval.
-        post_period_date = date_cls.fromisoformat(self.post_period)
-        marketing_start = [d for d in dates if d >= post_period_date]
+        post_key = period_key(self.post_period, self.data, self.date_variable)
+        marketing_start = [d for d in dates if period_key(d, self.data, self.date_variable) >= post_key]
         cum_resids = np.cumsum(actual_post - prediction_post)
         incr = self.results.get("incrementality")
         incr_lo = self.results.get("incrementality_ci_lower")
@@ -2391,31 +2416,42 @@ class MLEstimator(Estimator, abc.ABC):
             # Compare dates through an ISO ``YYYY-MM-DD`` key (see ``date_key``);
             # dates between the two periods fall in neither filter.
             key = date_key(self.data, self.date_variable)
-            in_pre = key <= period_key(self.pre_period)
-            in_post = key >= period_key(self.post_period)
-            pre_control = self.data.filter(in_pre & (nw.col(self.treatment_variable) == 0))
-            self.pre_control = (
-                pre_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
-            )
-            self.pre_control = self.pre_control.drop(self.date_variable)
-
-            pre_test = self.data.filter(in_pre & (nw.col(self.treatment_variable) == 1))
-            self.pre_test = (
-                pre_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
-            )
-            self.pre_test = self.pre_test.drop(self.date_variable)
-
-            post_control = self.data.filter(in_post & (nw.col(self.treatment_variable) == 0))
-            self.post_control = (
-                post_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
-            )
-            self.test_dates = self.post_control[self.date_variable]
-            self.post_control = self.post_control.drop(self.date_variable)
-
-            post_test = self.data.filter(in_post & (nw.col(self.treatment_variable) == 1))
-            self.post_test = (
-                post_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
-            )
-            self.post_test = self.post_test.drop(self.date_variable)
+            in_pre = key <= period_key(self.pre_period, self.data, self.date_variable)
+            in_post = key >= period_key(self.post_period, self.data, self.date_variable)
+            self.pre_control, self.pre_test, _ = self._aligned_daily_sums(in_pre)
+            self.post_control, self.post_test, self.test_dates = self._aligned_daily_sums(in_post)
 
         return self
+
+    def _aligned_daily_sums(self, in_period: nw.Expr) -> tuple[nw.DataFrame, nw.DataFrame, nw.Series]:
+        """Sum the control and test geos per date, keeping only dates both groups have.
+
+        The date column is dropped from the returned frames and the series are
+        later used positionally, so they are joined on date first: otherwise a
+        date missing from one group would shift the two series against each other.
+
+        Parameters
+        ----------
+        in_period : narwhals expression
+            Boolean filter selecting the period's rows.
+
+        Returns
+        -------
+        A tuple of (control sums, test sums, dates), each sorted by date.
+        """
+        y = self.y_variable
+
+        def daily_sums(flag: int) -> nw.DataFrame:
+            rows = self.data.filter(in_period & (nw.col(self.treatment_variable) == flag))
+            return rows.group_by(self.date_variable).agg(nw.col(y).sum())
+
+        control, test = daily_sums(0), daily_sums(1)
+        joined = control.join(test, on=self.date_variable, how="inner", suffix="_test").sort(self.date_variable)
+        if joined.shape[0] < max(control.shape[0], test.shape[0]):
+            warnings.warn(
+                f"{max(control.shape[0], test.shape[0]) - joined.shape[0]} date(s) are missing from the test or "
+                "control geos and were dropped so the two series stay aligned",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return joined.select(y), joined.select(nw.col(f"{y}_test").alias(y)), joined[self.date_variable]

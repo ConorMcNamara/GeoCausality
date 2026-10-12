@@ -529,6 +529,9 @@ class SyntheticControlV(EconometricEstimator):
             method="Nelder-Mead",
             options={"maxiter": 1000},
         )
+        # Nelder-Mead scales poorly with the number of pre-period dates (one V entry
+        # each) and on long pre-periods often stops at maxiter near its start.
+        self._warn_unconverged(res, "SyntheticControlV")
         v_diag = np.abs(res["x"])
         denom = np.sum(v_diag)
         v_matrix = np.diag(v_diag) / (denom if denom != 0 else 1.0)

@@ -410,3 +410,34 @@ class TestRandomizationInference:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_dates_missing_from_one_group_are_aligned(data_df: pd.DataFrame) -> None:
+    """A date missing from the test geos only must not shift the series against each other."""
+    dropped = pd.Timestamp("2022-06-15")
+    df = data_df[~((data_df["date"] == dropped) & data_df["is_test"])]
+    model = geox.GeoX(
+        df,
+        geo_variable="zipcode",
+        treatment_variable="is_test",
+        date_variable="date",
+        pre_period="2022-06-30",
+        post_period="2022-07-01",
+        y_variable="orders",
+    )
+    with pytest.warns(RuntimeWarning, match="1 date"):
+        model.pre_process()
+    full = geox.GeoX(
+        data_df,
+        geo_variable="zipcode",
+        treatment_variable="is_test",
+        date_variable="date",
+        pre_period="2022-06-30",
+        post_period="2022-07-01",
+        y_variable="orders",
+    ).pre_process()
+    assert model.pre_test.shape[0] == model.pre_control.shape[0] == full.pre_control.shape[0] - 1
+    # The control series keeps its own values: the date is dropped, not shifted.
+    pre_dates = sorted(data_df.loc[data_df["date"] <= pd.Timestamp("2022-06-30"), "date"].unique())
+    kept = np.delete(full.pre_control["orders"].to_numpy(), pre_dates.index(dropped))
+    np.testing.assert_allclose(model.pre_control["orders"].to_numpy(), kept)
