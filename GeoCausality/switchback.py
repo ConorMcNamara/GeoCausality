@@ -10,6 +10,7 @@ from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator
+from GeoCausality._plotting import apply_theme, get_theme
 
 
 class Switchback(Estimator):
@@ -761,8 +762,13 @@ class Switchback(Estimator):
             "power_ci_upper": min(1.0, power + z * se_power),
         }
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot the treatment schedule and outcome time series per geo.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Returns
         -------
@@ -777,13 +783,14 @@ class Switchback(Estimator):
         geos = sorted(panel_pd[self.geo_variable].unique())
         treat_var: str = self.treatment_variable or "is_treatment"
 
+        theme = get_theme(dark_mode)
         fig = go.Figure()
         for geo in geos:
             geo_data = panel_pd.loc[panel_pd[self.geo_variable] == geo].sort_values(by=self.date_variable)
             dates = geo_data[self.date_variable]
             y = geo_data[self.y_variable]
             treat = geo_data[treat_var]
-            colors = ["red" if t == 1 else "blue" for t in treat]
+            colors = [theme.counterfactual if t == 1 else theme.actual for t in treat]
             fig.add_trace(
                 go.Scatter(
                     x=dates,
@@ -799,4 +806,5 @@ class Switchback(Estimator):
             xaxis_title=self.date_variable,
             yaxis_title=self.y_variable,
         )
+        apply_theme(fig, theme)
         fig.show()

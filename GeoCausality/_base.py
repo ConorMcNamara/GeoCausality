@@ -18,6 +18,8 @@ from plotly.subplots import make_subplots
 from scipy.optimize import Bounds, LinearConstraint, minimize
 from tabulate import tabulate  # type: ignore
 
+from GeoCausality._plotting import apply_theme, get_theme
+
 # The lift types every ``summarize`` accepts. ``FixedEffects`` allows a subset.
 _LIFT_TYPES: tuple[str, ...] = ("absolute", "relative", "incremental", "cost-per", "revenue", "roas")
 
@@ -1653,6 +1655,7 @@ class EconometricEstimator(Estimator, ABC):
         actual_post: np.ndarray,
         prediction_pre: np.ndarray,
         prediction_post: np.ndarray,
+        dark_mode: bool = False,
     ) -> None:
         """Build and show the three-panel counterfactual figure with confidence bands.
 
@@ -1672,6 +1675,8 @@ class EconometricEstimator(Estimator, ABC):
             Observed outcome over the pre- and post-period.
         prediction_pre, prediction_post : numpy array
             Counterfactual outcome over the pre- and post-period.
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
         """
         if self.results is None:
             raise ValueError("results must not be None")
@@ -1687,7 +1692,8 @@ class EconometricEstimator(Estimator, ABC):
         band_value = self.results.get("conformal_band")
         band = float(band_value) if band_value is not None else 0.0
         has_band = bool(np.isfinite(band)) and band > 0
-        band_fill = "rgba(68, 68, 68, 0.2)"
+        theme = get_theme(dark_mode)
+        band_fill = theme.band(0.2)
         ci_label = f"{self._get_ci_print()} CI"
 
         total_fig = make_subplots(
@@ -1721,12 +1727,14 @@ class EconometricEstimator(Estimator, ABC):
                 col=1,
             )
         total_fig.add_trace(
-            go.Scatter(x=dates, y=actual, marker={"color": "blue"}, mode="lines", name="Actual"),
+            go.Scatter(x=dates, y=actual, marker={"color": theme.actual}, mode="lines", name="Actual"),
             row=1,
             col=1,
         )
         total_fig.add_trace(
-            go.Scatter(x=dates, y=prediction, marker={"color": "red"}, mode="lines", name="Counterfactual"),
+            go.Scatter(
+                x=dates, y=prediction, marker={"color": theme.counterfactual}, mode="lines", name="Counterfactual"
+            ),
             row=1,
             col=1,
         )
@@ -1752,7 +1760,7 @@ class EconometricEstimator(Estimator, ABC):
                 col=1,
             )
         total_fig.add_trace(
-            go.Scatter(x=dates, y=residuals, marker={"color": "purple"}, mode="lines", name="Difference"),
+            go.Scatter(x=dates, y=residuals, marker={"color": theme.difference}, mode="lines", name="Difference"),
             row=2,
             col=1,
         )
@@ -1781,7 +1789,7 @@ class EconometricEstimator(Estimator, ABC):
                     mode="lines",
                     line={"width": 0},
                     fill="tonexty",
-                    fillcolor="rgba(255, 165, 0, 0.2)",
+                    fillcolor=theme.cumulative_band(0.2),
                     name=ci_label,
                     showlegend=False,
                 ),
@@ -1792,7 +1800,7 @@ class EconometricEstimator(Estimator, ABC):
             go.Scatter(
                 x=marketing_start,
                 y=cum_resids,
-                marker={"color": "orange"},
+                marker={"color": theme.cumulative},
                 mode="lines",
                 name="Cumulative Incrementality",
             ),
@@ -1805,10 +1813,11 @@ class EconometricEstimator(Estimator, ABC):
                 x=self.post_period,
                 line_width=1,
                 line_dash="dash",
-                line_color="black",
+                line_color=theme.reference,
                 row=row,
                 col=1,
             )
+        apply_theme(total_fig, theme)
         total_fig.show()
 
     def _counterfactual_series(self, series: Any) -> np.ndarray:
@@ -2142,12 +2151,17 @@ class EconometricEstimator(Estimator, ABC):
         except Exception:
             return None
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot the actual series, counterfactual, and pointwise and cumulative differences.
 
         Draws the shared three-panel counterfactual figure (see
         ``_plot_counterfactual``) from the ``actual_*``/``prediction_*`` series
         each synthetic-control style estimator caches in ``generate``.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
         """
         # Read via getattr: these series are declared and cached on the concrete
         # synthetic-control subclasses, not on this base.
@@ -2172,6 +2186,7 @@ class EconometricEstimator(Estimator, ABC):
             self._counterfactual_series(actual_post),
             self._counterfactual_series(prediction_pre),
             self._counterfactual_series(prediction_post),
+            dark_mode=dark_mode,
         )
 
 

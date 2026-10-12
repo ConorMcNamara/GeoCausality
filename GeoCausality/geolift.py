@@ -193,6 +193,12 @@ class GeoLift:
         """
         return self.estimator.summarize(lift)
 
-    def plot(self) -> None:
-        """Plot the ASC counterfactual, pointwise and cumulative differences."""
-        return self.estimator.plot()
+    def plot(self, dark_mode: bool = False) -> None:
+        """Plot the ASC counterfactual, pointwise and cumulative differences.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
+        """
+        return self.estimator.plot(dark_mode=dark_mode)

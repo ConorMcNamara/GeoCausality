@@ -8,6 +8,7 @@ from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
+from GeoCausality._plotting import apply_theme, get_theme
 
 
 class FixedEffects(EconometricEstimator):
@@ -260,7 +261,7 @@ class FixedEffects(EconometricEstimator):
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot the event-study dynamic treatment effects for our fixed-effects model.
 
         Fits an auxiliary two-way fixed-effects model that interacts the treated
@@ -270,6 +271,11 @@ class FixedEffects(EconometricEstimator):
         zero support the parallel-trends assumption, while post-onset coefficients
         trace the dynamic treatment effect. This is fit independently of
         ``generate()`` and does not alter the headline single-coefficient results.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Returns
         -------
@@ -317,6 +323,7 @@ class FixedEffects(EconometricEstimator):
         estimates = np.asarray(estimates)[order]
         lowers = np.asarray(lowers)[order]
         uppers = np.asarray(uppers)[order]
+        theme = get_theme(dark_mode)
         fig = go.Figure(
             go.Scatter(
                 x=periods,
@@ -327,16 +334,17 @@ class FixedEffects(EconometricEstimator):
                     "array": uppers - estimates,
                     "arrayminus": estimates - lowers,
                 },
-                marker={"color": "purple"},
+                marker={"color": theme.difference},
                 mode="markers+lines",
                 name="Effect",
             )
         )
-        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="gray")
-        fig.add_vline(x=-0.5, line_width=1, line_dash="dash", line_color="black")
+        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color=theme.zero)
+        fig.add_vline(x=-0.5, line_width=1, line_dash="dash", line_color=theme.reference)
         fig.update_layout(
             title="Event Study (Two-Way Fixed Effects)",
             xaxis_title="Periods relative to treatment onset",
             yaxis_title=f"Effect on {self.y_variable}",
         )
+        apply_theme(fig, theme)
         fig.show()

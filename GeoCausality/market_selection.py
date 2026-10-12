@@ -31,6 +31,7 @@ from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator, date_key, period_key
+from GeoCausality._plotting import apply_theme, get_theme
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.power import PowerAnalysis
 
@@ -518,13 +519,15 @@ class MarketSelection:
         }
         print(tabulate(table, headers="keys", tablefmt="grid"))
 
-    def plot(self, top: int = 10) -> None:
+    def plot(self, top: int = 10, dark_mode: bool = False) -> None:
         """Plot the score of the top-ranked candidate test sets.
 
         Parameters
         ----------
         top : int, default=10
             The number of top-ranked candidates to display.
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Raises
         ------
@@ -549,4 +552,5 @@ class MarketSelection:
             yaxis_title="Test geos",
             xaxis_range=[0, 1],
         )
+        apply_theme(fig, get_theme(dark_mode))
         fig.show()
