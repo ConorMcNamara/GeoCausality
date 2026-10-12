@@ -24,6 +24,7 @@ Running the grid at ``effect = 0`` also calibrates the false-positive rate
 against ``alpha`` -- a free validation of the underlying inference.
 """
 
+import warnings
 from typing import Any
 
 import narwhals as nw
@@ -32,7 +33,7 @@ import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
-from GeoCausality._base import Estimator
+from GeoCausality._base import Estimator, date_key, period_key
 from GeoCausality._plotting import apply_theme, get_theme
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 
@@ -166,12 +167,12 @@ class PowerAnalysis:
         backend-agnostic comparison the estimators use internally.
         """
         dates = (
-            self.data.select(nw.col(self.date_variable).cast(nw.String).alias("d"))
+            self.data.select(date_key(self.data, self.date_variable).alias("d"))
             .unique(subset=["d"])
             .sort("d")["d"]
             .to_list()
         )
-        return [d for d in dates if d <= self.pre_period]
+        return [d for d in dates if d <= period_key(self.pre_period)]
 
     def _placebo_starts(self, duration: int, n_sims: int) -> np.ndarray:
         """Sample start indices for placebo post-windows of length ``duration``.
@@ -221,14 +222,17 @@ class PowerAnalysis:
 
         Returns
         -------
-        True if the estimator's conformal ``p_value`` is at most ``alpha``.
+        True if the estimator's ``p_value`` is at most ``alpha`` and, for a
+        non-zero injected effect, the estimated incrementality has the same sign
+        (a significant estimate in the wrong direction is not a detection). With
+        ``effect == 0`` any significant result counts, as a false positive.
         """
         post_dates = self.history[start_idx : start_idx + duration]
         pre_boundary = self.history[start_idx - 1]
         post_boundary = self.history[start_idx]
         last_post = post_dates[-1]
 
-        date_str = nw.col(self.date_variable).cast(nw.String)
+        date_str = date_key(self.data, self.date_variable)
         in_post = nw.col(self.geo_variable).is_in(self.test_geos) & date_str.is_in(post_dates)
         if self.injection == "multiplicative":
             injected = nw.when(in_post).then(nw.col(self.y_variable) * (1.0 + effect))
@@ -250,10 +254,17 @@ class PowerAnalysis:
             alpha=self.alpha,
             **self.estimator_kwargs,
         )
-        model.pre_process().generate()
+        # Only the p-value is used here, so warnings about the interval being
+        # unbounded on a short placebo pre-period are irrelevant noise.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="The pre-period is too short", category=RuntimeWarning)
+            model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")
-        return float(model.results["p_value"]) <= self.alpha
+        significant = float(model.results["p_value"]) <= self.alpha
+        if effect == 0:
+            return significant
+        return significant and float(np.sign(model.results["incrementality"])) == float(np.sign(effect))
 
     def simulate(
         self,
@@ -300,9 +311,12 @@ class PowerAnalysis:
     def mde(self, target_power: float = DEFAULT_TARGET_POWER) -> "PowerAnalysis":
         """Compute the Minimum Detectable Effect per duration at a target power.
 
-        For each duration the MDE is the smallest effect whose power reaches
-        ``target_power``, linearly interpolated between the two bracketing tested
-        effects. When no tested effect reaches the target, the MDE is ``None``.
+        For each duration the MDE is the smallest effect *magnitude* whose power
+        reaches ``target_power``, linearly interpolated between the two
+        bracketing tested effects. Positive effects (with ``0`` as the starting
+        point) are searched first; if none were tested, negative effects are
+        searched by magnitude and the MDE is reported as a negative number. When
+        no tested effect reaches the target, the MDE is ``None``.
 
         Parameters
         ----------
@@ -319,11 +333,17 @@ class PowerAnalysis:
         table: list[dict[str, Any]] = []
         durations = sorted({row["duration"] for row in self.power_curve})
         for duration in durations:
-            points = sorted(
-                ((r["effect"], r["power"]) for r in self.power_curve if r["duration"] == duration),
-                key=lambda p: p[0],
-            )
-            table.append({"duration": duration, "mde": self._interpolate_mde(points, target_power)})
+            rows = [(r["effect"], r["power"]) for r in self.power_curve if r["duration"] == duration]
+            # Search one direction by magnitude, so a large effect of the other
+            # sign can never be reported as the minimum detectable effect.
+            positive = sorted((e, p) for e, p in rows if e >= 0)
+            if any(e > 0 for e, _ in positive):
+                mde: float | None = self._interpolate_mde(positive, target_power)
+            else:
+                negative = sorted((-e, p) for e, p in rows if e <= 0)
+                magnitude = self._interpolate_mde(negative, target_power)
+                mde = -magnitude if magnitude is not None else None
+            table.append({"duration": duration, "mde": mde})
         self.mde_table = table
         if self.results is None:
             self.results = {}

@@ -112,7 +112,11 @@ class InteractiveFixedEffects(EconometricEstimator):
         max_iter : int, default=500
             The maximum number of alternating-least-squares iterations.
         tol : float, default=1e-6
-            Convergence tolerance on the treatment coefficient between iterations.
+            Convergence tolerance between iterations. In coefficient mode it is a
+            relative tolerance on the treatment coefficient,
+            ``|delta_new - delta| <= tol * (1 + |delta|)``; in projection mode it
+            is an absolute tolerance on the largest change in the factor matrix,
+            so it depends on the outcome's scale.
         conformal_q : float, default=1.0
             The exponent of the moving-block test statistic used for conformal
             inference (p-values and confidence intervals).
@@ -292,7 +296,11 @@ class InteractiveFixedEffects(EconometricEstimator):
         """
         y0 = y[:, ~treated_mask]  # control block, T x N0
         t, n0 = y0.shape
-        max_r = max(0, min(self.max_factors, min(t, n0) - 1, n_pre - 1))
+        # The two-way demeaned control panel has rank at most min(t, n0) - 1, and
+        # the eigenvalue ratio for r factors needs the (r + 1)-th singular value
+        # to be non-zero, so r can be at most min(t, n0) - 2. Allowing one more
+        # divides by a numerically-zero eigenvalue and always picks the cap.
+        max_r = max(0, min(self.max_factors, min(t, n0) - 2, n_pre - 1))
         if self.n_factors is not None:
             r = min(self.n_factors, max_r)
         else:
@@ -366,7 +374,11 @@ class InteractiveFixedEffects(EconometricEstimator):
         missing = (treatment_period[:, None] * treated_mask[None, :]) > 0.0  # treated post cells
         y0 = y[:, ~treated_mask]
         t, n0 = y0.shape
-        max_r = max(0, min(self.max_factors, min(t, n0) - 1, n_pre - 1))
+        # The two-way demeaned control panel has rank at most min(t, n0) - 1, and
+        # the eigenvalue ratio for r factors needs the (r + 1)-th singular value
+        # to be non-zero, so r can be at most min(t, n0) - 2. Allowing one more
+        # divides by a numerically-zero eigenvalue and always picks the cap.
+        max_r = max(0, min(self.max_factors, min(t, n0) - 2, n_pre - 1))
         if self.n_factors is not None:
             r = min(self.n_factors, max_r)
         else:

@@ -4,6 +4,7 @@ import warnings
 from abc import ABC
 from collections.abc import Callable
 from datetime import date as date_cls
+from datetime import datetime as datetime_cls
 from itertools import combinations
 from math import ceil, comb
 from typing import Any, Self
@@ -21,6 +22,51 @@ from GeoCausality._plotting import apply_theme, get_theme
 
 # The lift types every ``summarize`` accepts. ``FixedEffects`` allows a subset.
 _LIFT_TYPES: tuple[str, ...] = ("absolute", "relative", "incremental", "cost-per", "revenue", "roas")
+
+
+def date_key(frame: nw.DataFrame, date_variable: str) -> nw.Expr:
+    """Build a backend-agnostic, comparable string key for the date column.
+
+    Date and datetime columns are formatted as ``YYYY-MM-DD`` so they compare
+    against ``pre_period`` / ``post_period`` by calendar date. A plain string
+    cast would render a datetime as ``"2021-01-01 00:00:00"``, which sorts
+    after ``"2021-01-01"`` and silently drops the boundary date from ``<=``
+    filters. Other columns (ISO strings, integer years) are cast to string.
+
+    Parameters
+    ----------
+    frame : narwhals DataFrame
+        The frame holding the date column (used for its dtype).
+    date_variable : str
+        The name of the date column.
+
+    Returns
+    -------
+    The narwhals expression for the comparison key.
+    """
+    column = nw.col(date_variable)
+    if frame.schema[date_variable] in (nw.Datetime, nw.Date):
+        return column.dt.to_string("%Y-%m-%d")
+    return column.cast(nw.String)
+
+
+def period_key(value: Any) -> str:
+    """Normalise a date value to the string form produced by ``date_key``.
+
+    Parameters
+    ----------
+    value : str, date, datetime or other
+        A period boundary or a value taken from the date column.
+
+    Returns
+    -------
+    ``YYYY-MM-DD`` for date and datetime values, otherwise ``str(value)``.
+    """
+    if isinstance(value, datetime_cls):
+        return value.date().isoformat()
+    if isinstance(value, date_cls):
+        return value.isoformat()
+    return str(value)
 
 
 class Estimator(abc.ABC):
@@ -261,6 +307,27 @@ class Estimator(abc.ABC):
         """
         return numerator / denominator if denominator else float(np.inf)
 
+    def _cost_per_value(self, incrementality: float) -> float:
+        """Spend per incremental unit, tolerating unbounded CIs.
+
+        Parameters
+        ----------
+        incrementality : float
+            An incrementality estimate or CI bound; may be infinite or NaN.
+
+        Returns
+        -------
+        ``spend / incrementality``; ``inf`` when it is not positive, ``0`` when
+        it is ``+inf`` and ``nan`` when it is NaN. The incrementality is not
+        rounded first: rounding up (e.g. 0.3 -> 1) biased the cost downward.
+        """
+        incrementality = float(incrementality)
+        if np.isnan(incrementality):
+            return float("nan")
+        if incrementality == float("inf"):
+            return 0.0
+        return self.spend / incrementality if incrementality > 0 else float("inf")
+
     def _format_lift_cells(
         self,
         lift: str,
@@ -305,7 +372,7 @@ class Estimator(abc.ABC):
         else:
 
             def fmt(value: float) -> str:
-                return f"{ceil(value):,}"
+                return f"{ceil(value):,}" if np.isfinite(value) else str(float(value))
 
         return [fmt(point)], [fmt(lower)], [fmt(upper)]
 
@@ -399,6 +466,9 @@ class EconometricEstimator(Estimator, ABC):
         # (treated series / n) and scale the counterfactual back up by n, since
         # sum-to-one weights cannot reproduce a sum of several geos.
         self._n_treated: int = 1
+        # Zero-centred null replicates of the incrementality from the last
+        # parametric bootstrap (used by GeoLift to test the ASC estimate).
+        self._bootstrap_null: np.ndarray | None = None
 
     def pre_process(self) -> "EconometricEstimator":
         self._restrict_to_listed_geos()
@@ -416,16 +486,18 @@ class EconometricEstimator(Estimator, ABC):
                 )
         else:
             pass
-        # Cast the date column to ISO strings so the comparison is backend
-        # agnostic: polars `Date` columns cannot be compared to a string
+        # Compare dates through an ISO ``YYYY-MM-DD`` key so the comparison is
+        # backend agnostic: polars `Date` columns cannot be compared to a string
         # literal directly, while pandas `datetime` columns cannot be compared
-        # to a `date` object. ISO date strings sort lexicographically.
-        date_as_str = nw.col(self.date_variable).cast(nw.String)
-        self.data: nw.DataFrame = self.data.with_columns(
-            nw.when(date_as_str <= self.pre_period)
-            .then(0)
-            .otherwise(nw.when(date_as_str >= self.post_period).then(1).otherwise(0))
-            .alias("treatment_period")
+        # to a `date` object. Dates strictly between ``pre_period`` and
+        # ``post_period`` (e.g. a washout or ramp-up window) belong to neither
+        # period and are dropped, so they are neither fitted on nor counted as
+        # post-period.
+        key = date_key(self.data, self.date_variable)
+        in_pre = key <= period_key(self.pre_period)
+        in_post = key >= period_key(self.post_period)
+        self.data: nw.DataFrame = self.data.filter(in_pre | in_post).with_columns(
+            nw.when(in_pre).then(0).otherwise(1).alias("treatment_period")
         )
         if self.treatment_variable is not None:
             n_treated = self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].n_unique()
@@ -638,12 +710,9 @@ class EconometricEstimator(Estimator, ABC):
         """
         if self.results is None:
             raise ValueError("results must not be None")
-        lift = ceil(self.results["incrementality"])
-        cost_per = self.spend / lift if lift > 0 else np.inf
-        ci_upper = ceil(self.results["incrementality_ci_upper"])
-        cost_per_lower = self.spend / ci_upper if ci_upper > 0 else np.inf
-        ci_lower = ceil(self.results["incrementality_ci_lower"])
-        cost_per_upper = self.spend / ci_lower if ci_lower > 0 else np.inf
+        cost_per = self._cost_per_value(self.results["incrementality"])
+        cost_per_lower = self._cost_per_value(self.results["incrementality_ci_upper"])
+        cost_per_upper = self._cost_per_value(self.results["incrementality_ci_lower"])
         return cost_per, cost_per_lower, cost_per_upper
 
     def _finalize_counterfactual_results(
@@ -860,9 +929,69 @@ class EconometricEstimator(Estimator, ABC):
         def p_func(theta: float) -> float:
             return self._conformal_p_value(pre_resid, post_resid - theta, q)
 
-        upper = self._bisect_threshold(p_func, center, center + 10.0 * spread, alpha)
-        lower = self._bisect_threshold(p_func, center, center - 10.0 * spread, alpha)
+        # Bisection needs a point inside the acceptance region. The mean
+        # post-period residual usually is, but not always (e.g. when the
+        # pre-period fit is much tighter than the post-period noise), so fall
+        # back to a grid search for the accepted points nearest each end.
+        lo_in = hi_in = center
+        if p_func(center) < alpha:
+            grid = center + spread * np.linspace(-10.0, 10.0, 401)
+            accepted = [theta for theta in grid if p_func(theta) >= alpha]
+            if not accepted:
+                warnings.warn(
+                    "The conformal test rejects every constant effect, so the confidence "
+                    "interval is empty (reported as NaN); the counterfactual likely fits "
+                    "the pre-period much better than the post-period.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                return float("nan"), float("nan")
+            lo_in, hi_in = float(min(accepted)), float(max(accepted))
+
+        upper = self._expand_and_bisect(p_func, hi_in, spread, alpha)
+        lower = self._expand_and_bisect(p_func, lo_in, -spread, alpha)
         return lower, upper
+
+    def _expand_and_bisect(
+        self,
+        p_func: Callable[[float], float],
+        x_in: float,
+        step: float,
+        alpha: float,
+        max_doublings: int = 40,
+    ) -> float:
+        """Locate the acceptance-region boundary in the direction of ``step``.
+
+        Doubles the distance from ``x_in`` until a rejected point is found, then
+        bisects. Returns ``+/- inf`` when no rejected point is found, i.e. the
+        region is unbounded in that direction (possible when the residual series
+        is too short for the test to reject at level ``alpha``).
+
+        Parameters
+        ----------
+        p_func : callable
+            Maps a candidate effect to its permutation p-value.
+        x_in : float
+            A point inside the acceptance region.
+        step : float
+            Initial signed step; its sign sets the search direction.
+        alpha : float
+            The significance level.
+        max_doublings : int, default=40
+            Cap on the outward expansion.
+
+        Returns
+        -------
+        The boundary effect value.
+        """
+        distance = 10.0 * step
+        for _ in range(max_doublings):
+            x_out = x_in + distance
+            if p_func(x_out) < alpha:
+                return self._bisect_threshold(p_func, x_in, x_out, alpha)
+            x_in = x_out
+            distance *= 2.0
+        return float("inf") if step > 0 else float("-inf")
 
     def _split_conformal_band(
         self,
@@ -954,6 +1083,14 @@ class EconometricEstimator(Estimator, ABC):
             else:
                 method = "jackknife+ (residual)"
                 lift_lower, lift_upper, band = self._jackknife_residual_interval(pre_resid, post_resid)
+            if not (np.isfinite(lift_lower) and np.isfinite(lift_upper)):
+                warnings.warn(
+                    f"The pre-period is too short for a finite {self._get_ci_print()} interval; "
+                    "the reported interval is unbounded. Use a longer pre-period, a larger alpha, "
+                    'or inference_method="bootstrap".',
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
         else:
             method = "conformal"
             lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q)
@@ -1101,8 +1238,10 @@ class EconometricEstimator(Estimator, ABC):
     def _jackknife_quantile(abs_residuals: np.ndarray, alpha: float) -> float:
         """Return the jackknife+ ``(1 - alpha)`` quantile of absolute residuals.
 
-        Uses the ``ceil((1 - alpha)(n + 1))``-th smallest absolute residual,
-        widening to the maximum when that rank exceeds ``n``.
+        Uses the ``ceil((1 - alpha)(n + 1))``-th smallest absolute residual.
+        When that rank exceeds ``n`` there are too few residuals for a
+        ``(1 - alpha)`` guarantee and the quantile is infinite (Barber et al.,
+        2021); truncating to the largest residual would under-cover.
 
         Parameters
         ----------
@@ -1119,7 +1258,7 @@ class EconometricEstimator(Estimator, ABC):
         n = scores.shape[0]
         k = int(np.ceil((1 - alpha) * (n + 1)))
         if k > n:
-            return float(scores[-1])
+            return float("inf")
         return float(scores[k - 1])
 
     def _jackknife_residual_interval(
@@ -1130,9 +1269,14 @@ class EconometricEstimator(Estimator, ABC):
     ) -> tuple[float, float, float]:
         """Residual-only jackknife+ interval for a constant per-period effect.
 
-        Holds the counterfactual fixed and calibrates a band from the pre-period
-        residuals (every point used for both fit and calibration), centred on the
-        mean post-period residual.
+        Holds the counterfactual fixed and centres the interval on the mean
+        post-period residual. The interval is for that *mean*, so it is
+        calibrated on the means of every cyclic block of ``t1`` consecutive
+        pre-period residuals (as in the moving-block conformal test), which keeps
+        their autocorrelation. A per-observation residual quantile would treat
+        the mean of ``t1`` residuals as one residual and be about ``sqrt(t1)``
+        times too wide under independence. The returned ``band`` is still the
+        per-period quantile, for the pointwise prediction band.
 
         Parameters
         ----------
@@ -1149,7 +1293,12 @@ class EconometricEstimator(Estimator, ABC):
             alpha = self.alpha
         band = self._jackknife_quantile(pre_resid, alpha)
         center = float(np.mean(post_resid))
-        return center - band, center + band, band
+        t1 = post_resid.shape[0]
+        n = pre_resid.shape[0]
+        offsets = np.arange(t1)
+        block_means = np.array([np.mean(pre_resid[(start + offsets) % n]) for start in range(n)])
+        half_width = self._jackknife_quantile(block_means, alpha)
+        return center - half_width, center + half_width, band
 
     def _jackknife_plus_interval(
         self,
@@ -1165,6 +1314,14 @@ class EconometricEstimator(Estimator, ABC):
         leave-one-out model's prediction at that point with that model's held-out
         residual; the per-period lift bounds are aggregated into a per-period
         effect CI (so ``lift_ci * t1`` recovers the incrementality CI).
+
+        Each fold holds out a single pre-period point, so only per-point
+        residuals are available for calibration. Summing per-period bounds is
+        therefore deliberately conservative for the mean effect (roughly
+        ``sqrt(t1)`` too wide under independent errors); narrowing it would need
+        an assumption about the residuals' dependence that the per-point folds
+        cannot check. The residual-only fallback, which has the whole residual
+        series, calibrates on block means instead.
 
         Parameters
         ----------
@@ -1186,15 +1343,21 @@ class EconometricEstimator(Estimator, ABC):
         if alpha is None:
             alpha = self.alpha
         n = loo_resid.shape[0]
-        lo_idx = max(int(np.floor(alpha * (n + 1))), 1) - 1
-        hi_idx = min(int(np.ceil((1 - alpha) * (n + 1))), n) - 1
+        lo_rank = int(np.floor(alpha * (n + 1)))
+        hi_rank = int(np.ceil((1 - alpha) * (n + 1)))
+        band = self._jackknife_quantile(loo_resid, alpha)
+        if lo_rank < 1 or hi_rank > n:
+            # Too few folds for the jackknife+ quantiles: the interval is
+            # unbounded (Barber et al., 2021). Clamping to the extreme folds
+            # would drop the 1 - 2 * alpha coverage guarantee.
+            return float("-inf"), float("inf"), band
+        lo_idx, hi_idx = lo_rank - 1, hi_rank - 1
         incr_lower, incr_upper = 0.0, 0.0
         for t in range(t1):
             cf_lower = np.sort(loo_post_pred[:, t] - loo_resid)[lo_idx]
             cf_upper = np.sort(loo_post_pred[:, t] + loo_resid)[hi_idx]
             incr_lower += actual_post[t] - cf_upper
             incr_upper += actual_post[t] - cf_lower
-        band = self._jackknife_quantile(loo_resid, alpha)
         return incr_lower / t1, incr_upper / t1, band
 
     # ------------------------------------------------------------------
@@ -1264,7 +1427,7 @@ class EconometricEstimator(Estimator, ABC):
         if self._bootstrap_refit(fitted_pre) is None:
             return None
 
-        sigma = float(np.std(pre_resid))
+        sigma = float(np.std(pre_resid, ddof=1)) if pre_resid.shape[0] > 1 else 0.0
         if sigma == 0.0:
             sigma = 1.0
         n_pre, t1 = fitted_pre.shape[0], actual_post.shape[0]
@@ -1290,7 +1453,14 @@ class EconometricEstimator(Estimator, ABC):
         lower = incr_obs + float(np.percentile(incr_samples, 100 * alpha / 2)) - boot_mean
         upper = incr_obs + float(np.percentile(incr_samples, 100 * (1 - alpha / 2))) - boot_mean
         band = self._jackknife_quantile(pre_resid, alpha)
-        p_value = float(np.mean(np.abs(null_samples) >= abs(incr_obs)))
+        # The null replicates carry the same refit bias (their mean is
+        # sum(fitted_post - E[refit])), so center them on zero before comparing
+        # with the observed incrementality, and count the observed value itself
+        # (+1) so the p-value is never exactly zero.
+        null_samples = null_samples - float(np.mean(null_samples))
+        self._bootstrap_null = null_samples
+        n_extreme = int(np.sum(np.abs(null_samples) >= abs(incr_obs)))
+        p_value = (n_extreme + 1) / (self.n_boot + 1)
         return lower / t1, upper / t1, band, p_value
 
     # ------------------------------------------------------------------
@@ -1432,7 +1602,8 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        The selected factor count, in ``0..max_r``.
+        The selected factor count, in ``1..max_r``; ``0`` only when ``max_r < 1``.
+        The ratio criterion cannot itself select a zero-factor model.
         """
         if max_r < 1:
             return 0
@@ -1933,8 +2104,8 @@ class EconometricEstimator(Estimator, ABC):
             return None
 
         split_idx = int(len(pre_dates) * 0.7)
-        fake_pre = str(pre_dates[split_idx - 1])
-        fake_post = str(pre_dates[split_idx])
+        fake_pre = period_key(pre_dates[split_idx - 1])
+        fake_post = period_key(pre_dates[split_idx])
 
         try:
             placebo = self._clone(
@@ -2217,32 +2388,31 @@ class MLEstimator(Estimator, abc.ABC):
                     )
                 )
         if self.treatment_variable is not None:
-            # Cast the date column to ISO strings so the comparison is backend
-            # agnostic: polars `Date` columns cannot be compared to a string
-            # literal directly, while pandas `datetime` columns cannot be
-            # compared to a `date` object. ISO date strings sort
-            # lexicographically.
-            date_as_str = nw.col(self.date_variable).cast(nw.String)
-            pre_control = self.data.filter((date_as_str <= self.pre_period) & (nw.col(self.treatment_variable) == 0))
+            # Compare dates through an ISO ``YYYY-MM-DD`` key (see ``date_key``);
+            # dates between the two periods fall in neither filter.
+            key = date_key(self.data, self.date_variable)
+            in_pre = key <= period_key(self.pre_period)
+            in_post = key >= period_key(self.post_period)
+            pre_control = self.data.filter(in_pre & (nw.col(self.treatment_variable) == 0))
             self.pre_control = (
                 pre_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
             )
             self.pre_control = self.pre_control.drop(self.date_variable)
 
-            pre_test = self.data.filter((date_as_str <= self.pre_period) & (nw.col(self.treatment_variable) == 1))
+            pre_test = self.data.filter(in_pre & (nw.col(self.treatment_variable) == 1))
             self.pre_test = (
                 pre_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
             )
             self.pre_test = self.pre_test.drop(self.date_variable)
 
-            post_control = self.data.filter((date_as_str >= self.post_period) & (nw.col(self.treatment_variable) == 0))
+            post_control = self.data.filter(in_post & (nw.col(self.treatment_variable) == 0))
             self.post_control = (
                 post_control.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
             )
             self.test_dates = self.post_control[self.date_variable]
             self.post_control = self.post_control.drop(self.date_variable)
 
-            post_test = self.data.filter((date_as_str >= self.post_period) & (nw.col(self.treatment_variable) == 1))
+            post_test = self.data.filter(in_post & (nw.col(self.treatment_variable) == 1))
             self.post_test = (
                 post_test.group_by(self.date_variable).agg(nw.col(self.y_variable).sum()).sort(self.date_variable)
             )

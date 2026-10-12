@@ -30,7 +30,7 @@ import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
-from GeoCausality._base import Estimator
+from GeoCausality._base import Estimator, date_key, period_key
 from GeoCausality._plotting import apply_theme, get_theme
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.power import PowerAnalysis
@@ -223,8 +223,8 @@ class MarketSelection:
         A mapping from geo name to its z-scored pre-period series as a numpy
         array, sorted by date.
         """
-        date_str = nw.col(self.date_variable).cast(nw.String)
-        pre = self.data.filter(date_str <= self.pre_period).sort(self.date_variable)
+        date_str = date_key(self.data, self.date_variable)
+        pre = self.data.filter(date_str <= period_key(self.pre_period)).sort(self.date_variable)
         result: dict[str, np.ndarray] = {}
         for geo in self.all_geos:
             vals = pre.filter(nw.col(self.geo_variable) == geo)[self.y_variable].to_numpy().astype(float)
@@ -310,7 +310,7 @@ class MarketSelection:
         history = power.history
         pre_boundary = history[-duration - 1]
         post_boundary = history[-duration]
-        date_str = nw.col(self.date_variable).cast(nw.String)
+        date_str = date_key(self.data, self.date_variable)
         sub = self.data.filter(date_str <= history[-1])
 
         model = self.estimator(
@@ -325,12 +325,23 @@ class MarketSelection:
             alpha=self.alpha,
             **self.estimator_kwargs,
         )
-        model.pre_process().generate()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="The pre-period is too short", category=RuntimeWarning)
+            model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")
         band = model.results.get("conformal_band")
         if band is None:
             return None
+        if not np.isfinite(band):
+            # A pre-period too short for a finite (1 - alpha) band still has a
+            # usable fit; rank it by its largest absolute pre-period residual.
+            actual_pre = model.results.get("_actual_pre")
+            prediction_pre = model.results.get("_prediction_pre")
+            if actual_pre is None or prediction_pre is None:
+                return None
+            resid = np.asarray(actual_pre, dtype=float) - np.asarray(prediction_pre, dtype=float)
+            band = float(np.max(np.abs(resid)))
         # Normalise by the mean of the treated series summed across the test geos
         # per date -- the same scale the estimator's conformal band is computed on.
         # Averaging the individual geo-date rows instead leaves a spurious factor

@@ -11,8 +11,9 @@ approaches to provide valid and reliable inference and uncertainty estimates."
 for the de-biased point estimate (lift / incrementality / counterfactual) and a
 :class:`GeneralizedSyntheticControl` with parametric-bootstrap inference for the
 uncertainty (p-value and confidence intervals). The reported result is the ASC
-point estimate with the GSC bootstrap interval recentred onto it, so the summary
-and plot reflect the ASC counterfactual while the inference comes from GSC.
+point estimate with the GSC bootstrap interval recentred onto it and a p-value
+for the ASC estimate under the GSC bootstrap null, so the summary and plot
+reflect the ASC counterfactual while the inference comes from GSC.
 """
 
 from typing import Any
@@ -151,7 +152,10 @@ class GeoLift:
             raise ValueError("estimator and inference results must not be None")
 
         # Recentre the GSC bootstrap interval onto the ASC point estimate so the
-        # reported interval brackets the reported lift, then graft the GSC p-value.
+        # reported interval brackets the reported lift, and test the ASC estimate
+        # against the GSC bootstrap null distribution, so the p-value and the
+        # interval describe the same estimate. (GSC's own p-value tests GSC's
+        # estimate, which can disagree with the ASC-centred interval.)
         t1 = np.asarray(estimate["lift"], dtype=float).ravel().shape[0]
         incr = estimate["incrementality"]
         lower_width = inference["incrementality"] - inference["incrementality_ci_lower"]
@@ -160,7 +164,12 @@ class GeoLift:
         estimate["incrementality_ci_upper"] = incr + upper_width
         estimate["lift_ci_lower"] = estimate["incrementality_ci_lower"] / t1
         estimate["lift_ci_upper"] = estimate["incrementality_ci_upper"] / t1
-        estimate["p_value"] = inference["p_value"]
+        null = self.inference._bootstrap_null
+        if null is not None and null.shape[0] > 0:
+            n_extreme = int(np.sum(np.abs(null) >= abs(incr)))
+            estimate["p_value"] = (n_extreme + 1) / (null.shape[0] + 1)
+        else:
+            estimate["p_value"] = inference["p_value"]
         estimate["conformal_band"] = inference.get("conformal_band")
         estimate["method"] = "asc + gsc-bootstrap"
         # Keep the raw GSC inference for transparency.

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template with lighter series, band and reference-line colours so they stay
   legible on a dark background. Light-mode output is unchanged.
 
+## [0.18.0] - 2026-10-09
+
 ### Fixed
 
 - **Multiple treated geos** — `SyntheticControl`, `SyntheticControlV`,
@@ -50,6 +52,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variance under AR(1) errors for the switching schedule (new
   `switching_freq` argument). The earlier cluster design effect was far off
   and gave NaN for slightly negative autocorrelation.
+- **Date handling** — dates are compared by calendar day via a shared
+  `date_key`, so datetime columns (`"2021-01-01 00:00:00"`) no longer drop the
+  last pre-period day. Dates strictly between `pre_period` and `post_period`
+  are now dropped by every estimator. Before, they were trained on (most
+  estimators) or counted as post-period (`MatrixCompletion`).
+- **Conformal interval** — when the point estimate itself is rejected, the
+  test inversion now searches for the accepted region instead of returning a
+  zero-width interval, and it expands past the old ±10·spread cap. An empty
+  region is reported as NaN with a warning.
+- **Jackknife+ / split-conformal quantiles** — when there are too few
+  pre-period points for a finite `(1 - alpha)` quantile, the interval is now
+  unbounded (with a warning) instead of being clamped to the extreme
+  residual, which voided the coverage guarantee.
+- **Parametric bootstrap p-value** — the null replicates are centred on zero
+  (removing the refit bias) and the p-value includes the +1 correction. The
+  noise scale uses `ddof=1`.
+- **`DiffinDiff`** — the relative lift and "Baseline" use the treated
+  group's counterfactual level instead of the control group's. With
+  `inference="ols"`, standard errors now allow AR(1) autocorrelation within
+  each group's series; iid errors gave badly anti-conservative p-values.
+- **`InteractiveFixedEffects`** — the automatic factor count is capped at
+  `min(T, N0) - 2`. The old cap made the eigenvalue ratio divide by zero, so
+  it always picked the maximum when there were few controls.
+- **`Switchback`**:
+  - Relative lift is measured against the untreated baseline. Before, it
+    divided the incrementality by itself and always read 100%.
+  - Carryover lags are built before washout rows are dropped.
+  - `permutation_test()` re-applies lags and washout to each permuted schedule.
+  - Incrementality counts every treated period, including washed-out ones,
+    plus the carryover effects.
+- **`GeoX`** — `alternative` now applies to pointwise and percent-lift
+  intervals and to the placebo and randomization p-values, not only the
+  cumulative interval.
+- **`GeoLift`** — the p-value tests the ASC estimate against the GSC
+  bootstrap null, so it agrees with the ASC-centred interval.
+- **Residual jackknife+ interval** — the interval for the mean effect is now
+  calibrated on means of `t1`-length blocks of pre-period residuals. The
+  per-observation quantile was about `sqrt(t1)` times too wide. The faithful
+  jackknife+ interval remains deliberately conservative; its docstring now
+  says why.
+- **Cost-per** — the incrementality is no longer rounded up before dividing,
+  which biased the cost per acquisition downward.
+- **`GeoX` percent-lift CI** — uses each day's full prediction standard error
+  (including parameter uncertainty) over that day's counterfactual, instead
+  of one residual sigma over the mean counterfactual.
+- **`NonlinearSyntheticControl`** warns when the weight optimizer does not
+  converge.
+- **`RobustSyntheticControl`** treats only NaN cells as missing. Genuine zero
+  outcomes no longer change the `p_hat` rescaling.
+- **`KernelSyntheticControl`** — the leave-one-out leverage used to select
+  the penalty now accounts for the fitted intercept.
+- **`PowerAnalysis`** — a significant estimate with the wrong sign no longer
+  counts as a detection. The MDE is searched by magnitude in one direction,
+  so a negative effect is never reported as the MDE when positive effects
+  were tested.
+- **`CausalImpact`** — simulated counterfactual paths now draw the model
+  parameters from their asymptotic distribution, so intervals include
+  parameter uncertainty (null coverage of a nominal 90% interval went from
+  ~0.80 to ~0.95 in simulation).
+- **`Switchback.power_simulation()`** honours `treatment_fraction`, shares the
+  analytical schedule, and reports a `1 - alpha` Monte Carlo interval for the
+  power.
+- **Docstrings** corrected for `ElasticNetSyntheticControl` (scikit-learn's
+  `1/(2T)` loss scaling), `GeneralizedSyntheticControl` (zero factors gives a
+  flat counterfactual), `MatrixCompletion` (no per-unit standardization or
+  warm-started path), `InteractiveFixedEffects` (`tol` semantics), the
+  factor-count range, `Switchback` (two-way FE, not the Horvitz-Thompson
+  estimator; permutation-test assumptions) and `AugmentedSyntheticControl`
+  (the penalty CV follows augsynth and is somewhat optimistic).
 
 ## [0.17.1] - 2026-09-25
 
@@ -653,6 +724,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.18.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.18.0
 [0.17.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.1
 [0.17.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.0
 [0.16.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.16.0

@@ -208,12 +208,10 @@ class RobustSyntheticControl(EconometricEstimator):
         daily_x_mat = self.daily_x.drop(self.date_variable).to_numpy()
         daily_x_transposed = daily_x_mat.T
         M_hat = self._svd(daily_x_transposed).T
-        # Number of pre-period rows: compare dates as ISO strings so the split is
-        # backend- and format-agnostic (matches the base class; integer years like
-        # "1989" are not valid ``date.fromisoformat`` input). ``daily_x`` is sorted
-        # by date, so the pre-period is the leading block.
-        date_list = self.daily_x[self.date_variable].to_list()
-        end_idx = sum(1 for d in date_list if str(d) <= self.pre_period)
+        # Split the date-sorted panel into the leading pre-period block and the
+        # trailing post-period block, using the base class's period labels
+        # (gap dates between the periods were dropped in ``pre_process``).
+        end_idx = self.data.filter(nw.col("treatment_period") == 0)[self.date_variable].n_unique()
         M_hat_neg = M_hat[:end_idx, :]
         Y1_neg = self.daily_y[self.y_variable].to_numpy()[:end_idx]
 
@@ -267,6 +265,11 @@ class RobustSyntheticControl(EconometricEstimator):
         -------
         M_hat, a matrix based on our SVD.
         """
+        # Missing cells (NaN) are zero-filled and the denoised matrix rescaled by
+        # the observed fraction p_hat (Amjad, Shah & Shen, 2018). Genuine zero
+        # outcomes are observations, not missing values.
+        observed = np.isfinite(groupby_x_transposed)
+        groupby_x_transposed = np.where(observed, groupby_x_transposed, 0.0)
         u, s, v = np.linalg.svd(groupby_x_transposed)
         s_shape = s.shape[0]
         if self.threshold:
@@ -284,6 +287,6 @@ class RobustSyntheticControl(EconometricEstimator):
         s_res = np.zeros_like(groupby_x_transposed)
         s_res[:idx, :idx] = np.diag(s[:idx])
         r, c = groupby_x_transposed.shape
-        p_hat = max(np.count_nonzero(groupby_x_transposed) / (r * c), 1 / (r * c))
+        p_hat = max(np.count_nonzero(observed) / (r * c), 1 / (r * c))
         M_hat = (1 / p_hat) * (u @ s_res @ v)
         return M_hat
