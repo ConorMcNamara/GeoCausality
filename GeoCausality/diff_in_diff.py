@@ -12,6 +12,7 @@ from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
+from GeoCausality._plotting import apply_theme, get_theme
 
 
 class DiffinDiff(EconometricEstimator):
@@ -317,7 +318,7 @@ class DiffinDiff(EconometricEstimator):
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def plot(self) -> None:
+    def plot(self, dark_mode: bool = False) -> None:
         """Plot the parallel-trends diagnostic for our difference-in-differences.
 
         Plots the treated and control group averages over time alongside the
@@ -326,6 +327,11 @@ class DiffinDiff(EconometricEstimator):
         groups; in the pre-period it overlays the treated series when trends are
         parallel, and the post-period gap between the treated series and the
         counterfactual is the difference-in-differences estimand.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render with a dark background and lighter series colours.
 
         Returns
         -------
@@ -345,26 +351,27 @@ class DiffinDiff(EconometricEstimator):
         control_pre = control.filter(nw.col("treatment_period") == 0)[self.y_variable].to_numpy()
         offset = treated_pre.mean() - control_pre.mean()
         counterfactual = control_y + offset
+        theme = get_theme(dark_mode)
         fig = go.Figure(
             [
                 go.Scatter(
                     x=treated_dates,
                     y=treated_y,
-                    marker={"color": "blue"},
+                    marker={"color": theme.actual},
                     mode="lines",
                     name="Treated",
                 ),
                 go.Scatter(
                     x=control_dates,
                     y=control_y,
-                    marker={"color": "green"},
+                    marker={"color": theme.control},
                     mode="lines",
                     name="Control",
                 ),
                 go.Scatter(
                     x=control_dates,
                     y=counterfactual,
-                    marker={"color": "red"},
+                    marker={"color": theme.counterfactual},
                     mode="lines",
                     line={"dash": "dash"},
                     name="Counterfactual",
@@ -375,11 +382,12 @@ class DiffinDiff(EconometricEstimator):
             x=self.post_period,
             line_width=1,
             line_dash="dash",
-            line_color="black",
+            line_color=theme.reference,
         )
         fig.update_layout(
             title="Parallel Trends",
             xaxis_title=self.date_variable,
             yaxis_title=self.y_variable,
         )
+        apply_theme(fig, theme)
         fig.show()
