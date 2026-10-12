@@ -21,9 +21,11 @@ from datetime import date, timedelta
 
 import numpy as np
 import plotly.graph_objects as go
+import plotly.io as pio
 import polars as pl
 import pytest
 
+from GeoCausality._plotting import DARK_THEME, LIGHT_THEME, PlotTheme
 from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
 N_DATES = 40
@@ -204,6 +206,21 @@ class TestPlot:
         # The cumulative band's final point matches the reported incrementality CI.
         cumulative_lower = band_traces[-1]
         assert float(cumulative_lower.y[-1]) == pytest.approx(model.results["incrementality_ci_lower"], rel=1e-6)
+
+    @staticmethod
+    @pytest.mark.parametrize(("dark_mode", "theme"), [(False, LIGHT_THEME), (True, DARK_THEME)], ids=["light", "dark"])
+    def test_plot_applies_theme(
+        effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch, dark_mode: bool, theme: PlotTheme
+    ) -> None:
+        captured = {}
+        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
+        model = _model(effect_data).pre_process().generate()
+        model.plot(dark_mode=dark_mode)
+        fig = captured["fig"]
+        assert fig.layout.template == pio.templates[theme.template or pio.templates.default]
+        actual = next(t for t in fig.data if t.name == "Actual")
+        assert actual.marker.color == theme.actual
+        assert all(shape.line.color == theme.reference for shape in fig.layout.shapes)
 
 
 if __name__ == "__main__":

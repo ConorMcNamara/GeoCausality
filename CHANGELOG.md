@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dark mode for plots** — every `plot()` method (and
+  `PowerAnalysis.plot_mde_sensitivity()` / `plot_power_heatmap()`) takes
+  `dark_mode: bool = False`. When set, figures use Plotly's `plotly_dark`
+  template with lighter series, band and reference-line colours so they stay
+  legible on a dark background. Light-mode output is unchanged.
+
 ### Fixed
 
 - **Conformal test refits under the null** — the Chernozhukov, Wüthrich & Zhu
