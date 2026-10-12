@@ -26,15 +26,12 @@ Two estimators, two natural framings of the same experiment:
   ``campaign_treatment`` coefficient is the TWFE DiD and it carries real
   clustered standard errors -- the strong "golden master" check here.
 
-* ``DiffinDiff`` sums ``y`` across geos within each (treatment, period) cell
-  before regressing, which is the right 2x2 textbook DiD only when fed
-  comparable group series. Card & Krueger's design is heavily unbalanced
-  (~320 NJ stores vs ~77 PA stores), so summing raw store-level counts is
-  dominated by store *counts*, not the per-store effect (see
-  ``test_diff_in_diff_store_sums_diverge``). Fed the per-state **mean** FTE
-  series (two geos), it recovers the published per-restaurant DiD exactly --
-  though a saturated 2x2 has zero residual degrees of freedom, so only the point
-  estimate is meaningful (its p-value/CI are degenerate, hence not asserted).
+* ``DiffinDiff`` averages ``y`` across geos within each (treatment, period)
+  cell before regressing -- the textbook 2x2 DiD on group means -- so it
+  recovers the published per-restaurant effect both from the per-state mean
+  series and directly from the unbalanced store-level panel (~320 NJ vs ~77 PA
+  stores). On the two-geo mean series the 2x2 is saturated, with zero residual
+  degrees of freedom, so only the point estimate is meaningful there.
 
 Tolerances are deliberately generous: this guards against gross divergence, not
 exact equality. Our TWFE on the unbalanced panel weights observations slightly
@@ -158,10 +155,10 @@ class TestDiffinDiffParity:
         assert fitted.results["lift"] > 0.0
 
     @staticmethod
-    def test_diff_in_diff_store_sums_diverge(card_krueger: pd.DataFrame) -> None:
-        # Documents why we feed DiffinDiff the per-state *mean* series above:
-        # summing raw store-level FTE across the unbalanced NJ/PA groups is
-        # dominated by store counts, so it cannot recover the +2.76 per-store DiD.
+    def test_store_level_panel_matches_published(card_krueger: pd.DataFrame) -> None:
+        # Averaging within each group makes the unbalanced store-level panel give
+        # the per-store DiD directly (``att``); ``lift`` is that effect summed over
+        # the treated stores, like the other estimators' per-period lift.
         model = DiffinDiff(
             card_krueger,
             geo_variable="geo",
@@ -172,10 +169,9 @@ class TestDiffinDiffParity:
             y_variable="y",
             alpha=0.05,
         )
-        with warnings.catch_warnings():  # saturated 2x2, as above
-            warnings.simplefilter("ignore", RuntimeWarning)
-            model.pre_process().generate()
-        assert abs(model.results["lift"]) > 10 * REF_DID  # nowhere near +2.76
+        model.pre_process().generate()
+        assert model.results["att"] == pytest.approx(REF_DID, abs=DID_ABS_TOL)
+        assert model.results["lift"] == pytest.approx(model.results["att"] * model._n_treated)
 
 
 if __name__ == "__main__":

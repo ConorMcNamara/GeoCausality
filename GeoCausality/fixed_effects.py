@@ -99,6 +99,7 @@ class FixedEffects(EconometricEstimator):
             self.inference_method = inference
         self.n_dates: int | None = None
         self.n_geos: int | None = None
+        self._pt_control: np.ndarray | None = None
 
     def pre_process(self) -> "FixedEffects":
         """Add the campaign-treatment interaction column and count treated dates and geos.
@@ -213,7 +214,30 @@ class FixedEffects(EconometricEstimator):
         treated_pre, control_pre = group_mean(1, 0), group_mean(0, 0)
         treated_post, control_post = group_mean(1, 1), group_mean(0, 1)
         offset = treated_pre.mean() - control_pre.mean()
+        self._pt_control = np.concatenate([control_pre, control_post])
         return treated_pre, control_pre + offset, treated_post, control_post + offset
+
+    def _refit_counterfactual(self, y_full: np.ndarray, train: np.ndarray) -> np.ndarray | None:
+        """Refit the parallel-trends level shift on a subset of periods.
+
+        The counterfactual is the control mean plus a constant gap, so the refit
+        is the mean treated-minus-control gap over the training periods.
+
+        Parameters
+        ----------
+        y_full : numpy array, shape (T,)
+            The treated mean series over every period.
+        train : numpy array of bool, shape (T,)
+            The periods to fit on.
+
+        Returns
+        -------
+        The counterfactual over every period, or None before it is built.
+        """
+        control = self._pt_control
+        if control is None or control.shape[0] != y_full.shape[0] or not train.any():
+            return None
+        return control + float(np.mean((y_full - control)[train]))
 
     def summarize(self, lift: str) -> None:
         """Print a tabulated summary of the estimated campaign lift.

@@ -104,9 +104,17 @@ class DiffinDiff(EconometricEstimator):
             self.inference_method = inference
         self.groupby_data: nw.DataFrame | None = None
         self.n_dates: int | None = None
+        self._pt_control: np.ndarray | None = None
 
     def pre_process(self) -> "DiffinDiff":
-        """Aggregate the data by treatment, period and date and count post-period dates.
+        """Average the data by treatment, period and date and count post-period dates.
+
+        Each group is collapsed to its per-geo *mean* outcome on each date. The
+        2x2 difference-in-differences compares group means: with per-date sums,
+        a common time shock enters the treated and control series scaled by
+        their geo counts and only cancels when the two groups are the same size.
+        The per-geo effect is scaled back up by the number of treated geos in
+        ``generate``.
 
         Returns
         -------
@@ -120,7 +128,7 @@ class DiffinDiff(EconometricEstimator):
             self.data.group_by(
                 [self.treatment_variable, "treatment_period", self.date_variable],
             )
-            .agg(nw.col(self.y_variable).sum())
+            .agg(nw.col(self.y_variable).mean())
             .sort([self.treatment_variable, "treatment_period", self.date_variable])
         )
         self.n_dates = self.groupby_data.filter(
@@ -132,7 +140,10 @@ class DiffinDiff(EconometricEstimator):
         """Fit the OLS model and compute lift, confidence intervals and incrementality.
 
         The point estimate is always the interaction coefficient of the
-        difference-in-differences OLS model. The p-value and confidence intervals
+        difference-in-differences OLS model on the group-mean series, i.e. the
+        per-geo, per-date effect (``att``). ``lift`` and its CIs scale it by the
+        number of treated geos, giving the per-date effect on the treated
+        group's total like the other estimators. The p-value and confidence intervals
         come from ``self.inference``: ``"ols"`` uses the model's closed-form
         standard errors, while the conformal-family options attach
         distribution-free inference to the parallel-trends counterfactual.
@@ -149,20 +160,23 @@ class DiffinDiff(EconometricEstimator):
         frame = self.groupby_data.to_pandas()
         self.model = smf.ols(f"{self.y_variable} ~ {self.treatment_variable} * treatment_period", data=frame).fit()
         params = self.model.params
-        lift = float(params[f"{self.treatment_variable}:treatment_period"])
+        n_treated = self._n_treated
+        att = float(params[f"{self.treatment_variable}:treatment_period"])
         # ``test`` and ``control`` are each group's fitted post-period per-date
-        # outcome; the bare ``treatment_period`` coefficient is only the control
-        # group's pre-to-post change, and ``Intercept`` its pre-period level.
+        # per-geo outcome; the bare ``treatment_period`` coefficient is only the
+        # control group's pre-to-post change, and ``Intercept`` its pre-period level.
         control_post = float(params["Intercept"] + params["treatment_period"])
         self.results = dict(
-            test=control_post + float(params[self.treatment_variable]) + lift,
+            test=control_post + float(params[self.treatment_variable]) + att,
             control=control_post,
-            lift=lift,
+            att=att,
+            lift=att * n_treated,
         )
         self.results["incrementality"] = self.results["lift"] * self.n_dates
         if self.inference == "ols":
             interaction = f"{self.treatment_variable}:treatment_period"
             se, df_resid = self._ar1_standard_error(frame, interaction)
+            se *= n_treated
             if df_resid > 0 and np.isfinite(se) and se > 0:
                 crit = float(t_dist.ppf(1 - self.alpha / 2, df_resid))
                 lower = self.results["lift"] - crit * se
@@ -237,12 +251,14 @@ class DiffinDiff(EconometricEstimator):
         """Build the treated series and its parallel-trends counterfactual.
 
         Mirrors the counterfactual drawn in ``plot()``: the treated group's
-        per-date outcome is the observed series, and the counterfactual is the
-        control group's per-date outcome level-shifted by the pre-period gap
-        between the two groups. Feeding these four series to the conformal engine
-        gives per-period residuals whose mean equals the difference-in-differences
-        estimand, so the conformal p-value and confidence intervals are centred on
-        the same effect as the OLS coefficient.
+        per-geo mean outcome is the observed series, and the counterfactual is
+        the control group's per-geo mean level-shifted by the pre-period gap
+        between the two groups. Both are scaled by the number of treated geos so
+        the residuals are on the treated total's scale, like ``lift``. Feeding
+        these four series to the conformal engine gives per-period residuals
+        whose mean equals the difference-in-differences estimand, so the
+        conformal p-value and confidence intervals are centred on the same
+        effect as the OLS coefficient.
 
         Returns
         -------
@@ -260,7 +276,31 @@ class DiffinDiff(EconometricEstimator):
         treated_post = treated.filter(nw.col("treatment_period") == 1)[self.y_variable].to_numpy()
         control_post = control.filter(nw.col("treatment_period") == 1)[self.y_variable].to_numpy()
         offset = treated_pre.mean() - control_pre.mean()
-        return treated_pre, control_pre + offset, treated_post, control_post + offset
+        n = self._n_treated
+        self._pt_control = n * np.concatenate([control_pre, control_post])
+        return n * treated_pre, n * (control_pre + offset), n * treated_post, n * (control_post + offset)
+
+    def _refit_counterfactual(self, y_full: np.ndarray, train: np.ndarray) -> np.ndarray | None:
+        """Refit the parallel-trends level shift on a subset of periods.
+
+        The counterfactual is the control series plus a constant gap, so the
+        refit is the mean treated-minus-control gap over the training periods.
+
+        Parameters
+        ----------
+        y_full : numpy array, shape (T,)
+            The treated series over every period.
+        train : numpy array of bool, shape (T,)
+            The periods to fit on.
+
+        Returns
+        -------
+        The counterfactual over every period, or None before it is built.
+        """
+        control = self._pt_control
+        if control is None or control.shape[0] != y_full.shape[0] or not train.any():
+            return None
+        return control + float(np.mean((y_full - control)[train]))
 
     def summarize(self, lift: str) -> None:
         """Print a tabulated summary of the difference-in-differences results.
@@ -278,13 +318,13 @@ class DiffinDiff(EconometricEstimator):
         lift = self._validate_lift(lift)
         ci_alpha = self._get_ci_print()
         lo_key, hi_key = f"{ci_alpha} Lower CI", f"{ci_alpha} Upper CI"
-        # The baseline is the treated group's counterfactual over the
-        # post-period: its pre-period level plus the control group's pre-to-post
-        # change (Intercept + treated + period coefficients), not the control
-        # group's level.
+        # The baseline is the treated group's counterfactual total over the
+        # post-period: its per-geo pre-period level plus the control group's
+        # pre-to-post change (Intercept + treated + period coefficients), not the
+        # control group's level, scaled to all treated geos and post dates.
         params = self.model.params
         counterfactual_level = float(params["Intercept"] + params[self.treatment_variable] + params["treatment_period"])
-        base_level = counterfactual_level * self.n_dates
+        base_level = counterfactual_level * self._n_treated * self.n_dates
         incrementality = (
             self.results["incrementality"],
             self.results["incrementality_ci_lower"],

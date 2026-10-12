@@ -6,7 +6,6 @@ import narwhals as nw
 import numpy as np
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from GeoCausality._base import EconometricEstimator
 
@@ -211,20 +210,17 @@ class PenalizedSyntheticControl(EconometricEstimator):
         keeps its meaning while SLSQP works at unit magnitude.
         """
         x, y, n_treated = self._per_geo_problem(x, y)
-        _, n_c = x.shape
+        n_r = x.shape[0]
         discrepancy = np.mean((y.reshape(-1, 1) - x) ** 2, axis=0)
-        bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
-        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
-        x0 = np.full(n_c, 1 / n_c)
-        res = minimize(
-            fun=lambda w: self._loss_w(w, x, y, discrepancy),
-            x0=x0,
-            bounds=bounds,
-            constraints=constraints,
-            method="SLSQP",
+        # (1 / T) ||y - X w||^2 + lambda * D' w as a simplex QP.
+        weights = self._solve_simplex_qp(
+            x.T @ x / n_r,
+            x.T @ y / n_r,
+            float(y @ y) / n_r,
+            "PenalizedSyntheticControl",
+            linear=self.lambda_ * discrepancy,
         )
-        self._warn_unconverged(res, "PenalizedSyntheticControl")
-        return res["x"] * n_treated
+        return weights * n_treated
 
     def _loss_w(self, w: np.ndarray, x: np.ndarray, y: np.ndarray, discrepancy: np.ndarray) -> float:
         """Penalized synthetic-control loss for a candidate weight vector.
