@@ -33,6 +33,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ${{ fromJSON(needs.python-versions.outputs.versions) }}
 
+    # pytest-xdist runs one process per core; pin BLAS/OpenMP to a single thread so
+    # the workers don't oversubscribe the runner, and keep matplotlib headless.
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      MPLBACKEND: Agg
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,4 +55,4 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run full test suite
-        run: uv run pytest
+        run: uv run pytest -n auto --dist loadscope
