@@ -122,6 +122,7 @@ class TestCandidateGeneration:
 
 
 class TestSearch:
+    @pytest.mark.slow
     @staticmethod
     def test_rankings_structure(searched_size2: MarketSelection) -> None:
         assert searched_size2.rankings is not None
@@ -131,15 +132,18 @@ class TestSearch:
             assert r["n_test"] + r["n_control"] == N_GEOS
             assert 0.0 <= r["power"] <= 1.0
 
+    @pytest.mark.slow
     @staticmethod
     def test_rankings_sorted_by_score_desc(searched_sizes_1_2: MarketSelection) -> None:
         scores = [r["score"] for r in searched_sizes_1_2.rankings]
         assert scores == sorted(scores, reverse=True)
 
+    @pytest.mark.slow
     @staticmethod
     def test_pre_fit_computed_for_synthetic_control(searched_size2: MarketSelection) -> None:
         assert all(r["pre_fit"] is not None and r["pre_fit"] >= 0.0 for r in searched_size2.rankings)
 
+    @pytest.mark.slow
     @staticmethod
     def test_fit_weight_zero_ranks_on_power(history: pl.DataFrame) -> None:
         ms = _selection(history, fit_weight=0.0).search(n_test_geos=[2], effect_size=0.3, duration=10, n_sims=8)
@@ -152,6 +156,7 @@ class TestSearch:
 
 
 class TestReporting:
+    @pytest.mark.slow
     @staticmethod
     def test_summarize_runs(searched_sizes_1_2: MarketSelection) -> None:
         with redirect_stdout(io.StringIO()) as buffer:

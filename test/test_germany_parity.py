@@ -37,6 +37,9 @@ from GeoCausality.nonlinear_synthetic_control import NonlinearSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl
 from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
+# Full fits on the published panel dominate the suite's runtime; CI runs these on one matrix cell.
+pytestmark = pytest.mark.slow
+
 TREATED = "West Germany"
 PRE_PERIOD = "1989"  # last pre-reunification year
 POST_PERIOD = "1990"  # reunification year (treated from here)

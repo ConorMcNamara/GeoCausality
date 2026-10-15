@@ -22,6 +22,7 @@ help:
 	@echo "  type-check    Run zuban static type checker"
 	@echo "  check         Run lint + type-check (mirrors CI)"
 	@echo "  test          Run the test suite with pytest + coverage summary"
+	@echo "  test-fast     Run the test suite without tests marked slow"
 	@echo "  coverage      Run tests and open an HTML coverage report"
 	@echo "  clean         Remove build artefacts and caches"
 	@echo ""
@@ -60,6 +61,10 @@ check: lint type-check
 .PHONY: test
 test:
 	$(PYTHON) -m pytest $(TESTS) -v --cov=$(SRC) --cov-report=term-missing
+
+.PHONY: test-fast
+test-fast:
+	$(PYTHON) -m pytest $(TESTS) -v -m "not slow"
 
 .PHONY: coverage
 coverage:

@@ -51,6 +51,9 @@ module-root = ""
 
 [tool.pytest.ini_options]
 pythonpath = ["geocausality", '.']
+markers = [
+    "slow: expensive fits (published-panel parity, market search); run with -m slow, skip with -m \"not slow\"",
+]
 
 [tool.coverage.run]
 source = ["GeoCausality"]

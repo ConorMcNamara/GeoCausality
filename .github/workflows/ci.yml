@@ -118,8 +118,15 @@ jobs:
       - name: Install package with dev dependencies
         run: uv sync --extra dev
 
+      # The full suite (including tests marked slow) runs once, on the cell that
+      # uploads coverage; every other OS/Python cell skips the slow parity fits.
       - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.python-versions.outputs.min-version
         run: uv run pytest --cov=GeoCausality --cov-report=xml --cov-report=term-missing
+
+      - name: Run tests (excluding slow)
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != needs.python-versions.outputs.min-version
+        run: uv run pytest -m "not slow"
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.python-versions.outputs.min-version
