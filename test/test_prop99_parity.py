@@ -40,6 +40,10 @@ from GeoCausality.robust_synthetic_control import RobustSyntheticControl
 from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
 from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
+# Full fits on the published panel dominate the suite's runtime; CI runs these on one matrix cell
+# per push and on every cell weekly (full-suite.yml).
+pytestmark = pytest.mark.slow
+
 TREATED = "California"
 PRE_PERIOD = "1988"  # last untreated year
 POST_PERIOD = "1989"  # first treated year (Prop 99 passed 1988)
