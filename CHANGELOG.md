@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-16
+
+### Changed
+
+- **CI** — lint, test and build are skipped on doc-only changes; expensive
+  tests are marked `slow` and run only on one CI cell per push, with the full
+  suite running weekly on every OS/Python cell; tests run in parallel with
+  `pytest-xdist`. No library code changed.
+
 ## [0.19.0] - 2026-10-12
 
 ### Added
@@ -786,6 +795,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.19.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.1
 [0.19.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.0
 [0.18.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.18.0
 [0.17.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.17.1
