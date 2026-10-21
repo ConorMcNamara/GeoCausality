@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster DTW pre-filter in `MarketSelection`** — `search(dtw_top_k=...)` no
+  longer runs a pure-Python double loop per geo pair. The DTW recurrence now
+  runs one anti-diagonal at a time across thousands of pairs at once in numpy,
+  pairs between geos that never enter a test set are skipped, and per-geo
+  series are grouped in one pass instead of one filter per geo. Distances are
+  bit-for-bit identical, so filtered candidates and rankings are unchanged.
+  All pairwise distances for 200 geos over 365 dates take 2.4s instead of
+  16 min; 1,000 geos take about 1 min instead of an estimated 6 h. A new
+  opt-in `dtw_window` argument applies a Sakoe-Chiba band, which cuts the
+  cost to about `(2 * dtw_window + 1) / T` of that but can change which
+  candidates pass the filter; the default `None` keeps unconstrained DTW.
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed

@@ -191,26 +191,94 @@ class MarketSelection:
         return list(seen)
 
     @staticmethod
-    def _dtw_distance(s: np.ndarray, t: np.ndarray) -> float:
+    def _dtw_batch(s: np.ndarray, t: np.ndarray, window: int | None = None) -> np.ndarray:
+        """Dynamic Time Warping distances for a batch of series pairs.
+
+        Runs the usual recurrence
+        ``D[i, j] = |s[i] - t[j]| + min(D[i-1, j], D[i, j-1], D[i-1, j-1])``
+        one anti-diagonal (``i + j = k``) at a time, since every cell on a
+        diagonal depends only on the previous two. Each diagonal is updated for
+        all pairs at once, so the Python loop runs ``n + m`` times regardless of
+        the batch size. The arithmetic is the same as the cell-by-cell loop, so
+        the distances match it exactly.
+
+        Parameters
+        ----------
+        s : 2-D array of shape (n_pairs, n)
+            The first series of each pair.
+        t : 2-D array of shape (n_pairs, m)
+            The second series of each pair.
+        window : int, optional
+            Sakoe-Chiba band half-width: only cells with ``|i - j| <= window``
+            are visited. It is widened to ``|n - m|`` when narrower so the end
+            cell stays reachable. ``None`` (the default) is unconstrained DTW.
+
+        Returns
+        -------
+        A 1-D array of the accumulated DTW cost (L1 element cost) per pair.
+        """
+        s = np.asarray(s, dtype=float)
+        t = np.asarray(t, dtype=float)
+        n_pairs, n = s.shape
+        m = t.shape[1]
+        if n == 0 or m == 0:
+            return np.full(n_pairs, 0.0 if n == m else np.inf)
+        if window is not None:
+            window = max(window, abs(n - m))
+
+        # Diagonals are indexed by i (row 0..n) and laid out as (i, pair) so every
+        # slice below is contiguous. ``t`` is reversed so that t[j - 1] with
+        # j = k - i is also a forward slice in i.
+        s_rows = np.ascontiguousarray(s.T)
+        t_rev = np.ascontiguousarray(t[:, ::-1].T)
+        prev2 = np.full((n + 1, n_pairs), np.inf)  # diagonal k - 2
+        prev1 = np.full((n + 1, n_pairs), np.inf)  # diagonal k - 1
+        cur = np.full((n + 1, n_pairs), np.inf)
+        prev2[0] = 0.0  # D[0, 0]
+        cost = np.empty((min(n, m), n_pairs))
+        best = np.empty((min(n, m), n_pairs))
+
+        for k in range(2, n + m + 1):
+            lo, hi = max(1, k - m), min(n, k - 1)
+            if window is not None:
+                lo, hi = max(lo, (k - window + 1) // 2), min(hi, (k + window) // 2)
+            # lo and hi each advance by at most one per diagonal, so the next two
+            # diagonals only read cells lo - 1 .. hi + 1 of this one. The two
+            # cells just outside [lo, hi] are off the grid or out of the band.
+            cur[lo - 1] = np.inf
+            if hi < n:
+                cur[hi + 1] = np.inf
+            if lo <= hi:
+                width = hi - lo + 1
+                c, b = cost[:width], best[:width]
+                np.subtract(s_rows[lo - 1 : hi], t_rev[m - k + lo : m - k + hi + 1], out=c)
+                np.abs(c, out=c)
+                # D[i-1, j], D[i, j-1] and D[i-1, j-1] respectively.
+                np.minimum(prev1[lo - 1 : hi], prev1[lo : hi + 1], out=b)
+                np.minimum(b, prev2[lo - 1 : hi], out=b)
+                np.add(c, b, out=cur[lo : hi + 1])
+            prev2, prev1, cur = prev1, cur, prev2
+        return prev1[n].copy()
+
+    @staticmethod
+    def _dtw_distance(s: np.ndarray, t: np.ndarray, window: int | None = None) -> float:
         """Dynamic Time Warping distance between two 1-D series.
 
         Parameters
         ----------
         s, t : 1-D arrays
             The two time series.
+        window : int, optional
+            Sakoe-Chiba band half-width (see ``_dtw_batch``). ``None`` (the
+            default) is unconstrained DTW.
 
         Returns
         -------
-        The accumulated DTW cost (L1 element cost, no window constraint).
+        The accumulated DTW cost (L1 element cost).
         """
-        n, m = len(s), len(t)
-        dtw = np.full((n + 1, m + 1), np.inf)
-        dtw[0, 0] = 0.0
-        for i in range(1, n + 1):
-            for j in range(1, m + 1):
-                cost = abs(s[i - 1] - t[j - 1])
-                dtw[i, j] = cost + min(dtw[i - 1, j], dtw[i, j - 1], dtw[i - 1, j - 1])
-        return float(dtw[n, m])
+        s_arr = np.asarray(s, dtype=float).reshape(1, -1)
+        t_arr = np.asarray(t, dtype=float).reshape(1, -1)
+        return float(MarketSelection._dtw_batch(s_arr, t_arr, window)[0])
 
     def _geo_series(self) -> dict[str, np.ndarray]:
         """Extract the z-scored pre-period time series per geo.
@@ -227,9 +295,16 @@ class MarketSelection:
         date_str = date_key(self.data, self.date_variable)
         pre_key = period_key(self.pre_period, self.data, self.date_variable)
         pre = self.data.filter(date_str <= pre_key).sort(self.date_variable)
+        # Group the date-sorted rows by geo in one pass. A stable sort on the geo
+        # code keeps each geo's rows in the same (date) order as filtering would.
+        geo_codes, inverse = np.unique(pre[self.geo_variable].to_numpy(), return_inverse=True)
+        order = np.argsort(inverse, kind="stable")
+        bounds = np.searchsorted(inverse[order], np.arange(len(geo_codes) + 1))
+        y_sorted = pre[self.y_variable].to_numpy().astype(float)[order]
+        groups = {geo: y_sorted[bounds[i] : bounds[i + 1]] for i, geo in enumerate(geo_codes)}
         result: dict[str, np.ndarray] = {}
         for geo in self.all_geos:
-            vals = pre.filter(nw.col(self.geo_variable) == geo)[self.y_variable].to_numpy().astype(float)
+            vals = groups.get(geo, np.empty(0))
             std = vals.std()
             if std > 0:
                 vals = (vals - vals.mean()) / std
@@ -238,29 +313,82 @@ class MarketSelection:
             result[geo] = vals
         return result
 
-    def _pairwise_dtw(self) -> dict[tuple[str, str], float]:
+    def _dtw_matrix(
+        self,
+        rows: set[str] | None = None,
+        window: int | None = None,
+        chunk_size: int = 2048,
+    ) -> np.ndarray:
+        """Compute the matrix of pairwise DTW distances between geos.
+
+        Pairs are batched by series length and fed through ``_dtw_batch`` in
+        chunks of ``chunk_size`` to bound memory.
+
+        Parameters
+        ----------
+        rows : set of str, optional
+            Only compute pairs involving at least one of these geos; every other
+            off-diagonal entry is left as NaN. ``None`` computes all pairs.
+        window : int, optional
+            Sakoe-Chiba band half-width (see ``_dtw_batch``).
+        chunk_size : int, default=2048
+            The most pairs pushed through the recurrence at once.
+
+        Returns
+        -------
+        A symmetric ``(n_geos, n_geos)`` array of DTW distances, indexed in
+        ``all_geos`` order, with a zero diagonal.
+        """
+        series = self._geo_series()
+        geos = list(series)
+        n_geos = len(geos)
+        dist = np.full((n_geos, n_geos), np.nan)
+        np.fill_diagonal(dist, 0.0)
+
+        a_idx, b_idx = np.triu_indices(n_geos, k=1)
+        if rows is not None:
+            wanted = np.array([g in rows for g in geos], dtype=bool)
+            keep = wanted[a_idx] | wanted[b_idx]
+            a_idx, b_idx = a_idx[keep], b_idx[keep]
+
+        # Pairs in one batch must share both series lengths.
+        lengths = np.array([len(series[g]) for g in geos])
+        by_length = {n: np.array([series[g] for g in geos if len(series[g]) == n]) for n in set(lengths.tolist())}
+        position = np.zeros(n_geos, dtype=int)  # row of each geo within its length group
+        for n in by_length:
+            position[lengths == n] = np.arange(int((lengths == n).sum()))
+        pair_lengths = np.stack([lengths[a_idx], lengths[b_idx]], axis=1)
+        for n, m in {tuple(p) for p in pair_lengths.tolist()}:
+            sel = np.flatnonzero((pair_lengths[:, 0] == n) & (pair_lengths[:, 1] == m))
+            for start in range(0, len(sel), chunk_size):
+                chunk = sel[start : start + chunk_size]
+                a, b = a_idx[chunk], b_idx[chunk]
+                d = self._dtw_batch(by_length[n][position[a]], by_length[m][position[b]], window)
+                dist[a, b] = d
+                dist[b, a] = d
+        return dist
+
+    def _pairwise_dtw(self, window: int | None = None) -> dict[tuple[str, str], float]:
         """Compute pairwise DTW distances between all geos.
+
+        Parameters
+        ----------
+        window : int, optional
+            Sakoe-Chiba band half-width (see ``_dtw_batch``).
 
         Returns
         -------
         A mapping from ``(geo_a, geo_b)`` to DTW distance, with both orderings
         stored for convenient lookup.
         """
-        series = self._geo_series()
-        geos = list(series)
-        dist: dict[tuple[str, str], float] = {}
-        for i, a in enumerate(geos):
-            dist[(a, a)] = 0.0
-            for b in geos[i + 1 :]:
-                d = self._dtw_distance(series[a], series[b])
-                dist[(a, b)] = d
-                dist[(b, a)] = d
-        return dist
+        dist = self._dtw_matrix(window=window)
+        return {(a, b): float(dist[i, j]) for i, a in enumerate(self.all_geos) for j, b in enumerate(self.all_geos)}
 
     def _dtw_filter(
         self,
         candidates: list[tuple[str, ...]],
         top_k: int,
+        window: int | None = None,
     ) -> list[tuple[str, ...]]:
         """Keep the ``top_k`` candidates whose test geos are closest to controls.
 
@@ -274,16 +402,23 @@ class MarketSelection:
             The full candidate pool from ``_candidate_sets``.
         top_k : int
             How many candidates to keep.
+        window : int, optional
+            Sakoe-Chiba band half-width (see ``_dtw_batch``).
 
         Returns
         -------
         The ``top_k`` candidates with the smallest DTW scores.
         """
-        dist = self._pairwise_dtw()
+        # Scores only read distances from a test geo, so pairs where neither geo
+        # is ever tested (e.g. two excluded geos) are skipped.
+        dist = self._dtw_matrix(rows=set().union(*candidates), window=window)
+        index = {g: i for i, g in enumerate(self.all_geos)}
 
         def score(test_geos: tuple[str, ...]) -> float:
-            controls = [g for g in self.all_geos if g not in set(test_geos)]
-            return float(np.mean([min(dist[(tg, cg)] for cg in controls) for tg in test_geos]))
+            test_idx = [index[g] for g in test_geos]
+            controls = np.ones(len(self.all_geos), dtype=bool)
+            controls[test_idx] = False
+            return float(np.mean(dist[np.ix_(test_idx, controls)].min(axis=1)))
 
         scored = sorted(candidates, key=score)
         return scored[:top_k]
@@ -367,6 +502,7 @@ class MarketSelection:
         n_sims: int = 100,
         dtw_top_k: int | None = None,
         n_jobs: int = 1,
+        dtw_window: int | None = None,
     ) -> "MarketSelection":
         """Score and rank candidate test-geo sets.
 
@@ -392,15 +528,24 @@ class MarketSelection:
             Number of parallel workers for the candidate scoring loop.
             ``-1`` uses all available cores.  ``1`` (the default) runs
             sequentially with no parallelism overhead.
+        dtw_window : int, optional
+            Sakoe-Chiba band for the ``dtw_top_k`` pre-filter: series may only
+            be warped by up to this many dates. This cuts the DTW cost to
+            roughly ``(2 * dtw_window + 1) / T`` of the unconstrained cost for
+            ``T`` pre-period dates, but distances (and so the filtered
+            candidates) can differ from the unconstrained ones. ``None`` (the default) is unconstrained DTW.
+            Ignored unless ``dtw_top_k`` is set.
 
         Returns
         -------
         MarketSelection
             Itself, so it can be chained with summarize() / plot().
         """
+        if dtw_window is not None and dtw_window < 0:
+            raise ValueError(f"dtw_window must be non-negative, got {dtw_window}")
         candidates = self._candidate_sets(n_test_geos, include or [], exclude or [])
         if dtw_top_k is not None and dtw_top_k < len(candidates):
-            candidates = self._dtw_filter(candidates, dtw_top_k)
+            candidates = self._dtw_filter(candidates, dtw_top_k, window=dtw_window)
 
         native_data = self.data.to_native()
         geo_var = self.geo_variable
