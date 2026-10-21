@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dates. The penalty was already selected once and held fixed in every refit;
   the time went into coordinate descent itself, which hits its 100,000-sweep
   cap for the large candidate effects the interval search tries. The Gram
-  solver makes the same updates more cheaply, so results are unchanged up to
-  floating-point rounding (about 1e-10 relative). With 100 donors and 365
+  solver reaches the same solution more cheaply, so results are unchanged up
+  to floating-point rounding (about 1e-10 relative), though the number of
+  sweeps can differ on those badly conditioned large-effect refits. With 100 donors and 365
   days, `generate()` drops from 171 s to 16 s; with 400 donors and 365 days,
   from 700 s to 312 s. Panels with far more donors than dates (400 donors,
   120 days) keep the plain solver and are not faster.

@@ -325,9 +325,10 @@ class ElasticNetSyntheticControl(EconometricEstimator):
     def _use_gram(x: np.ndarray) -> bool:
         """Whether coordinate descent should run on the precomputed Gram matrix.
 
-        Gram-based coordinate descent makes exactly the same coordinate updates
-        as the plain solver (same iterates and iteration counts; coefficients
-        agree to ~1e-10 relative, i.e. floating-point rounding), but each sweep
+        Gram-based coordinate descent converges to the same solution as the
+        plain solver up to floating-point rounding (coefficients agree to
+        ~1e-10 relative); sweep counts can differ on badly conditioned refits,
+        such as the large candidate effects of the interval search. Each sweep
         costs ``O(n_donors^2)`` instead of ``O(n_dates * n_donors)`` and runs on
         a small contiguous matrix. In practice it is 2-20x faster unless the
         donors greatly outnumber the training dates; the measured break-even is
