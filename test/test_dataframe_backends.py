@@ -5,6 +5,11 @@ pandas spells ``pivot(columns=...)``, so a pandas DataFrame raised ``TypeError``
 in every synthetic-control style estimator. The suite only fed them polars, so
 it never noticed. These tests fit each estimator on the same panel as pandas
 and as polars and require identical results.
+
+The panel is varied along the axes where the two backends pivot differently:
+integer geos (polars names the pivoted columns ``"0"``, ``"1"``, ... while pandas
+keeps them as integers) and shuffled rows (the pivot must not depend on the
+source row order).
 """
 
 import numpy as np
@@ -44,10 +49,15 @@ ESTIMATORS = [
 RESULT_KEYS = ("incrementality", "incrementality_ci_lower", "incrementality_ci_upper", "p_value")
 
 
-@pytest.fixture(scope="module")
-def panel():
+@pytest.fixture(scope="module", params=["string_geos", "numeric_geos", "shuffled_rows"])
+def panel(request):
     # One treated geo keeps the treated series on the donors' scale.
-    return make_panel(effect=EFFECT, n_test=1, n_control=6)
+    panel = make_panel(effect=EFFECT, n_test=1, n_control=6)
+    if request.param == "numeric_geos":
+        panel.df["geo"] = panel.df["geo"].str[1:].astype(int)
+    elif request.param == "shuffled_rows":
+        panel.df = panel.df.sample(frac=1.0, random_state=0).reset_index(drop=True)
+    return panel
 
 
 def _fit(cls, data, panel) -> dict:

@@ -216,8 +216,13 @@ class InteractiveFixedEffects(EconometricEstimator):
         y = pivot.drop(self.date_variable).to_numpy()  # T x N
 
         # Treated-geo mask (column aligned) and the per-date treatment period.
-        treated_geos = set(self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].unique().to_list())
-        treated_mask = np.array([g in treated_geos for g in geos])
+        # Match on the string form: polars pivots integer geos into string column
+        # names ("0", "1", ...) while pandas keeps them as integers, so comparing
+        # raw values would silently mark no geo as treated on polars.
+        treated_geos = {
+            str(g) for g in self.data.filter(nw.col(self.treatment_variable) == 1)[self.geo_variable].unique().to_list()
+        }
+        treated_mask = np.array([str(g) in treated_geos for g in geos])
         period = (
             self.data.select([self.date_variable, "treatment_period"])
             .group_by(self.date_variable)
