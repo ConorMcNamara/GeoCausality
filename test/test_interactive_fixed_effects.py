@@ -232,20 +232,15 @@ class TestAtt:
 
 class TestPlot:
     @staticmethod
-    def test_plot_builds_figure(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        captured = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
-        _model(effect_data).pre_process().generate().plot()
-        assert "fig" in captured
+    def test_plot_builds_figure(effect_data: pl.DataFrame) -> None:
+        assert isinstance(_model(effect_data).pre_process().generate().plot(), go.Figure)
 
     @staticmethod
-    def test_plot_renders_confidence_bands(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_plot_renders_confidence_bands(effect_data: pl.DataFrame) -> None:
         # Regression: IFE now inherits the base counterfactual plot, which shades a
         # confidence band on each of the three panels (its own plot dropped them).
-        captured = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
-        _model(effect_data).pre_process().generate().plot()
-        band_traces = [trace for trace in captured["fig"].data if trace.fill == "tonexty"]
+        fig = _model(effect_data).pre_process().generate().plot()
+        band_traces = [trace for trace in fig.data if trace.fill == "tonexty"]
         assert len(band_traces) == 3
 
 

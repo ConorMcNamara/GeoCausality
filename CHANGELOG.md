@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Altair plotting backend** — every `plot()` method (and
+  `PowerAnalysis.plot_mde_sensitivity()` / `plot_power_heatmap()`) takes
+  `backend="plotly" | "altair"`. Each Altair chart draws the same series,
+  bands and reference lines as its Plotly figure, follows `dark_mode`, and
+  accepts date, datetime, ISO-string or integer date axes. Altair is optional:
+  `pip install "geocausality[altair]"`.
+
+### Changed
+
+- **Breaking: `plot()` returns the figure instead of showing it** — every
+  `plot()` method (and `PowerAnalysis.plot_mde_sensitivity()` /
+  `plot_power_heatmap()`) now returns its figure rather than calling
+  `fig.show()` and returning `None`. Notebooks still render the figure when it
+  is the cell's last expression; scripts should call `.show()` on the result.
+- **`GeoX.plot()` uses the shared counterfactual figure** — the same three
+  panels as the synthetic-control estimators, so its bands now draw beneath
+  the series, the cumulative band is orange like theirs, the top band has a
+  legend entry, and the middle series is labelled "Difference" rather than
+  "Residuals". The intervals shaded are unchanged. Every other Plotly figure
+  is unchanged.
+- **Plotting internals** — `GeoCausality._plotting` is now a package: each
+  `plot()` builds a backend-free figure description (`figures`) and `render`
+  draws it with a per-backend renderer (`_plotly`, `_altair`).
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed

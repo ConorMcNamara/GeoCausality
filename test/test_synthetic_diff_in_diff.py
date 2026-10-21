@@ -20,7 +20,6 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
-import plotly.graph_objects as go
 import plotly.io as pio
 import polars as pl
 import pytest
@@ -194,12 +193,9 @@ class TestSummarize:
 
 class TestPlot:
     @staticmethod
-    def test_plot_renders_confidence_bands(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        captured = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
+    def test_plot_renders_confidence_bands(effect_data: pl.DataFrame) -> None:
         model = _model(effect_data).pre_process().generate()
-        model.plot()
-        fig = captured["fig"]
+        fig = model.plot()
         # One shaded band per panel (top, middle, cumulative) via `fill="tonexty"`.
         band_traces = [t for t in fig.data if t.fill == "tonexty"]
         assert len(band_traces) == 3
@@ -209,18 +205,29 @@ class TestPlot:
 
     @staticmethod
     @pytest.mark.parametrize(("dark_mode", "theme"), [(False, LIGHT_THEME), (True, DARK_THEME)], ids=["light", "dark"])
-    def test_plot_applies_theme(
-        effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch, dark_mode: bool, theme: PlotTheme
-    ) -> None:
-        captured = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
-        model = _model(effect_data).pre_process().generate()
-        model.plot(dark_mode=dark_mode)
-        fig = captured["fig"]
+    def test_plot_applies_theme(effect_data: pl.DataFrame, dark_mode: bool, theme: PlotTheme) -> None:
+        fig = _model(effect_data).pre_process().generate().plot(dark_mode=dark_mode)
         assert fig.layout.template == pio.templates[theme.template or pio.templates.default]
         actual = next(t for t in fig.data if t.name == "Actual")
         assert actual.marker.color == theme.actual
         assert all(shape.line.color == theme.reference for shape in fig.layout.shapes)
+
+    @staticmethod
+    def test_altair_backend_matches_plotly_bands(effect_data: pl.DataFrame) -> None:
+        alt = pytest.importorskip("altair")
+        model = _model(effect_data).pre_process().generate()
+        chart = model.plot(backend="altair")
+        assert isinstance(chart, alt.VConcatChart)
+        spec = chart.to_dict()  # validates against the Vega-Lite schema
+        assert [panel["title"] for panel in spec["vconcat"]] == [
+            "Expected vs Counterfactual",
+            "Pointwise Difference",
+            "Cumulative Difference",
+        ]
+        # The cumulative band ends at the reported incrementality CI, as in Plotly.
+        cumulative_band = chart.vconcat[2].layer[0].data
+        assert cumulative_band["lower"].iloc[-1] == pytest.approx(model.results["incrementality_ci_lower"], rel=1e-6)
+        assert cumulative_band["upper"].iloc[-1] == pytest.approx(model.results["incrementality_ci_upper"], rel=1e-6)
 
 
 if __name__ == "__main__":
