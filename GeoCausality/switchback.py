@@ -881,6 +881,8 @@ class Switchback(Estimator):
 
         if sigma is None:
             sigma = float(np.sqrt(self.model.resids.var()))
+        if sigma < 0:
+            raise ValueError(f"sigma must be non-negative, got {sigma}")
         if rho is None:
             resids = self.model.resids
             residuals_by_geo: list[np.ndarray] = []

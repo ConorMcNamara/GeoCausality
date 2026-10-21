@@ -334,6 +334,12 @@ class TestPowerSimulation:
         assert 0.0 <= result["power"] <= 1.0
 
     @staticmethod
+    def test_rejects_negative_sigma(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        with pytest.raises(ValueError, match="sigma must be non-negative"):
+            model.power_simulation(mde=5.0, n_simulations=2, sigma=-1.0)
+
+    @staticmethod
     def test_large_effect_high_power(data_df: pd.DataFrame) -> None:
         model = _fit(data_df)
         result = model.power_simulation(mde=20.0, n_simulations=20, seed=0)
