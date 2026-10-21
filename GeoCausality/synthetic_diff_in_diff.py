@@ -5,7 +5,6 @@ from typing import Any
 import narwhals as nw
 import numpy as np
 from narwhals.typing import IntoDataFrame
-from scipy.optimize import Bounds, LinearConstraint, minimize
 from scipy.stats import norm
 
 from GeoCausality._base import EconometricEstimator
@@ -221,34 +220,14 @@ class SyntheticDiffInDiff(EconometricEstimator):
         -------
         A tuple of (intercept, weights).
         """
-        n_r, n_c = x.shape
+        n_r = x.shape[0]
         penalty = zeta * zeta * n_r
         # Profile out the free intercept: for any weights the optimal intercept is
         # ``mean(y) - mean(x @ w)``, so centering both sides removes it from the
-        # optimisation. Solving the well-conditioned centered problem (rather than
-        # carrying a large-magnitude unbounded intercept variable) keeps SLSQP
-        # stable at outcome scales such as GDP.
+        # optimisation, leaving a ridge-penalised simplex least-squares problem.
         x_bar = x.mean(axis=0)
         y_bar = float(y.mean())
-        xc = x - x_bar
-        yc = y - y_bar
-        # Divide the objective by the target variance so its value and gradients
-        # are O(1) regardless of the outcome scale. The minimiser is unchanged (a
-        # positive constant does not move the argmin), but this keeps SLSQP's
-        # relative convergence test from stopping early at large outcome scales
-        # such as GDP -- otherwise the fitted weights, and hence the estimate,
-        # drift with the platform's BLAS/LAPACK build.
-        scale = max(float(np.var(yc)), 1e-12)
-        bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
-        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
-        w0 = np.full(n_c, 1.0 / n_c)
-
-        def loss(w: np.ndarray) -> float:
-            resid = yc - xc @ w
-            return float((resid @ resid + penalty * (w @ w)) / scale)
-
-        res = minimize(fun=loss, x0=w0, bounds=bounds, constraints=constraints, method="SLSQP")
-        weights = res["x"]
+        weights = self._solve_simplex_lsq(x - x_bar, y - y_bar, "SyntheticDiffInDiff", ridge=penalty)
         intercept = y_bar - float(x_bar @ weights)
         return intercept, weights
 

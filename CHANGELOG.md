@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster simplex donor weights** — `SyntheticControl`,
+  `AugmentedSyntheticControl`, `SyntheticControlV` and `SyntheticDiffInDiff`
+  fit their simplex-constrained weights (``w >= 0, sum(w) = 1``) with
+  non-negative least squares (`_solve_simplex_lsq`) instead of SLSQP. SLSQP's
+  cost grows roughly cubically with the donor count and conformal inference
+  refits the weights dozens of times, so 400-donor panels took minutes; NNLS
+  matches a tightly converged SLSQP to ~1e-14 in relative loss and is orders
+  of magnitude faster. `SyntheticControl` and `AugmentedSyntheticControl`
+  results are unchanged (to 1e-6). `PenalizedSyntheticControl` keeps SLSQP:
+  its linear discrepancy penalty has no least-squares form.
+- **`SyntheticControlV` and `SyntheticDiffInDiff` estimates shift slightly**
+  — their SLSQP calls had no analytic gradient and a loose tolerance, and
+  stopped short of the optimum while reporting success (SDID's near-exact
+  time-weight fits stopped at a loss of ~1e-8 rather than ~1e-13, before the
+  ridge that selects among them took effect). NNLS reaches the optimum, so
+  their incrementality and intervals move by roughly 0.01-2% on test panels.
+  The published-replication parity tests still pass.
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed
