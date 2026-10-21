@@ -17,7 +17,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from GeoCausality.matrix_completion import MatrixCompletion
+from GeoCausality.matrix_completion import MatrixCompletion, _svt
 
 TEST_GEOS = ("g0", "g1")
 LONG_PRE, LONG_POST = 30, 10
@@ -166,6 +166,86 @@ class TestPenaltyAndReproducibility:
         df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
         results = _build(df, pre, post, use_time_effect=False).pre_process().generate().results
         assert results["incrementality"] > 0.0
+
+
+def _full_svd_svt(x: np.ndarray, lambda_: float) -> np.ndarray:
+    """Reference soft-threshold via a full SVD."""
+    u, s, vt = np.linalg.svd(x, full_matrices=False)
+    return (u * np.maximum(s - lambda_, 0.0)) @ vt
+
+
+def _masked_panel(seed: int = 0, shape: tuple[int, int] = (12, 40)) -> tuple[np.ndarray, np.ndarray]:
+    """A rank-2-plus-noise panel with fixed effects and ~20% of cells masked."""
+    rng = np.random.default_rng(seed)
+    n_units, n_periods = shape
+    panel = (
+        rng.normal(0, 5, size=(n_units, 1))
+        + rng.normal(0, 1, size=(1, n_periods)).cumsum(axis=1)
+        + rng.normal(size=(n_units, 2)) @ rng.normal(size=(2, n_periods)) * 3.0
+        + rng.normal(0, 0.5, size=shape)
+    )
+    mask = rng.uniform(size=shape) > 0.2
+    return panel, mask
+
+
+class TestSoftThreshold:
+    @staticmethod
+    @pytest.mark.parametrize("shape", [(5, 9), (9, 5), (30, 30), (21, 120), (120, 21)])
+    @pytest.mark.parametrize("rank", [1, 3, None])
+    def test_matches_full_svd(shape: tuple[int, int], rank: int | None) -> None:
+        rng = np.random.default_rng(sum(shape))
+        k = min(shape) if rank is None else rank
+        x = rng.normal(size=(shape[0], k)) @ rng.normal(size=(k, shape[1])) * 10.0 + rng.normal(size=shape)
+        s = np.linalg.svd(x, compute_uv=False)
+        # Above the top singular value, between singular values, near the
+        # bottom of the spectrum, and the tiny-penalty full-SVD fallback.
+        for lambda_ in [1.01 * s[0], 0.5 * (s[0] + s[-1]), s[min(2, s.size - 1)], 0.5 * s[-1], 1e-3 * s[0], 1e-9, 0.0]:
+            expected = _full_svd_svt(x, lambda_)
+            np.testing.assert_allclose(_svt(x, lambda_), expected, rtol=0.0, atol=1e-10 * s[0])
+
+    @staticmethod
+    def test_above_top_singular_value_is_zero() -> None:
+        x = np.random.default_rng(0).normal(size=(6, 8))
+        lambda_ = 1.5 * np.linalg.svd(x, compute_uv=False)[0]
+        assert not np.any(_svt(x, lambda_))
+
+
+class TestSolverInternals:
+    @staticmethod
+    def test_two_way_fe_full_mask_is_two_way_demeaning() -> None:
+        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=0.0)
+        model = _build(df, pre, post, tol=1e-12, max_iter=1000)
+        panel, _ = _masked_panel()
+        gamma, delta = model._two_way_fe(panel, np.ones_like(panel, dtype=bool))
+        expected = panel.mean(axis=1)[:, None] + panel.mean(axis=0)[None, :] - panel.mean()
+        np.testing.assert_allclose(gamma[:, None] + delta[None, :], expected, atol=1e-9)
+
+    @staticmethod
+    def test_warm_start_reaches_cold_start_solution() -> None:
+        # Warm-starting a penalty from the previous one's low-rank term (as the
+        # cross-validation path does) converges to the same completion.
+        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=0.0)
+        model = _build(df, pre, post, tol=1e-11, max_iter=5000)
+        panel, mask = _masked_panel()
+        path = model._lambda_path(panel, mask)
+        _, warm = model._complete(panel, mask, path[5])
+        cold_fit, _ = model._complete(panel, mask, path[6])
+        warm_fit, _ = model._complete(panel, mask, path[6], warm)
+        np.testing.assert_allclose(warm_fit, cold_fit, rtol=0.0, atol=1e-6 * np.abs(cold_fit).max())
+
+    @staticmethod
+    def test_continuation_solve_is_near_converged() -> None:
+        # At a small penalty the final fit (reached by continuation down the
+        # path) at the default tolerance sits close to a tightly converged fit;
+        # a cold solve from zero stops ~30x farther away on this panel.
+        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=0.0)
+        panel, mask = _masked_panel(seed=1)
+        loose = _build(df, pre, post)
+        lambda_ = float(loose._lambda_path(panel, mask)[30])
+        loose.lambda_ = lambda_
+        tight = _build(df, pre, post, lambda_=lambda_, tol=1e-11, max_iter=20000)
+        expected = tight._solve(panel, mask)
+        np.testing.assert_allclose(loose._solve(panel, mask), expected, rtol=0.0, atol=1e-4 * np.abs(expected).max())
 
 
 class TestValidation:
