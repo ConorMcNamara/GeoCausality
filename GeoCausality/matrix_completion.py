@@ -14,8 +14,17 @@ _CONVERGENCE_NORM_EPS = 1e-12
 
 # Below this penalty (relative to the matrix's Frobenius norm) the Gram-matrix
 # soft-threshold could admit round-off-level eigenvalues, so ``_svt`` falls
-# back to a full SVD. Above it the two agree to ~1e-12 relative.
+# back to a full SVD. Above it the two agree to round-off amplified by the
+# squared condition number (worst seen ~5e-11 of the top singular value, on
+# ill-conditioned inputs with the penalty just above this cutoff).
 _GRAM_MIN_LAMBDA_RATIO = 1e-6
+
+# The continuation path for the final fit: ``_CONTINUATION_STEPS`` geometric
+# steps from ``lambda_max`` down to ``lambda_max * _CONTINUATION_MIN_RATIO``.
+# Fixed (rather than ``n_lambda`` / ``lambda_ratio``) so a given penalty fits
+# the same way however the cross-validation path is configured.
+_CONTINUATION_STEPS = 50
+_CONTINUATION_MIN_RATIO = 1e-3
 
 
 class MatrixCompletion(EconometricEstimator):
@@ -36,7 +45,9 @@ class MatrixCompletion(EconometricEstimator):
     Imbens & Khosravi :cite:`athey2021matrix`. The nuclear-norm penalty
     ``lambda_`` is chosen by cross-validation over a decreasing path (each
     penalty warm-started from the previous one's low-rank term) unless supplied;
-    the final fit reaches it by the same warm-started continuation.
+    the final fit reaches it by warm-started continuation down a fixed penalty
+    path, so a given ``lambda_`` fits the same way whatever ``n_lambda`` and
+    ``lambda_ratio`` are.
 
     Inference reuses the shared conformal p-values and confidence intervals from
     ``EconometricEstimator`` (with the residual-only jackknife+ fallback for
@@ -251,12 +262,12 @@ class MatrixCompletion(EconometricEstimator):
         The fitted full panel on the original scale.
         """
         lambda_ = self.lambda_ if self.lambda_ is not None else self._cv_lambda(panel, mask)
-        # Reach the penalty by continuation: warm-start down the path's larger
-        # penalties first. Soft-impute converges slowly from zero at small
-        # penalties, so a cold solve can stop (relative change below ``tol``)
-        # well short of the optimum.
+        # Reach the penalty by continuation: warm-start down a fixed path's
+        # larger penalties first. Soft-impute converges slowly from zero at
+        # small penalties, so a cold solve can stop (relative change below
+        # ``tol``) well short of the optimum.
         low_rank = None
-        for step in self._lambda_path(panel, mask):
+        for step in self._lambda_path(panel, mask, _CONTINUATION_STEPS, _CONTINUATION_MIN_RATIO):
             if step <= lambda_:
                 break
             _, low_rank = self._complete(panel, mask, step, low_rank)
@@ -370,20 +381,25 @@ class MatrixCompletion(EconometricEstimator):
             prev = low_rank
         return low_rank
 
-    def _lambda_path(self, panel: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def _lambda_path(
+        self, panel: np.ndarray, mask: np.ndarray, n_lambda: int | None = None, ratio: float | None = None
+    ) -> np.ndarray:
         """Geometric penalty path from ``lambda_max`` down to ``lambda_max * ratio``.
 
         ``lambda_max`` is the largest singular value of the two-way-demeaned
         observed matrix -- the smallest penalty that shrinks the low-rank term to
         zero -- so the path spans the full range from pure fixed effects to a
-        near-interpolating completion.
+        near-interpolating completion. ``n_lambda`` and ``ratio`` default to the
+        estimator's cross-validation settings.
         """
         gamma, delta = self._two_way_fe(panel, mask)
         demeaned = np.where(mask, panel - gamma[:, None] - delta[None, :], 0.0)
         lambda_max = float(np.linalg.svd(demeaned, compute_uv=False)[0])
         if lambda_max <= 0.0:
             return np.zeros(1)
-        return np.geomspace(lambda_max, lambda_max * self.lambda_ratio, self.n_lambda)
+        n_lambda = self.n_lambda if n_lambda is None else n_lambda
+        ratio = self.lambda_ratio if ratio is None else ratio
+        return np.geomspace(lambda_max, lambda_max * ratio, n_lambda)
 
     def _cv_lambda(self, panel: np.ndarray, mask: np.ndarray) -> float:
         """Pick the penalty minimizing held-out error on masked observed cells.
@@ -431,9 +447,12 @@ def _svt(x: np.ndarray, lambda_: float) -> np.ndarray:
     full SVD this eigendecomposes the smaller Gram matrix and keeps the
     eigenpairs whose eigenvalues exceed ``lambda_**2``. With ``A`` the tall
     orientation of ``x`` and ``V`` the kept eigenvectors, the result is
-    ``A V diag(1 - lambda_ / s) V^T`` since ``A v_i = s_i u_i``. This matches
-    the full-SVD soft-threshold to round-off (~1e-12 relative) and is two to
-    four times faster. For a penalty that is tiny relative to ``x`` (including
+    ``A V diag(1 - lambda_ / s) V^T`` since ``A v_i = s_i u_i``. This is two
+    to four times faster than a full SVD. Forming the Gram matrix squares the
+    condition number, so the two agree to round-off only up to that
+    amplification: typically ~1e-15 of the top singular value, but up to
+    ~5e-11 of it (~1e-9 relative to the result) on ill-conditioned inputs
+    with ``lambda_`` just above the full-SVD fallback cutoff. For a penalty that is tiny relative to ``x`` (including
     ``lambda_ = 0``), where squaring would let round-off-level eigenvalues
     through, it falls back to the full SVD.
 

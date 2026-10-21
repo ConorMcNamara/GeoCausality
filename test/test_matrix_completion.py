@@ -247,6 +247,27 @@ class TestSolverInternals:
         expected = tight._solve(panel, mask)
         np.testing.assert_allclose(loose._solve(panel, mask), expected, rtol=0.0, atol=1e-4 * np.abs(expected).max())
 
+    @staticmethod
+    def test_fixed_lambda_ignores_cv_path_settings() -> None:
+        # A supplied penalty is reached by a fixed continuation path, so the CV
+        # path's length and depth do not change the fit.
+        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=0.0)
+        panel, mask = _masked_panel(seed=1)
+        lambda_ = 0.002 * float(_build(df, pre, post)._lambda_path(panel, mask)[0])
+        expected = _build(df, pre, post, lambda_=lambda_)._solve(panel, mask)
+        for n_lambda, lambda_ratio in [(2, 1e-3), (200, 1e-3), (50, 0.5)]:
+            model = _build(df, pre, post, lambda_=lambda_, n_lambda=n_lambda, lambda_ratio=lambda_ratio)
+            np.testing.assert_array_equal(model._solve(panel, mask), expected)
+
+    @staticmethod
+    def test_cv_selected_lambda_is_pinned() -> None:
+        # Regression pin on the warm-started CV path: the held-out error has a
+        # clear minimum at step 25 of 50 on this panel (the neighbours are ~0.1%
+        # worse), so any drift in the path or the warm starts shows up here.
+        df, pre, post = _panel(SHORT_PRE, SHORT_POST, effect=0.0)
+        panel, mask = _masked_panel(seed=0)
+        assert _build(df, pre, post)._cv_lambda(panel, mask) == pytest.approx(1.1571268454788184, rel=1e-6)
+
 
 class TestValidation:
     @staticmethod

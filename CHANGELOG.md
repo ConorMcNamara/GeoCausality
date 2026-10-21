@@ -9,18 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Faster `MatrixCompletion`** — `generate()` is 40-200x faster (100
-  donors x 120 days: ~53 s to ~1.3 s; 400 x 365: over 5 min to ~20 s).
-  Every fit is now warm-started along the decreasing penalty path, including
-  the final fit at the chosen penalty, instead of starting from zero. The
+- **Faster `MatrixCompletion`** — `generate()` is 40-200x faster (100 donors
+  x 120 days: ~53 s to ~1.3 s; 400 x 365: over 5 min to ~20 s). Every fit is
+  now warm-started along the decreasing penalty path, including the final
+  fit at the chosen penalty, instead of starting from zero. The
   singular-value soft-threshold eigendecomposes the smaller Gram matrix
-  (matching the full SVD to round-off), and the fixed-effect sweeps use
-  matrix-vector products. Soft-impute converges slowly from zero at small
-  penalties, so the old cold-start fits often stopped short of the optimum;
-  the new fits sit closer to the converged solution. Results therefore shift
-  slightly: within 0.2% on most panels, while a few panels with a flat
-  cross-validation curve now pick a different penalty. On the West Germany
-  parity panel the average gap moves from -755 to -826 (converged: -860).
+  (matching the full SVD to ~1e-9 relative or better), and the fixed-effect
+  sweeps use matrix-vector products. Soft-impute converges slowly from zero
+  at small penalties, so the old cold-start fits often stopped short of the
+  optimum; the new fits sit closer to the converged solution. Results
+  therefore shift slightly: within 0.2% on most panels, while a few panels
+  with a flat cross-validation curve now pick a different penalty. On the
+  West Germany parity panel the average gap moves from -755 to -826
+  (converged: -860). The final fit's continuation path is fixed, so a
+  supplied `lambda_` gives the same fit whatever `n_lambda` and
+  `lambda_ratio` are.
 
 ## [0.19.1] - 2026-10-16
 
