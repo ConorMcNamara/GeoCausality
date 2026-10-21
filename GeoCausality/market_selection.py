@@ -191,6 +191,28 @@ class MarketSelection:
         return list(seen)
 
     @staticmethod
+    def _check_window(window: int | None) -> None:
+        """Validate a Sakoe-Chiba band half-width.
+
+        Parameters
+        ----------
+        window : int, optional
+            The band half-width, or ``None`` for unconstrained DTW.
+
+        Raises
+        ------
+        ValueError
+            If ``window`` is not ``None`` or a non-negative integer. ``bool`` is
+            rejected even though it subclasses ``int``.
+        """
+        if window is None:
+            return
+        if isinstance(window, bool) or not isinstance(window, (int, np.integer)):
+            raise ValueError(f"dtw_window must be a non-negative integer or None, got {window!r}")
+        if window < 0:
+            raise ValueError(f"dtw_window must be non-negative, got {window}")
+
+    @staticmethod
     def _dtw_batch(s: np.ndarray, t: np.ndarray, window: int | None = None) -> np.ndarray:
         """Dynamic Time Warping distances for a batch of series pairs.
 
@@ -217,6 +239,7 @@ class MarketSelection:
         -------
         A 1-D array of the accumulated DTW cost (L1 element cost) per pair.
         """
+        MarketSelection._check_window(window)
         s = np.asarray(s, dtype=float)
         t = np.asarray(t, dtype=float)
         n_pairs, n = s.shape
@@ -224,7 +247,7 @@ class MarketSelection:
         if n == 0 or m == 0:
             return np.full(n_pairs, 0.0 if n == m else np.inf)
         if window is not None:
-            window = max(window, abs(n - m))
+            window = max(int(window), abs(n - m))
 
         # Diagonals are indexed by i (row 0..n) and laid out as (i, pair) so every
         # slice below is contiguous. ``t`` is reversed so that t[j - 1] with
@@ -285,7 +308,11 @@ class MarketSelection:
 
         Z-scoring makes DTW distances comparable across geos with different
         outcome scales: a geo with mean-100 and a geo with mean-10000 are
-        judged on shape, not level.
+        judged on shape, not level. Missing (null / NaN) and infinite outcomes
+        are dropped before z-scoring -- a single one would otherwise turn the
+        whole series, and every DTW distance to it, into NaN -- and DTW aligns
+        the shorter series that remain. Rows with a null geo ID are dropped too,
+        so a null geo gets an empty series (infinitely far from every other).
 
         Returns
         -------
@@ -295,16 +322,21 @@ class MarketSelection:
         date_str = date_key(self.data, self.date_variable)
         pre_key = period_key(self.pre_period, self.data, self.date_variable)
         pre = self.data.filter(date_str <= pre_key).sort(self.date_variable)
+        y = pre[self.y_variable].to_numpy().astype(float)
+        keep = np.isfinite(y) & ~pre[self.geo_variable].is_null().to_numpy()
         # Group the date-sorted rows by geo in one pass. A stable sort on the geo
         # code keeps each geo's rows in the same (date) order as filtering would.
-        geo_codes, inverse = np.unique(pre[self.geo_variable].to_numpy(), return_inverse=True)
+        geo_codes, inverse = np.unique(pre[self.geo_variable].to_numpy()[keep], return_inverse=True)
         order = np.argsort(inverse, kind="stable")
         bounds = np.searchsorted(inverse[order], np.arange(len(geo_codes) + 1))
-        y_sorted = pre[self.y_variable].to_numpy().astype(float)[order]
+        y_sorted = y[keep][order]
         groups = {geo: y_sorted[bounds[i] : bounds[i + 1]] for i, geo in enumerate(geo_codes)}
         result: dict[str, np.ndarray] = {}
         for geo in self.all_geos:
             vals = groups.get(geo, np.empty(0))
+            if vals.size == 0:
+                result[geo] = vals
+                continue
             std = vals.std()
             if std > 0:
                 vals = (vals - vals.mean()) / std
@@ -541,8 +573,7 @@ class MarketSelection:
         MarketSelection
             Itself, so it can be chained with summarize() / plot().
         """
-        if dtw_window is not None and dtw_window < 0:
-            raise ValueError(f"dtw_window must be non-negative, got {dtw_window}")
+        self._check_window(dtw_window)
         candidates = self._candidate_sets(n_test_geos, include or [], exclude or [])
         if dtw_top_k is not None and dtw_top_k < len(candidates):
             candidates = self._dtw_filter(candidates, dtw_top_k, window=dtw_window)

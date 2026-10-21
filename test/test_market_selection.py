@@ -402,6 +402,52 @@ class TestDTWMatchesReference:
         with pytest.raises(ValueError, match="dtw_window"):
             _selection(history).search(n_test_geos=[1], dtw_top_k=3, dtw_window=-1)
 
+    @staticmethod
+    @pytest.mark.parametrize("window", [2.0, 1.5, "2", True])
+    def test_dtw_window_must_be_integer(history: pl.DataFrame, window: object) -> None:
+        with pytest.raises(ValueError, match="dtw_window must be a non-negative integer"):
+            _selection(history).search(n_test_geos=[1], dtw_top_k=3, dtw_window=window)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="dtw_window must be a non-negative integer"):
+            MarketSelection._dtw_distance(np.ones(5), np.zeros(5), window=window)  # type: ignore[arg-type]
+
+    @staticmethod
+    def test_dtw_window_accepts_numpy_integer() -> None:
+        s, t = np.arange(8.0), np.arange(8.0)[::-1]
+        assert MarketSelection._dtw_distance(s, t, window=np.int64(2)) == MarketSelection._dtw_distance(s, t, window=2)
+
+    @staticmethod
+    def test_dtw_filter_skips_missing_outcomes(history: pl.DataFrame) -> None:
+        # One null outcome used to turn a geo's z-scored series (and every
+        # distance to it) into NaN, degrading the ranking to enumeration order.
+        gappy = history.with_columns(
+            pl.when((pl.col("geo") == "g5") & (pl.col("date") == date(2021, 1, 10)))
+            .then(None)
+            .otherwise(pl.col("y"))
+            .alias("y")
+        )
+        ms = _selection(gappy)
+        series = ms._geo_series()
+        assert all(np.isfinite(v).all() for v in series.values())
+        assert len(series["g5"]) == len(series["g0"]) - 1
+        assert not np.isnan(ms._pairwise_dtw()[("g0", "g5")])
+        # The ranking matches the one computed with g5's missing date dropped.
+        dropped = history.filter(~((pl.col("geo") == "g5") & (pl.col("date") == date(2021, 1, 10))))
+        candidates = ms._candidate_sets(n_test_geos=[1, 2], include=[], exclude=[])
+        assert ms._dtw_filter(candidates, top_k=5) == _selection(dropped)._dtw_filter(candidates, top_k=5)
+        assert ms._dtw_filter(candidates, top_k=5) == _reference_dtw_filter(ms, candidates, 5)
+
+    @staticmethod
+    def test_dtw_filter_null_geo_id(history: pl.DataFrame) -> None:
+        # Null geo IDs must not break the single-pass grouping; the null geo's
+        # rows are dropped, leaving it an empty series as on a per-geo filter.
+        nulled = history.with_columns(pl.when(pl.col("geo") == "g0").then(None).otherwise(pl.col("geo")).alias("geo"))
+        ms = _selection(nulled)
+        series = ms._geo_series()
+        assert len(series[None]) == 0  # type: ignore[index]
+        candidates = [c for c in ms._candidate_sets(n_test_geos=[1], include=[], exclude=[]) if c != (None,)]
+        kept = ms._dtw_filter(candidates, top_k=3)
+        assert kept == _reference_dtw_filter(ms, candidates, 3)
+
 
 class TestParallel:
     @staticmethod
