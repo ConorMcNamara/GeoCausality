@@ -110,6 +110,48 @@ class TestConfiguration:
         assert results["incrementality"] > 0.0
 
 
+class TestRefitSolver:
+    @staticmethod
+    def test_penalty_selected_once() -> None:
+        # The penalty is cross-validated once on the observed pre-period; the
+        # ~50 conformal / cross-fit refits reuse it rather than re-tuning.
+        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
+        model = _build(df, pre, post).pre_process()
+        fitted: list[str] = []
+        silent_fit = ElasticNetSyntheticControl._silent_fit
+
+        def counting_fit(estimator: object, x: np.ndarray, y: np.ndarray) -> object:
+            fitted.append(type(estimator).__name__)
+            return silent_fit(estimator, x, y)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(model, "_silent_fit", counting_fit)
+            model.generate()
+        assert fitted.count("ElasticNetCV") == 1
+        assert fitted.count("ElasticNet") > 1
+
+    @staticmethod
+    @pytest.mark.parametrize("overrides", [{}, {"intercept": False}, {"non_negative": True}, {"l1_ratio": 0.0}])
+    def test_gram_solver_matches_plain(overrides: dict) -> None:
+        # The Gram (precomputed) coordinate descent makes the same updates as
+        # the plain solver, so the refit weights agree to rounding error.
+        df, pre, post = _panel(LONG_PRE, LONG_POST, effect=40.0)
+        model = _build(df, pre, post, **overrides).pre_process().generate()
+        assert model.lambda_ is not None
+        x, y = model._jk_x_pre, model._jk_y_pre
+        plain = model._silent_fit(model._make_estimator(model.lambda_, precompute=False), x, y)
+        gram = model._silent_fit(model._make_estimator(model.lambda_, precompute=True), x, y)
+        assert gram.n_iter_ == plain.n_iter_
+        np.testing.assert_allclose(gram.coef_, plain.coef_, rtol=1e-8, atol=1e-10)
+        assert gram.intercept_ == pytest.approx(plain.intercept_, rel=1e-8, abs=1e-10)
+
+    @staticmethod
+    @pytest.mark.parametrize(("shape", "expected"), [((120, 20), True), ((120, 300), True), ((120, 400), False)])
+    def test_use_gram_threshold(shape: tuple[int, int], expected: bool) -> None:
+        # Gram is used unless donors exceed 2.5x the training dates.
+        assert ElasticNetSyntheticControl._use_gram(np.zeros(shape)) is expected
+
+
 class TestValidation:
     @staticmethod
     @pytest.mark.parametrize(
