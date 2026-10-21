@@ -929,6 +929,13 @@ class EconometricEstimator(Estimator, ABC):
                 x_out = mid
         return x_in
 
+    # The outward search for an interval bound gives up this many residual
+    # spreads from where it started and reports the bound as infinite. Finite
+    # bounds sit within a few tens of spreads in practice, while searching
+    # further only refits ever more extreme, ill-conditioned problems (up to
+    # ~1e13 spreads before this cap). Stopping early can only widen the interval.
+    _CI_SEARCH_MAX_SPREADS = 1e3
+
     def _conformal_interval(
         self,
         pre_resid: np.ndarray,
@@ -936,16 +943,24 @@ class EconometricEstimator(Estimator, ABC):
         q: float = 1.0,
         alpha: float | None = None,
         resid_fn: Callable[[float], tuple[np.ndarray, np.ndarray]] | None = None,
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, list[tuple[float, float]]]:
         """Confidence interval for a constant per-period effect by test inversion.
 
-        Inverts the moving-block permutation test: the interval is the set of
-        constant per-period effects ``theta`` for which the sharp null is not
+        Inverts the moving-block permutation test: the confidence set is the set
+        of constant per-period effects ``theta`` for which the sharp null is not
         rejected at level ``alpha``. Under each ``theta``, ``resid_fn`` returns
         the residuals of the counterfactual refit on all periods with the
         post-period outcome reduced by ``theta`` (Chernozhukov, Wuthrich & Zhu,
         2021). Without it, ``theta`` is subtracted from the fixed post-period
         residuals, which is only an approximation.
+
+        The set is usually one interval around the point estimate, but need not
+        be: a flexible counterfactual can absorb very large effects (so they are
+        never rejected) while effects near the estimate are. The returned bounds
+        are always the set's outer hull, which is a valid, if conservative,
+        confidence set. When the set is not a single interval -- or the hull
+        disagrees with the test at zero -- its pieces are located explicitly and
+        a warning is raised.
 
         Parameters
         ----------
@@ -961,7 +976,9 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        A tuple of (lower, upper) bounds on the per-period effect.
+        A tuple of (lower, upper, pieces): the hull bounds on the per-period
+        effect, and the accepted intervals as ``(lower, upper)`` pairs (a single
+        pair when the set is an interval, empty when every effect is rejected).
         """
         if alpha is None:
             alpha = self.alpha
@@ -974,18 +991,25 @@ class EconometricEstimator(Estimator, ABC):
             def resid_fn(theta: float) -> tuple[np.ndarray, np.ndarray]:
                 return pre_resid, post_resid - theta
 
+        # Every evaluated effect and whether the test accepts it, for locating
+        # the pieces of a confidence set that is not a single interval.
+        seen: dict[float, bool] = {}
+
         def p_func(theta: float) -> float:
-            return self._conformal_p_value(*resid_fn(theta), q)
+            p_value = self._conformal_p_value(*resid_fn(theta), q)
+            seen[float(theta)] = p_value >= alpha
+            return p_value
 
         # Bisection needs a point inside the acceptance region. The mean
         # post-period residual usually is, but not always (e.g. when the
         # pre-period fit is much tighter than the post-period noise), so fall
         # back to a grid search for the accepted points nearest each end.
         lo_in = hi_in = center
+        gaps = False
         if p_func(center) < alpha:
             grid = center + spread * np.linspace(-10.0, 10.0, 81)
-            accepted = [theta for theta in grid if p_func(theta) >= alpha]
-            if not accepted:
+            flags = np.array([p_func(theta) >= alpha for theta in grid])
+            if not flags.any():
                 warnings.warn(
                     "The conformal test rejects every constant effect, so the confidence "
                     "interval is empty (reported as NaN); the counterfactual likely fits "
@@ -993,12 +1017,33 @@ class EconometricEstimator(Estimator, ABC):
                     RuntimeWarning,
                     stacklevel=3,
                 )
-                return float("nan"), float("nan")
-            lo_in, hi_in = float(min(accepted)), float(max(accepted))
+                return float("nan"), float("nan"), []
+            accepted = np.flatnonzero(flags)
+            lo_in, hi_in = float(grid[accepted[0]]), float(grid[accepted[-1]])
+            gaps = bool(np.any(np.diff(accepted) > 1))
 
-        upper = self._expand_and_bisect(p_func, hi_in, spread, alpha)
-        lower = self._expand_and_bisect(p_func, lo_in, -spread, alpha)
-        return lower, upper
+        limit = self._CI_SEARCH_MAX_SPREADS * spread
+        upper, upper_gap = self._expand_and_bisect(p_func, hi_in, spread, alpha, limit)
+        lower, lower_gap = self._expand_and_bisect(p_func, lo_in, -spread, alpha, limit)
+        zero_accepted = p_func(0.0) >= alpha
+        if not (gaps or upper_gap or lower_gap or zero_accepted != (lower <= 0.0 <= upper)):
+            return lower, upper, [(lower, upper)]
+
+        pieces = self._acceptance_pieces(p_func, seen, center, spread, lower, upper, alpha)
+        if not pieces:
+            return lower, upper, [(lower, upper)]
+        lower, upper = pieces[0][0], pieces[-1][1]
+        shown = ", ".join(f"[{lo:.4g}, {hi:.4g}]" for lo, hi in pieces)
+        warnings.warn(
+            f"The conformal confidence set is not a single interval ({shown} per period), so "
+            "the reported interval is its outer hull: a valid but conservative bound that can "
+            "include effects the test rejects (including zero when p < alpha). The pieces are "
+            "in results['lift_ci_set']. This usually means the counterfactual can absorb large "
+            "effects, or fits the pre-period much better than the post-period.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return lower, upper, pieces
 
     def _expand_and_bisect(
         self,
@@ -1006,14 +1051,18 @@ class EconometricEstimator(Estimator, ABC):
         x_in: float,
         step: float,
         alpha: float,
-        max_doublings: int = 40,
-    ) -> float:
-        """Locate the acceptance-region boundary in the direction of ``step``.
+        limit: float,
+    ) -> tuple[float, bool]:
+        """Locate the outer acceptance-region boundary in the direction of ``step``.
 
         Doubles the distance from ``x_in`` until a rejected point is found, then
-        bisects. Returns ``+/- inf`` when no rejected point is found, i.e. the
-        region is unbounded in that direction (possible when the residual series
-        is too short for the test to reject at level ``alpha``).
+        bisects. Returns ``+/- inf`` when nothing within ``limit`` of ``x_in`` is
+        rejected, i.e. the region is unbounded in that direction for practical
+        purposes (possible when the residual series is too short for the test to
+        reject at level ``alpha``, or the counterfactual can absorb large
+        effects). Once a rejected point is found, the point ``limit`` away is
+        tested too: if it is accepted, the region resumes beyond the rejection,
+        so the outer bound is ``+/- inf`` and the region has a gap.
 
         Parameters
         ----------
@@ -1025,21 +1074,87 @@ class EconometricEstimator(Estimator, ABC):
             Initial signed step; its sign sets the search direction.
         alpha : float
             The significance level.
-        max_doublings : int, default=40
-            Cap on the outward expansion.
+        limit : float
+            How far from ``x_in`` to search before reporting an infinite bound.
 
         Returns
         -------
-        The boundary effect value.
+        A tuple of (boundary, gap): the outer boundary effect value, and whether
+        an accepted point lies beyond a rejected one in this direction.
         """
+        unbounded = float("inf") if step > 0 else float("-inf")
+        start = x_in
         distance = 10.0 * step
-        for _ in range(max_doublings):
+        while abs(x_in + distance - start) <= limit:
             x_out = x_in + distance
             if p_func(x_out) < alpha:
-                return self._bisect_threshold(p_func, x_in, x_out, alpha)
+                if p_func(start + np.sign(step) * limit) >= alpha:
+                    return unbounded, True
+                return self._bisect_threshold(p_func, x_in, x_out, alpha), False
             x_in = x_out
             distance *= 2.0
-        return float("inf") if step > 0 else float("-inf")
+        return unbounded, False
+
+    def _acceptance_pieces(
+        self,
+        p_func: Callable[[float], float],
+        seen: dict[float, bool],
+        center: float,
+        spread: float,
+        lower: float,
+        upper: float,
+        alpha: float,
+    ) -> list[tuple[float, float]]:
+        """Locate the accepted intervals of a confidence set with gaps.
+
+        Scans a grid around the point estimate and zero, then bisects every
+        switch between adjacent evaluated effects. Gaps narrower than the
+        spacing of the evaluated effects can be missed, so the pieces are as
+        fine as the scan, not exact.
+
+        Parameters
+        ----------
+        p_func : callable
+            Maps a candidate effect to its permutation p-value, recording each
+            evaluation in ``seen``.
+        seen : dict
+            Effects evaluated so far, mapped to whether the test accepts them.
+        center, spread : float
+            The point estimate and residual spread that scale the scan.
+        lower, upper : float
+            The outer hull found by the search (``+/- inf`` when unbounded).
+        alpha : float
+            The significance level.
+
+        Returns
+        -------
+        The accepted intervals in increasing order, as ``(lower, upper)`` pairs;
+        the outermost ends are ``lower`` and ``upper`` when those are infinite.
+        """
+        finite = [theta for theta in seen if np.isfinite(theta)]
+        span_lo = min(finite + [0.0, center - 10.0 * spread])
+        span_hi = max(finite + [0.0, center + 10.0 * spread])
+        if np.isfinite(lower):
+            span_lo = max(span_lo, lower)
+        if np.isfinite(upper):
+            span_hi = min(span_hi, upper)
+        for theta in np.linspace(span_lo, span_hi, 81):
+            if float(theta) not in seen:
+                p_func(float(theta))
+
+        thetas = sorted(seen)
+        pieces: list[tuple[float, float]] = []
+        piece_lo = lower if seen[thetas[0]] else None
+        for left, right in zip(thetas[:-1], thetas[1:], strict=True):
+            if seen[left] and not seen[right]:
+                end = self._bisect_threshold(p_func, left, right, alpha)
+                pieces.append((float(lower if piece_lo is None else piece_lo), end))
+                piece_lo = None
+            elif not seen[left] and seen[right]:
+                piece_lo = self._bisect_threshold(p_func, right, left, alpha)
+        if piece_lo is not None:
+            pieces.append((float(piece_lo), float(upper)))
+        return pieces
 
     def _split_conformal_band(
         self,
@@ -1096,7 +1211,9 @@ class EconometricEstimator(Estimator, ABC):
         -------
         A dict suitable for ``self.results.update(...)`` containing the
         p-value, per-period ``lift`` CIs, total ``incrementality`` CIs, the
-        prediction band half-width, and the ``method`` used for the intervals
+        confidence sets as lists of intervals (``lift_ci_set``,
+        ``incrementality_ci_set``; see ``_conformal_interval``), the prediction
+        band half-width, and the ``method`` used for the intervals
         (``"conformal"``, ``"jackknife+"`` or ``"jackknife+ (residual)"``).
 
         Notes
@@ -1147,9 +1264,11 @@ class EconometricEstimator(Estimator, ABC):
                 )
         else:
             method = "conformal"
-            lift_lower, lift_upper = self._conformal_interval(pre_resid, post_resid, q, resid_fn=resid_fn)
+            lift_lower, lift_upper, lift_set = self._conformal_interval(pre_resid, post_resid, q, resid_fn=resid_fn)
             calibration = self._cross_fit_residuals(actual_pre, t1)
             band = self._split_conformal_band(pre_resid if calibration is None else calibration)
+        if method != "conformal":
+            lift_set = [(lift_lower, lift_upper)]
 
         return {
             "p_value": p_value,
@@ -1157,6 +1276,11 @@ class EconometricEstimator(Estimator, ABC):
             "lift_ci_upper": lift_upper,
             "incrementality_ci_lower": lift_lower * t1,
             "incrementality_ci_upper": lift_upper * t1,
+            # The confidence set as accepted intervals: one (lower, upper) pair
+            # unless the conformal set has gaps, in which case the bounds above
+            # are its outer hull. Empty when every effect is rejected.
+            "lift_ci_set": lift_set,
+            "incrementality_ci_set": [(lo * t1, hi * t1) for lo, hi in lift_set],
             "conformal_band": band,
             "method": method,
             "conformal_refit": resid_fn is not None,
