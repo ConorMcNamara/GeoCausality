@@ -533,8 +533,8 @@ class MarketSelection:
             be warped by up to this many dates. This cuts the DTW cost to
             roughly ``(2 * dtw_window + 1) / T`` of the unconstrained cost for
             ``T`` pre-period dates, but distances (and so the filtered
-            candidates) can differ from the unconstrained ones. ``None`` (the default) is unconstrained DTW.
-            Ignored unless ``dtw_top_k`` is set.
+            candidates) can differ from the unconstrained ones. ``None`` (the
+            default) is unconstrained DTW. Ignored unless ``dtw_top_k`` is set.
 
         Returns
         -------
