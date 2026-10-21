@@ -181,7 +181,9 @@ def _legacy_permutation_test(model: Switchback, n_permutations: int, seed: int) 
         except Exception:
             continue
     perm_arr = np.asarray(perm_effects, dtype=float)
-    n_extreme = np.sum(np.abs(perm_arr) >= abs(model.results["lift"]))
+    # Tie-tolerant, as in ``permutation_test``: even PanelOLS reproduces a
+    # flipped schedule's coefficient only up to rounding.
+    n_extreme = np.sum(np.abs(perm_arr) >= abs(model.results["lift"]) * (1 - 1e-9))
     return {"permutation_effects": perm_arr, "empirical_p_value": float((n_extreme + 1) / (len(perm_arr) + 1))}
 
 
@@ -207,6 +209,45 @@ class TestPermutationTestEquivalence:
         old = _legacy_permutation_test(model, n_permutations=10, seed=seed)
         assert new["n_permutations"] == len(old["permutation_effects"])
         np.testing.assert_allclose(new["permutation_effects"], old["permutation_effects"], rtol=1e-8, atol=1e-8)
+        assert new["empirical_p_value"] == old["empirical_p_value"]
+
+    @staticmethod
+    @pytest.mark.parametrize("n_geos, n_periods, seed", [(4, 6, 0), (3, 8, 1), (2, 12, 2)])
+    def test_schedule_ties_count_as_extreme(n_geos: int, n_periods: int, seed: int) -> None:
+        """Shifts that reproduce or flip an alternating schedule tie the observed effect.
+
+        With few geos and short periodic schedules such ties are common; all of
+        them must count as extreme even though the closed-form refit differs
+        from the observed ``PanelOLS`` fit by rounding.
+        """
+        rng = np.random.default_rng(seed)
+        rows = []
+        for g in range(n_geos):
+            geo_fe = rng.normal(50, 10)
+            for t in range(n_periods):
+                treat = (t + g) % 2
+                y = geo_fe + np.sin(t) + 3.0 * treat + rng.normal(0, 2)
+                rows.append({"geo": f"g{g}", "date": t, "y": y, "is_treatment": treat})
+        model = _fit(pd.DataFrame(rows))
+        new = model.permutation_test(n_permutations=200, seed=seed)
+        old = _legacy_permutation_test(model, n_permutations=200, seed=seed)
+
+        # Replay the draws: the schedule is reproduced when every geo's shift is
+        # even and flipped (coefficient -observed) when every shift is odd.
+        # Shifts that put every geo in the same phase leave a treatment absorbed
+        # by the time effects, which PanelOLS cannot fit, so they are skipped.
+        draws = np.random.default_rng(seed)
+        parities = np.array([draws.integers(1, np.full(n_geos, n_periods)) % 2 for _ in range(200)])
+        phases = (parities + np.arange(n_geos)) % 2
+        parities = parities[np.any(phases != phases[:, :1], axis=1)]
+        is_tie = np.all(parities == parities[:, :1], axis=1)
+        assert new["n_permutations"] == len(parities) == len(old["permutation_effects"])
+        observed = abs(new["observed_effect"])
+        effects = np.abs(new["permutation_effects"])
+        assert is_tie.any()
+        np.testing.assert_allclose(effects[is_tie], observed, rtol=1e-9)
+        n_extreme = is_tie.sum() + np.sum(effects[~is_tie] > observed)
+        assert new["empirical_p_value"] == (n_extreme + 1) / (len(effects) + 1)
         assert new["empirical_p_value"] == old["empirical_p_value"]
 
     @staticmethod

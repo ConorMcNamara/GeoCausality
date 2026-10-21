@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same permuted schedules) and gets each permutation's treatment
   coefficient from a closed-form two-way fixed-effects fit instead of a full
   `PanelOLS` fit with a clustered covariance that was thrown away. Effects are
-  swept out exactly, as `PanelOLS` does, so results match the old
-  implementation to ~1e-13. Permutations whose treatment is absorbed or
+  swept out exactly, as `PanelOLS` does, so coefficients match the old
+  implementation to ~1e-13. Permuted coefficients are compared with the
+  observed one with a 1e-9 relative tolerance, so shifts that reproduce or
+  flip a periodic schedule still count as ties (extreme) and p-values match
+  the old implementation. Permutations whose treatment is absorbed or
   collinear, whose effects are not connected, or panels with missing values
   or duplicate geo-dates still go through `PanelOLS`. At 1,000 geos × 365
   days a permutation takes ~14 ms instead of ~13 s, so the default 1,000

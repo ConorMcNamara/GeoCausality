@@ -429,7 +429,11 @@ class Switchback(Estimator):
             perm_effects.append(effect)
 
         perm_arr = np.asarray(perm_effects, dtype=float)
-        n_extreme = np.sum(np.abs(perm_arr) >= abs(observed))
+        # Periodic schedules make some shifts reproduce (or flip) the observed
+        # one, so ties are genuine. The closed-form refit differs from PanelOLS
+        # by ~1e-13 relative, so compare with a relative tolerance to count
+        # every tie as extreme.
+        n_extreme = np.sum(np.abs(perm_arr) >= abs(observed) * (1 - 1e-9))
         empirical_p = float((n_extreme + 1) / (len(perm_arr) + 1))
 
         result = {
