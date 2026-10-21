@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster switchback permutation test** — `Switchback.permutation_test`
+  shifts every geo's schedule in one vectorised step (same random draws, so
+  the same permuted schedules) and gets each permutation's treatment
+  coefficient from a closed-form two-way fixed-effects fit instead of a full
+  `PanelOLS` fit with a clustered covariance that was thrown away. Effects are
+  swept out exactly, as `PanelOLS` does, so results match the old
+  implementation to ~1e-13. Permutations whose treatment is absorbed or
+  collinear, whose effects are not connected, or panels with missing values
+  or duplicate geo-dates still go through `PanelOLS`. At 1,000 geos × 365
+  days a permutation takes ~14 ms instead of ~13 s, so the default 1,000
+  permutations run in ~15 s rather than ~3.5 hours. `power_simulation` builds
+  its synthetic panels with array operations (bit-identical data).
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed
