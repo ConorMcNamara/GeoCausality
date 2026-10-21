@@ -4,16 +4,21 @@
 ``w >= 0, sum(w) = 1`` as a non-negative least-squares problem. These tests
 check it against an independent, tightly converged SLSQP reference across the
 shapes the estimators produce (more donors than periods, collinear trending
-donors, large outcome scales, ridge penalties), and that it falls back to the
-SLSQP solver when NNLS fails.
+donors, large outcome scales, ridge penalties), that it falls back to the
+SLSQP solver when NNLS fails, and that a panel with a missing geo-date cell
+raises a clear error in every estimator that uses it.
 """
 
 import numpy as np
+import pandas as pd
+import polars as pl
 import pytest
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from GeoCausality import _base
-from GeoCausality.synthetic_control import SyntheticControl
+from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
+from GeoCausality.synthetic_control import SyntheticControl, SyntheticControlV
+from GeoCausality.synthetic_diff_in_diff import SyntheticDiffInDiff
 
 
 @pytest.fixture
@@ -95,3 +100,26 @@ class TestSolveSimplexLsq:
         weights = solver._solve_simplex_lsq(x, y, "test")
         assert weights.sum() == pytest.approx(1.0)
         assert _loss(x, y, 0.0, weights) == pytest.approx(_loss(x, y, 0.0, _reference(x, y, 0.0)), rel=1e-6)
+
+    @staticmethod
+    @pytest.mark.parametrize("bad", [np.nan, np.inf])
+    def test_rejects_non_finite_input(solver: SyntheticControl, bad: float) -> None:
+        x, y = _problem(20, 4, 1.0, seed=3)
+        x[5, 1] = bad
+        with pytest.raises(ValueError, match="test: the panel has missing or non-finite"):
+            solver._solve_simplex_lsq(x, y, "test")
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [SyntheticControl, AugmentedSyntheticControl, SyntheticControlV, SyntheticDiffInDiff],
+    ids=lambda cls: cls.__name__,
+)
+def test_missing_geo_date_raises_clear_error(estimator: type, panel_factory) -> None:
+    # A donor with no row for one pre-period date pivots to NaN; NNLS would
+    # otherwise fail with scipy's opaque "array must not contain infs or NaNs".
+    panel = panel_factory(effect=5.0)
+    df = panel.df[~((panel.df["geo"] == "g4") & (panel.df["date"] == pd.Timestamp("2021-01-10")))]
+    model = estimator(pl.from_pandas(df), **panel.kwargs())
+    with pytest.raises(ValueError, match=f"{estimator.__name__}: the panel has missing or non-finite"):
+        model.pre_process().generate()

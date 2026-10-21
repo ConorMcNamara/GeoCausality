@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ridge that selects among them took effect). NNLS reaches the optimum, so
   their incrementality and intervals move by roughly 0.01-2% on test panels.
   The published-replication parity tests still pass.
+- **Missing panel cells now raise a clear error** — a panel with a missing or
+  non-finite outcome (e.g. a geo with no row for some date, which pivots to
+  NaN) now raises a `ValueError` naming the estimator and the cause in
+  `SyntheticControl`, `AugmentedSyntheticControl`, `SyntheticControlV` and
+  `SyntheticDiffInDiff`. Previously SC returned a meaningless estimate, SDID
+  returned NaN and ASC raised an unrelated `LinAlgError`.
 
 ## [0.19.1] - 2026-10-16
 

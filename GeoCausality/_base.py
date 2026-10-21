@@ -1688,10 +1688,15 @@ class EconometricEstimator(Estimator, ABC):
         return weights * n_treated
 
     # Weight on the extra NNLS row that enforces ``sum(w) = 1``, relative to the
-    # largest entry of ``x``. Large enough that the constraint holds to rounding
-    # (the result is renormalised anyway) and that the fit matches a tightly
-    # converged SLSQP to ~1e-14 in relative loss, while keeping the augmented
-    # matrix well conditioned.
+    # largest entry of ``x``. The row is a penalty, not a hard constraint: before
+    # renormalising, the sum misses 1 by roughly ``n_rows * |residual| / (1e8 *
+    # max|x|)``, up to ~1e-3 when ``y`` is 1e3-1e4x the donor scale.
+    # Renormalising restores the sum; the weights are then exact when the
+    # optimum is a vertex of the simplex and otherwise drift slightly from the
+    # constrained optimum. SC and ASC go through ``_per_geo_problem``,
+    # which puts ``y`` on the donor scale, and there the fit matches a tightly
+    # converged SLSQP to ~1e-14 in relative loss. A larger weight would tighten
+    # this but ill-condition the augmented matrix.
     _SIMPLEX_SUM_WEIGHT = 1e4
 
     def _solve_simplex_lsq(self, x: np.ndarray, y: np.ndarray, name: str, ridge: float = 0.0) -> np.ndarray:
@@ -1705,6 +1710,8 @@ class EconometricEstimator(Estimator, ABC):
         series the way the Gram-matrix form does, and its active-set solve is
         orders of magnitude faster than SLSQP on large donor pools. If NNLS hits
         its iteration limit the problem falls back to ``_solve_simplex_qp``.
+        Non-finite inputs raise a ``ValueError`` rather than returning
+        meaningless weights.
 
         Parameters
         ----------
@@ -1723,6 +1730,12 @@ class EconometricEstimator(Estimator, ABC):
         """
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
+        if not (np.isfinite(x).all() and np.isfinite(y).all()):
+            raise ValueError(
+                f"{name}: the panel has missing or non-finite outcome values (e.g. a geo with no row "
+                "for some date, which pivots to NaN). Fill or drop those geo-date cells so every geo "
+                "has a finite value on every date."
+            )
         n_c = x.shape[1]
         if ridge > 0.0:
             x = np.vstack([x, np.sqrt(ridge) * np.identity(n_c)])
