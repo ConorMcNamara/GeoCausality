@@ -134,7 +134,7 @@ class TestGeoX:
         model = _fit(data_df)
         chart = model.plot(backend="altair")
         assert len(chart.to_dict()["vconcat"]) == 3
-        cumulative_band = chart.vconcat[2].layer[0].data
+        cumulative_band = pd.DataFrame(chart.vconcat[2].layer[0].data.values)
         np.testing.assert_allclose(cumulative_band["upper"], model.results["cumulative_incrementality_ci_upper"])
 
 

@@ -9,6 +9,7 @@ Diff-in-Diff, FixedEffects does not support a ``"relative"`` lift.
 import io
 from contextlib import redirect_stdout
 
+import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
@@ -119,7 +120,7 @@ class TestPlot:
         pytest.importorskip("altair")
         chart = _fit(effect_panel).plot(backend="altair")
         chart.to_dict()
-        effect = chart.layer[-1].data
+        effect = pd.DataFrame(chart.layer[-1].data.values)
         assert effect.loc[effect["period"] == -1, "estimate"].item() == 0.0
 
 

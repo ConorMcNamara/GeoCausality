@@ -261,4 +261,4 @@ class TestPlot:
         pytest.importorskip("altair")
         chart = _fit(data_df).plot(backend="altair")
         chart.to_dict()
-        assert set(chart.data["status"]) == {"Treatment", "Control"}
+        assert set(pd.DataFrame(chart.data.values)["status"]) == {"Treatment", "Control"}

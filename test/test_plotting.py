@@ -6,6 +6,7 @@ the renderers alone; the estimator tests cover the data each model supplies.
 """
 
 import sys
+from dataclasses import replace
 from datetime import date, timedelta
 
 import numpy as np
@@ -205,6 +206,57 @@ class TestAltairRenderer:
     def test_x_axis_type_follows_dates(dates: list, x_type: str) -> None:
         spec = render(_counterfactual(dates), LIGHT_THEME, "altair").to_dict()
         assert spec["vconcat"][0]["layer"][1]["encoding"]["x"]["type"] == x_type
+
+    @staticmethod
+    def test_string_post_period_follows_integer_dates() -> None:
+        years = list(range(1980, 1990))
+        data = replace(_counterfactual(years), post_period="1986")
+        spec = render(data, LIGHT_THEME, "altair").to_dict()
+        rule = spec["vconcat"][0]["layer"][-1]
+        assert rule["encoding"]["x"]["type"] == "quantitative"
+        assert spec["datasets"][rule["data"]["name"]] == [{"date": 1986}]
+
+    @staticmethod
+    def test_parallel_trends_string_post_period_follows_integer_dates() -> None:
+        years = list(range(1980, 1990))
+        data = replace(_parallel_trends(), treated_dates=years, control_dates=years, post_period="1986")
+        spec = render(data, LIGHT_THEME, "altair").to_dict()
+        rule = spec["layer"][-1]
+        assert rule["encoding"]["x"]["type"] == "quantitative"
+        assert spec["datasets"][rule["data"]["name"]] == [{"date": 1986}]
+
+    @staticmethod
+    @pytest.mark.parametrize("label", ["2021-W{:02d}", "week_{:02d}"], ids=["iso-week", "label"])
+    def test_non_date_strings_draw_in_data_order(label: str) -> None:
+        # Descending, so a sorted axis would not match by accident.
+        dates = [label.format(i) for i in range(10, 0, -1)]
+        spec = render(_counterfactual(dates), LIGHT_THEME, "altair").to_dict()
+        top = spec["vconcat"][0]["layer"]
+        assert top[1]["encoding"]["x"]["type"] == "ordinal"
+        assert top[1]["encoding"]["x"]["sort"] == dates
+        assert spec["datasets"][top[-1]["data"]["name"]] == [{"date": dates[6]}]
+
+    @staticmethod
+    def test_large_charts_serialise_past_altair_row_limit() -> None:
+        n = 3000  # melts to 6000 rows in the top panel
+        dates = [date(2015, 1, 1) + timedelta(days=i) for i in range(n)]
+        spec = render(_counterfactual(dates), LIGHT_THEME, "altair").to_dict()
+        line = spec["vconcat"][0]["layer"][1]
+        assert line["encoding"]["x"]["type"] == "temporal"
+        assert len(spec["datasets"][line["data"]["name"]]) == 2 * n
+
+        frame = pd.DataFrame(
+            [
+                {"geo": f"g{g}", "date": d, "y": float(i), "treated": i % 2 == 0}
+                for g in range(100)
+                for i, d in enumerate(dates[:60])
+            ]
+        )
+        chart = render(SwitchbackPlotData(frame=frame, x_title="date", y_title="y"), LIGHT_THEME, "altair")
+        assert chart.to_json()
+        spec = chart.to_dict()
+        assert len(spec["datasets"][spec["data"]["name"]]) == 6000
+        assert spec["layer"][0]["encoding"]["x"]["type"] == "temporal"
 
     @staticmethod
     def test_parallel_trends_dashes_only_the_counterfactual() -> None:

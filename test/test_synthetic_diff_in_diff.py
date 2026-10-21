@@ -20,6 +20,7 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 import plotly.io as pio
 import polars as pl
 import pytest
@@ -225,7 +226,7 @@ class TestPlot:
             "Cumulative Difference",
         ]
         # The cumulative band ends at the reported incrementality CI, as in Plotly.
-        cumulative_band = chart.vconcat[2].layer[0].data
+        cumulative_band = pd.DataFrame(chart.vconcat[2].layer[0].data.values)
         assert cumulative_band["lower"].iloc[-1] == pytest.approx(model.results["incrementality_ci_lower"], rel=1e-6)
         assert cumulative_band["upper"].iloc[-1] == pytest.approx(model.results["incrementality_ci_upper"], rel=1e-6)
 

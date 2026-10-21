@@ -4,6 +4,8 @@ Importing this module imports Altair, so ``figures.render`` only imports it
 when the Altair backend is requested.
 """
 
+import warnings
+from dataclasses import dataclass
 from functools import singledispatch
 from typing import Any, Literal
 
@@ -30,7 +32,7 @@ except ImportError as exc:
         "The altair plotting backend requires altair. Install it with `pip install geocausality[altair]`."
     ) from exc
 
-XType = Literal["quantitative", "temporal"]
+XType = Literal["quantitative", "temporal", "ordinal"]
 
 _WIDTH = 600
 _HEIGHT = 300
@@ -61,16 +63,61 @@ def _style(chart: Any, theme: PlotTheme) -> Any:
     return chart.configure(**config)
 
 
-def _x_column(values: Any) -> tuple[pd.Series, XType]:
-    """Convert date-axis values to a pandas column and its Vega-Lite type.
+@dataclass(frozen=True)
+class _XAxis:
+    """The date axis shared by every layer of a chart.
 
-    Numeric axes (integer years, week indices) stay quantitative; dates,
-    datetimes and ISO strings are parsed so Altair draws a time axis.
+    The type comes from the dates themselves, so values drawn against them
+    (the post-period start, band dates) are coerced to match rather than
+    typed on their own: a string ``"1989"`` on an integer-year axis is 1989.
     """
-    series = pd.Series(list(values))
-    if pd.api.types.is_numeric_dtype(series):
-        return series, "quantitative"
-    return pd.to_datetime(series), "temporal"
+
+    type: XType
+    # Category order for an ordinal axis, which Vega-Lite would otherwise sort.
+    order: list[str] | None = None
+
+    @classmethod
+    def of(cls, *dates: Any) -> "_XAxis":
+        """Pick the axis type for one or more lists of dates.
+
+        Numeric axes (integer years, week indices) stay quantitative; dates,
+        datetimes and ISO strings are drawn as time; other labels ("2021-W01",
+        "week_01") are categories in data order, as Plotly draws them.
+        """
+        series = pd.Series([value for values in dates for value in values])
+        if pd.api.types.is_numeric_dtype(series):
+            return cls("quantitative")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # format-inference warnings on unparseable labels
+                pd.to_datetime(series)
+        except (ValueError, TypeError):
+            return cls("ordinal", list(dict.fromkeys(series.astype(str))))
+        return cls("temporal")
+
+    def column(self, values: Any) -> pd.Series:
+        """Convert ``values`` to this axis's type."""
+        series = pd.Series(list(values))
+        if self.type == "quantitative":
+            return pd.to_numeric(series)
+        if self.type == "temporal":
+            return pd.to_datetime(series)
+        return series.astype(str)
+
+    def encode(self, title: str | None) -> Any:
+        return alt.X("date", type=self.type, title=title, sort=self.order or alt.Undefined)
+
+    def tooltip(self) -> Any:
+        return alt.Tooltip("date", type=self.type)
+
+
+def _chart(frame: pd.DataFrame) -> Any:
+    """Start a chart on ``frame`` with its rows inlined.
+
+    Inline values skip Altair's 5000-row limit, which long daily series and
+    geo-by-date frames exceed, without changing the global data transformer.
+    """
+    return alt.Chart(alt.InlineData(values=alt.to_values(frame)["values"]))
 
 
 def _series_colour(names: list[str], colours: list[str]) -> Any:
@@ -84,16 +131,16 @@ def _series_colour(names: list[str], colours: list[str]) -> Any:
     )
 
 
-def _start_rule(post_period: Any, x: Any, theme: PlotTheme) -> Any:
+def _start_rule(post_period: Any, axis: _XAxis, theme: PlotTheme) -> Any:
     """Draw the dashed vertical line marking the start of the post-period."""
-    start, _ = _x_column([post_period])
-    return alt.Chart(pd.DataFrame({"date": start})).mark_rule(color=theme.reference, strokeDash=[4, 4]).encode(x=x)
+    start = pd.DataFrame({"date": axis.column([post_period])})
+    return _chart(start).mark_rule(color=theme.reference, strokeDash=[4, 4]).encode(x=axis.encode(None))
 
 
 @_draw.register
 def _(data: CounterfactualPlotData, theme: PlotTheme) -> Any:
-    _, x_type = _x_column(data.dates)
-    x = alt.X("date", type=x_type, title=None)
+    axis = _XAxis.of(data.dates)
+    x = axis.encode(None)
     # Fit the axis to the data like Plotly does, rather than Altair's zero baseline.
     y = alt.Y("value:Q", title=None, scale=alt.Scale(zero=False))
 
@@ -106,15 +153,15 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> Any:
     colour = _series_colour(names, colours)
 
     def lines(dates: list[Any], **series: np.ndarray) -> Any:
-        frame = pd.DataFrame({"date": _x_column(dates)[0], **series})
+        frame = pd.DataFrame({"date": axis.column(dates), **series})
         long = frame.melt(id_vars="date", var_name="series", value_name="value")
-        tooltip = [alt.Tooltip("date", type=x_type), "series:N", alt.Tooltip("value:Q", format=",.2f")]
-        return alt.Chart(long).mark_line().encode(x=x, y=y, color=colour, tooltip=tooltip)
+        tooltip = [axis.tooltip(), "series:N", alt.Tooltip("value:Q", format=",.2f")]
+        return _chart(long).mark_line().encode(x=x, y=y, color=colour, tooltip=tooltip)
 
     def area(band: Band, legend: str | None = None, **mark: Any) -> Any:
-        frame = pd.DataFrame({"date": _x_column(band.dates)[0], "lower": band.lower, "upper": band.upper})
+        frame = pd.DataFrame({"date": axis.column(band.dates), "lower": band.lower, "upper": band.upper})
         band_y = alt.Y("lower:Q", title=None, scale=alt.Scale(zero=False))
-        chart = alt.Chart(frame.assign(series=legend)).mark_area(opacity=0.2, **mark)
+        chart = _chart(frame.assign(series=legend)).mark_area(opacity=0.2, **mark)
         chart = chart.encode(x=x, y=band_y, y2="upper:Q")
         # A labelled band is coloured through the shared scale so it gets a legend entry.
         return chart.encode(color=colour) if legend is not None else chart
@@ -132,7 +179,7 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> Any:
     middle.append(lines(data.dates, Difference=data.difference))
     bottom.append(lines(data.post_dates, **{"Cumulative Incrementality": data.cumulative}))
 
-    start = _start_rule(data.post_period, x, theme)
+    start = _start_rule(data.post_period, axis, theme)
     titles = ("Expected vs Counterfactual", "Pointwise Difference", "Cumulative Difference")
     return alt.vconcat(
         *(
@@ -144,8 +191,8 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> Any:
 
 @_draw.register
 def _(data: ParallelTrendsPlotData, theme: PlotTheme) -> Any:
-    treated_x, x_type = _x_column(data.treated_dates)
-    control_x, _ = _x_column(data.control_dates)
+    axis = _XAxis.of(data.treated_dates, data.control_dates)
+    treated_x, control_x = axis.column(data.treated_dates), axis.column(data.control_dates)
     frame = pd.concat(
         [
             pd.DataFrame({"date": treated_x, "value": data.treated, "series": "Treated"}),
@@ -154,22 +201,21 @@ def _(data: ParallelTrendsPlotData, theme: PlotTheme) -> Any:
         ]
     )
     names = ["Treated", "Control", "Counterfactual"]
-    x = alt.X("date", type=x_type, title=data.x_title)
     lines = (
-        alt.Chart(frame)
+        _chart(frame)
         .mark_line()
         .encode(
-            x=x,
+            x=axis.encode(data.x_title),
             y=alt.Y("value:Q", title=data.y_title, scale=alt.Scale(zero=False)),
             color=_series_colour(names, [theme.actual, theme.control, theme.counterfactual]),
             # Dash only the counterfactual, as Plotly does.
             strokeDash=alt.StrokeDash(
                 "series:N", scale=alt.Scale(domain=names, range=[[1, 0], [1, 0], [6, 4]]), legend=None
             ),
-            tooltip=[alt.Tooltip("date", type=x_type), "series:N", alt.Tooltip("value:Q", format=",.2f")],
+            tooltip=[axis.tooltip(), "series:N", alt.Tooltip("value:Q", format=",.2f")],
         )
     )
-    return alt.layer(lines, _start_rule(data.post_period, x, theme)).properties(
+    return alt.layer(lines, _start_rule(data.post_period, axis, theme)).properties(
         title="Parallel Trends", width=_WIDTH, height=_HEIGHT
     )
 
@@ -178,7 +224,7 @@ def _(data: ParallelTrendsPlotData, theme: PlotTheme) -> Any:
 def _(data: EventStudyPlotData, theme: PlotTheme) -> Any:
     frame = pd.DataFrame({"period": data.periods, "estimate": data.estimates, "lower": data.lower, "upper": data.upper})
     x = alt.X("period:Q", title="Periods relative to treatment onset")
-    base = alt.Chart(frame).encode(x=x)
+    base = _chart(frame).encode(x=x)
     tooltip = [
         "period:Q",
         alt.Tooltip("estimate:Q", format=",.2f"),
@@ -202,14 +248,14 @@ def _(data: EventStudyPlotData, theme: PlotTheme) -> Any:
 
 @_draw.register
 def _(data: SwitchbackPlotData, theme: PlotTheme) -> Any:
-    dates, x_type = _x_column(data.frame["date"])
+    axis = _XAxis.of(data.frame["date"])
     frame = data.frame.assign(
-        date=dates.to_numpy(),
+        date=axis.column(data.frame["date"]).to_numpy(),
         geo=data.frame["geo"].astype(str),
         status=np.where(data.frame["treated"], "Treatment", "Control"),
     ).drop(columns="treated")
-    base = alt.Chart(frame).encode(
-        x=alt.X("date", type=x_type, title=data.x_title),
+    base = _chart(frame).encode(
+        x=axis.encode(data.x_title),
         y=alt.Y("y:Q", title=data.y_title, scale=alt.Scale(zero=False)),
     )
     # Lines take a colour per geo; points are filled by treatment status, as in Plotly.
@@ -220,7 +266,7 @@ def _(data: SwitchbackPlotData, theme: PlotTheme) -> Any:
             scale=alt.Scale(domain=["Treatment", "Control"], range=[theme.counterfactual, theme.actual]),
             title="Status",
         ),
-        tooltip=["geo:N", alt.Tooltip("date", type=x_type), "status:N", alt.Tooltip("y:Q", format=",.2f")],
+        tooltip=["geo:N", axis.tooltip(), "status:N", alt.Tooltip("y:Q", format=",.2f")],
     )
     return alt.layer(lines, points).properties(title="Switchback Design: Outcome by Geo", width=_WIDTH, height=_HEIGHT)
 
