@@ -209,10 +209,9 @@ class InteractiveFixedEffects(EconometricEstimator):
             .agg(nw.col(self.y_variable).sum())
             .sort([self.date_variable, self.geo_variable])
         )
-        pivot = nw.from_native(
-            panel.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        ).sort(self.date_variable)
+        pivot = panel.pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable).sort(
+            self.date_variable
+        )
         geos = [c for c in pivot.columns if c != self.date_variable]
         y = pivot.drop(self.date_variable).to_numpy()  # T x N
 

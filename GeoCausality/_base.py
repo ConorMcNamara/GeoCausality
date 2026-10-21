@@ -613,10 +613,7 @@ class EconometricEstimator(Estimator, ABC):
         # estimators that fit on one _control_matrix pivot and predict on another
         # would map the weight vector onto mis-ordered donor columns.
         frame = frame.sort([self.date_variable, self.geo_variable])
-        pivot = nw.from_native(
-            frame.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        pivot = frame.pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable)
         if sort_pivot:
             pivot = pivot.sort(self.date_variable)
         return pivot
