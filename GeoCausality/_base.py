@@ -957,10 +957,16 @@ class EconometricEstimator(Estimator, ABC):
         The set is usually one interval around the point estimate, but need not
         be: a flexible counterfactual can absorb very large effects (so they are
         never rejected) while effects near the estimate are. The returned bounds
-        are always the set's outer hull, which is a valid, if conservative,
-        confidence set. When the set is not a single interval -- or the hull
+        aim for the set's outer hull, a valid, if conservative, confidence set.
+        When the set is detected not to be a single interval -- or the hull
         disagrees with the test at zero -- its pieces are located explicitly and
         a warning is raised.
+
+        Detection is best-effort: the search only evaluates finitely many
+        effects, so an accepted piece lying wholly between them (e.g. beyond a
+        rejected stretch, but short of ``_CI_SEARCH_MAX_SPREADS`` spreads out)
+        can be missed, and the bounds then cover the pieces found rather than
+        the full hull.
 
         Parameters
         ----------
@@ -976,9 +982,10 @@ class EconometricEstimator(Estimator, ABC):
 
         Returns
         -------
-        A tuple of (lower, upper, pieces): the hull bounds on the per-period
-        effect, and the accepted intervals as ``(lower, upper)`` pairs (a single
-        pair when the set is an interval, empty when every effect is rejected).
+        A tuple of (lower, upper, pieces): the (best-effort) hull bounds on the
+        per-period effect, and the accepted intervals found as ``(lower,
+        upper)`` pairs (a single pair when the set is an interval, empty when
+        every effect is rejected).
         """
         if alpha is None:
             alpha = self.alpha
@@ -1036,7 +1043,7 @@ class EconometricEstimator(Estimator, ABC):
         shown = ", ".join(f"[{lo:.4g}, {hi:.4g}]" for lo, hi in pieces)
         warnings.warn(
             f"The conformal confidence set is not a single interval ({shown} per period), so "
-            "the reported interval is its outer hull: a valid but conservative bound that can "
+            "the reported interval spans the pieces found: a conservative bound that can "
             "include effects the test rejects (including zero when p < alpha). The pieces are "
             "in results['lift_ci_set']. This usually means the counterfactual can absorb large "
             "effects, or fits the pre-period much better than the post-period.",
@@ -1056,13 +1063,16 @@ class EconometricEstimator(Estimator, ABC):
         """Locate the outer acceptance-region boundary in the direction of ``step``.
 
         Doubles the distance from ``x_in`` until a rejected point is found, then
-        bisects. Returns ``+/- inf`` when nothing within ``limit`` of ``x_in`` is
+        bisects; the last probe is at ``limit`` itself, so the boundary of an
+        interval ending short of the limit is not reported as infinite. Returns
+        ``+/- inf`` when nothing probed within ``limit`` of ``x_in`` is
         rejected, i.e. the region is unbounded in that direction for practical
-        purposes (possible when the residual series is too short for the test to
-        reject at level ``alpha``, or the counterfactual can absorb large
+        purposes (possible when the residual series is too short for the test
+        to reject at level ``alpha``, or the counterfactual can absorb large
         effects). Once a rejected point is found, the point ``limit`` away is
         tested too: if it is accepted, the region resumes beyond the rejection,
-        so the outer bound is ``+/- inf`` and the region has a gap.
+        so the outer bound is ``+/- inf`` and the region has a gap. An accepted
+        stretch that resumes and ends again within ``limit`` is not detected.
 
         Parameters
         ----------
@@ -1084,15 +1094,21 @@ class EconometricEstimator(Estimator, ABC):
         """
         unbounded = float("inf") if step > 0 else float("-inf")
         start = x_in
+        edge = start + np.sign(step) * limit
         distance = 10.0 * step
         while abs(x_in + distance - start) <= limit:
             x_out = x_in + distance
             if p_func(x_out) < alpha:
-                if p_func(start + np.sign(step) * limit) >= alpha:
+                if p_func(edge) >= alpha:
                     return unbounded, True
                 return self._bisect_threshold(p_func, x_in, x_out, alpha), False
             x_in = x_out
             distance *= 2.0
+        # Doubling from 10 spreads rarely lands on the limit (it stops at 630
+        # spreads for the default 1,000), so probe the limit itself before
+        # declaring the bound infinite.
+        if p_func(edge) < alpha:
+            return self._bisect_threshold(p_func, x_in, edge, alpha), False
         return unbounded, False
 
     def _acceptance_pieces(
@@ -1277,8 +1293,9 @@ class EconometricEstimator(Estimator, ABC):
             "incrementality_ci_lower": lift_lower * t1,
             "incrementality_ci_upper": lift_upper * t1,
             # The confidence set as accepted intervals: one (lower, upper) pair
-            # unless the conformal set has gaps, in which case the bounds above
-            # are its outer hull. Empty when every effect is rejected.
+            # unless the conformal set is found to have gaps, in which case the
+            # bounds above are the hull of the pieces found (best-effort; see
+            # _conformal_interval). Empty when every effect is rejected.
             "lift_ci_set": lift_set,
             "incrementality_ci_set": [(lo * t1, hi * t1) for lo, hi in lift_set],
             "conformal_band": band,

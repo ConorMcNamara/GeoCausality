@@ -4,9 +4,10 @@
 stub test whose acceptance region is known, so they check the search itself:
 the outward search stops at ``_CI_SEARCH_MAX_SPREADS`` instead of doubling out
 to ~1e13 spreads, an interval is found exactly as before, and a confidence set
-that is not a single interval is reported as its outer hull, with its pieces,
-and a warning -- so the reported bounds never silently hide effects the test
-rejects, such as zero when ``p < alpha``.
+that is found not to be a single interval is reported as the hull of its
+pieces, with the pieces and a warning -- so the reported bounds do not silently
+hide effects the test rejects, such as zero when ``p < alpha``. Detection is
+best-effort: a piece lying wholly between the search's probes is missed.
 """
 
 import warnings
@@ -62,17 +63,31 @@ class TestSearch:
         lower, upper, pieces = _interval(model)
         assert (lower, upper) == (-np.inf, np.inf)
         assert pieces == [(-np.inf, np.inf)]
-        # Doubling from 10 spreads reaches the 1,000-spread cap in 6 probes per
-        # side (it used to make 40, out to ~1e13 spreads).
+        # Doubling from 10 spreads reaches 630 spreads in 6 probes per side, then
+        # probes the 1,000-spread cap itself (it used to make 40, out to ~1e13).
         assert max(abs(t) for t in calls) <= SyntheticControl._CI_SEARCH_MAX_SPREADS
-        assert len(calls) <= 2 * 6 + 2
+        assert len(calls) <= 2 * 7 + 2
 
     @staticmethod
-    def test_bound_beyond_the_cap_is_reported_unbounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("beyond", (1.01, 2.0))
+    def test_bound_beyond_the_cap_is_reported_unbounded(beyond: float, monkeypatch: pytest.MonkeyPatch) -> None:
         cap = SyntheticControl._CI_SEARCH_MAX_SPREADS
-        model, _ = _stub(lambda t: t <= 2 * cap, monkeypatch)
-        _, upper, _ = _interval(model)
-        assert upper == np.inf
+        model, _ = _stub(lambda t: -beyond * cap <= t <= beyond * cap, monkeypatch)
+        lower, upper, _ = _interval(model)
+        assert (lower, upper) == (-np.inf, np.inf)
+
+    @staticmethod
+    def test_bound_just_inside_the_cap_is_found(monkeypatch: pytest.MonkeyPatch) -> None:
+        # The doubling stops at 630 spreads, short of the cap; a bound between
+        # the two must still be found rather than reported as infinite.
+        cap = SyntheticControl._CI_SEARCH_MAX_SPREADS
+        model, _ = _stub(lambda t: -0.9 * cap <= t <= 0.8 * cap, monkeypatch)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            lower, upper, pieces = _interval(model)
+        assert lower == pytest.approx(-0.9 * cap, rel=1e-4)
+        assert upper == pytest.approx(0.8 * cap, rel=1e-4)
+        assert pieces == [(lower, upper)]
 
 
 class TestNonInterval:
@@ -111,6 +126,16 @@ class TestNonInterval:
         assert upper == np.inf
         assert pieces[0][1] == pytest.approx(3.0, abs=1e-3)
         assert pieces[-1] == (pytest.approx(400.0, abs=1e-2), np.inf)
+
+    @staticmethod
+    def test_piece_between_probes_is_missed(monkeypatch: pytest.MonkeyPatch) -> None:
+        # Documents the best-effort limit: an accepted piece wholly between the
+        # search's probes (10 spreads, then the 1,000-spread cap) is not found,
+        # so the bounds cover only the piece around the estimate.
+        model, _ = _stub(lambda t: -3.0 <= t <= 3.0 or 50.0 <= t <= 200.0, monkeypatch)
+        lower, upper, _ = _interval(model)
+        assert lower == pytest.approx(-3.0, abs=1e-3)
+        assert upper == pytest.approx(3.0, abs=1e-3)
 
     @staticmethod
     def test_every_effect_rejected_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:

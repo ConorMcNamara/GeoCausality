@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`lift_ci_set` / `incrementality_ci_set`** — the conformal-family results
   now include the confidence set as a list of `(lower, upper)` intervals. It
   is one interval in almost every case; see below for when it is not.
+  `FixedEffects` (conformal inference) reports it too, with
+  `incrementality_ci_set` on its `n_dates * n_geos` scale, and `GeoLift`
+  reports its single recentred bootstrap interval.
 
 ### Fixed
 
@@ -19,18 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unbounded (common for `ElasticNetSyntheticControl` and
   `GeneralizedSyntheticControl`, whose refits can absorb very large effects),
   the outward search doubled 40 times, to ~1e13 residual spreads, refitting
-  the counterfactual at each step. It now stops at 1,000 spreads and reports
-  the bound as infinite. Finite bounds sit within a few tens of spreads, so
+  the counterfactual at each step. It now stops at 1,000 spreads (probing the
+  limit itself, so bounds just inside it are still found) and reports the
+  bound as infinite. Finite bounds sit within a few tens of spreads, so
   this changes no finite interval; `ElasticNetSyntheticControl` at 100 donors
   x 365 days drops from 187 s to 17 s.
 - **Confidence sets that are not a single interval** — the reported
   interval could exclude accepted effects or include rejected ones (e.g.
   `ElasticNetSyntheticControl` on the German reunification panel reported
   (-inf, inf) with p = 0.023, though zero and the point estimate are both
-  rejected). The bounds are now always the set's outer hull, a valid but
-  conservative confidence set; when the set has gaps, or the hull disagrees
-  with the test at zero, its pieces are located, stored in `lift_ci_set` and
-  reported in a `RuntimeWarning`. On 48 synthetic fits across eight
+  rejected). The bounds now aim for the set's outer hull, a valid but
+  conservative confidence set; when the set is found to have gaps, or the
+  hull disagrees with the test at zero, its pieces are located, stored in
+  `lift_ci_set` and reported in a `RuntimeWarning`. Detection is best-effort:
+  the search evaluates finitely many effects, so an accepted piece lying
+  wholly between them (beyond a rejected stretch, within 1,000 spreads) can
+  still be missed. On 48 synthetic fits across eight
   estimators, 46 are unchanged; the two that changed (both ElasticNet) had
   been reporting a bound that cut off accepted effects.
 

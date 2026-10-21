@@ -327,8 +327,10 @@ class MarketSelection:
             alpha=self.alpha,
             **self.estimator_kwargs,
         )
+        # Only the fit's band is used here, so interval warnings are noise.
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="The pre-period is too short", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", message="The conformal confidence set is not", category=RuntimeWarning)
             model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")

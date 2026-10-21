@@ -90,6 +90,11 @@ class TestFixedEffects:
         # the engine's default per-period (* t1) scaling.
         assert conf.results["incrementality_ci_lower"] == pytest.approx(conf.results["lift_ci_lower"] * scale)
         assert conf.results["incrementality_ci_upper"] == pytest.approx(conf.results["lift_ci_upper"] * scale)
+        # The confidence set is reported too, on the same scales as the bounds.
+        assert conf.results["lift_ci_set"] == [(conf.results["lift_ci_lower"], conf.results["lift_ci_upper"])]
+        ((incr_lo, incr_hi),) = conf.results["incrementality_ci_set"]
+        assert incr_lo == pytest.approx(conf.results["incrementality_ci_lower"])
+        assert incr_hi == pytest.approx(conf.results["incrementality_ci_upper"])
 
     @staticmethod
     def test_conformal_effect_vs_null_significance(effect_panel, null_panel) -> None:

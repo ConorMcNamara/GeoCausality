@@ -255,10 +255,11 @@ class PowerAnalysis:
             alpha=self.alpha,
             **self.estimator_kwargs,
         )
-        # Only the p-value is used here, so warnings about the interval being
-        # unbounded on a short placebo pre-period are irrelevant noise.
+        # Only the p-value is used here, so warnings about the interval (unbounded
+        # on a short placebo pre-period, or not a single interval) are noise.
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="The pre-period is too short", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", message="The conformal confidence set is not", category=RuntimeWarning)
             model.pre_process().generate()
         if model.results is None:
             raise ValueError("model.results must not be None")

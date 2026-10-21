@@ -111,6 +111,16 @@ class TestPipeline:
         assert results["lift_ci_lower"] <= results["lift_ci_upper"]
 
     @staticmethod
+    def test_ci_set_matches_reported_interval(effect_data: pl.DataFrame) -> None:
+        # The interval is the recentred GSC bootstrap one, so the confidence set
+        # must be that interval, not the ASC fit's own conformal set.
+        results = _geolift(effect_data).pre_process().generate().results
+        assert results["lift_ci_set"] == [(results["lift_ci_lower"], results["lift_ci_upper"])]
+        assert results["incrementality_ci_set"] == [
+            (results["incrementality_ci_lower"], results["incrementality_ci_upper"])
+        ]
+
+    @staticmethod
     def test_raw_gsc_inference_exposed(effect_data: pl.DataFrame) -> None:
         results = _geolift(effect_data).pre_process().generate().results
         assert results["gsc_inference"]["method"] == "bootstrap"

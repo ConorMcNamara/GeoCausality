@@ -172,6 +172,8 @@ class FixedEffects(EconometricEstimator):
             self.results["lift_ci_upper"] = inference["lift_ci_upper"]
             self.results["incrementality_ci_lower"] = inference["lift_ci_lower"] * scale
             self.results["incrementality_ci_upper"] = inference["lift_ci_upper"] * scale
+            self.results["lift_ci_set"] = inference["lift_ci_set"]
+            self.results["incrementality_ci_set"] = [(lo * scale, hi * scale) for lo, hi in inference["lift_ci_set"]]
             self.results["p_value"] = inference["p_value"]
             self.results["conformal_band"] = inference["conformal_band"]
             self.results["method"] = inference["method"]

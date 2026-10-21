@@ -164,6 +164,10 @@ class GeoLift:
         estimate["incrementality_ci_upper"] = incr + upper_width
         estimate["lift_ci_lower"] = estimate["incrementality_ci_lower"] / t1
         estimate["lift_ci_upper"] = estimate["incrementality_ci_upper"] / t1
+        # The ASC fit's conformal confidence set no longer describes the reported
+        # interval; like any non-conformal method, the set is that one interval.
+        estimate["lift_ci_set"] = [(estimate["lift_ci_lower"], estimate["lift_ci_upper"])]
+        estimate["incrementality_ci_set"] = [(estimate["incrementality_ci_lower"], estimate["incrementality_ci_upper"])]
         null = self.inference._bootstrap_null
         if null is not None and null.shape[0] > 0:
             n_extreme = int(np.sum(np.abs(null) >= abs(incr)))
