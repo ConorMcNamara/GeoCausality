@@ -152,6 +152,8 @@ class TestPlotlyRenderer:
         # Pre-onset intervals straddle zero; post-onset ones exclude it.
         (trace,) = render(_event_study(), LIGHT_THEME, "plotly").data
         assert list(trace.marker.symbol) == ["circle-open"] * 3 + ["circle"] * 4
+        # Plotly would otherwise default the outline and connecting line to the colorway's first colour.
+        assert trace.marker.line.color == trace.line.color == LIGHT_THEME.difference
 
     @staticmethod
     def test_event_study_interval_touching_zero_counts_as_containing_it() -> None:
