@@ -1,8 +1,6 @@
-"""Shared light/dark colour themes for the estimators' Plotly figures."""
+"""Light/dark colour themes shared by the Plotly and Altair renderers."""
 
 from dataclasses import dataclass
-
-import plotly.graph_objects as go
 
 
 @dataclass(frozen=True)
@@ -10,7 +8,9 @@ class PlotTheme:
     """Plotly template plus the semantic colours each ``plot()`` draws with.
 
     Series colours are named by role rather than hue so dark mode can swap in
-    lighter shades that keep their contrast against a dark background.
+    lighter shades that keep their contrast against a dark background. The
+    ``background``/``foreground``/``grid`` colours style Altair charts the way
+    the Plotly template styles Plotly ones; ``None`` keeps Altair's defaults.
     """
 
     template: str | None
@@ -23,6 +23,9 @@ class PlotTheme:
     zero: str
     band_rgb: str
     cumulative_band_rgb: str
+    background: str | None = None
+    foreground: str | None = None
+    grid: str | None = None
 
     def band(self, alpha: float) -> str:
         """Return the neutral confidence-band fill at the given opacity."""
@@ -57,20 +60,13 @@ DARK_THEME = PlotTheme(
     zero="#9E9E9E",
     band_rgb="200, 200, 200",
     cumulative_band_rgb="255, 179, 71",
+    # Mirrors the plotly_dark template so both backends look alike.
+    background="#111111",
+    foreground="#F2F5FA",
+    grid="#283442",
 )
 
 
 def get_theme(dark_mode: bool) -> PlotTheme:
     """Return the dark theme when ``dark_mode`` is set, else the light theme."""
     return DARK_THEME if dark_mode else LIGHT_THEME
-
-
-def apply_theme(fig: go.Figure, theme: PlotTheme) -> go.Figure:
-    """Apply the theme's Plotly template to ``fig`` and return it.
-
-    The light theme has no template, so it leaves the caller's
-    ``plotly.io.templates.default`` in effect.
-    """
-    if theme.template is not None:
-        fig.update_layout(template=theme.template)
-    return fig

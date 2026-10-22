@@ -24,6 +24,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   days a permutation takes ~14 ms instead of ~13 s, so the default 1,000
   permutations run in ~15 s rather than ~3.5 hours. `power_simulation` builds
   its synthetic panels with array operations (bit-identical data).
+- **Faster simplex donor weights** — `SyntheticControl`,
+  `AugmentedSyntheticControl`, `SyntheticControlV` and `SyntheticDiffInDiff`
+  fit their simplex-constrained weights (``w >= 0, sum(w) = 1``) with
+  non-negative least squares (`_solve_simplex_lsq`) instead of SLSQP. SLSQP's
+  cost grows roughly cubically with the donor count and conformal inference
+  refits the weights dozens of times, so 400-donor panels took minutes; NNLS
+  matches a tightly converged SLSQP to ~1e-14 in relative loss and is orders
+  of magnitude faster. `SyntheticControl` and `AugmentedSyntheticControl`
+  results are unchanged (to 1e-6). `PenalizedSyntheticControl` keeps SLSQP:
+  its linear discrepancy penalty has no least-squares form.
+- **`SyntheticControlV` and `SyntheticDiffInDiff` estimates shift slightly**
+  — their SLSQP calls had no analytic gradient and a loose tolerance, and
+  stopped short of the optimum while reporting success (SDID's near-exact
+  time-weight fits stopped at a loss of ~1e-8 rather than ~1e-13, before the
+  ridge that selects among them took effect). NNLS reaches the optimum, so
+  their incrementality and intervals move by roughly 0.01-2% on test panels.
+  The published-replication parity tests still pass.
+- **Missing panel cells now raise a clear error** — a panel with a missing or
+  non-finite outcome (e.g. a geo with no row for some date, which pivots to
+  NaN) now raises a `ValueError` naming the estimator and the cause in
+  `SyntheticControl`, `AugmentedSyntheticControl`, `SyntheticControlV` and
+  `SyntheticDiffInDiff`. Previously SC returned a meaningless estimate, SDID
+  returned NaN and ASC raised an unrelated `LinAlgError`.
+
+## [0.20.0] - 2026-10-22
+
+### Added
+
+- **Altair plotting backend** — every `plot()` method (and
+  `PowerAnalysis.plot_mde_sensitivity()` / `plot_power_heatmap()`) takes
+  `backend="plotly" | "altair"`. Each Altair chart draws the same series,
+  bands and reference lines as its Plotly figure, follows `dark_mode`, and
+  accepts date, datetime, ISO-string or integer date axes. Altair is optional:
+  `pip install "geocausality[altair]"`.
+- **Hollow event-study markers** — `FixedEffects.plot()` draws a period's
+  coefficient with a hollow marker when its confidence interval contains zero,
+  and a filled one when it excludes zero, in both backends. Filled pre-onset
+  markers flag a possible parallel-trends violation. The omitted reference
+  period, pinned to zero, is always hollow. The Plotly line joining the
+  markers is now drawn in the markers' colour, as in Altair, rather than the
+  colorway's first colour.
+
+### Changed
+
+- **Breaking: `plot()` returns the figure instead of showing it** — every
+  `plot()` method (and `PowerAnalysis.plot_mde_sensitivity()` /
+  `plot_power_heatmap()`) now returns its figure rather than calling
+  `fig.show()` and returning `None`. Notebooks still render the figure when it
+  is the cell's last expression; scripts should call `.show()` on the result.
+- **`GeoX.plot()` uses the shared counterfactual figure** — the same three
+  panels as the synthetic-control estimators, so its bands now draw beneath
+  the series, the cumulative band is orange like theirs, the top band has a
+  legend entry, and the middle series is labelled "Difference" rather than
+  "Residuals". The intervals shaded are unchanged. Every other Plotly figure
+  is unchanged.
+- **Plotting internals** — `GeoCausality._plotting` is now a package: each
+  `plot()` builds a backend-free figure description (`figures`) and `render`
+  draws it with a per-backend renderer (`_plotly`, `_altair`).
+
+### Fixed
+
+- **pandas input to the synthetic-control estimators** — `SyntheticControl`,
+  `SyntheticControlV`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`,
+  `PenalizedSyntheticControl`, `RobustSyntheticControl`, `KernelSyntheticControl`,
+  `NonlinearSyntheticControl`, `GeneralizedSyntheticControl`,
+  `SyntheticDiffInDiff`, `MatrixCompletion`, `InteractiveFixedEffects`,
+  `CausalImpact` and `GeoLift` raised `TypeError: DataFrame.pivot() got an
+  unexpected keyword argument 'on'` on a pandas DataFrame. The donor matrix
+  was pivoted with polars' native signature; it now uses narwhals' `pivot`,
+  which works for both backends. Results on polars input are unchanged.
 
 ## [0.19.1] - 2026-10-16
 
@@ -813,6 +883,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.20.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.20.0
 [0.19.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.1
 [0.19.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.0
 [0.18.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.18.0
