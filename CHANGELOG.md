@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `plot()` builds a backend-free figure description (`figures`) and `render`
   draws it with a per-backend renderer (`_plotly`, `_altair`).
 
+### Fixed
+
+- **pandas input to the synthetic-control estimators** — `SyntheticControl`,
+  `SyntheticControlV`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`,
+  `PenalizedSyntheticControl`, `RobustSyntheticControl`, `KernelSyntheticControl`,
+  `NonlinearSyntheticControl`, `GeneralizedSyntheticControl`,
+  `SyntheticDiffInDiff`, `MatrixCompletion`, `InteractiveFixedEffects`,
+  `CausalImpact` and `GeoLift` raised `TypeError: DataFrame.pivot() got an
+  unexpected keyword argument 'on'` on a pandas DataFrame. The donor matrix
+  was pivoted with polars' native signature; it now uses narwhals' `pivot`,
+  which works for both backends. Results on polars input are unchanged.
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed
