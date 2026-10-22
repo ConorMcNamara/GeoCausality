@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 from narwhals.typing import IntoDataFrame
 
+from GeoCausality._plotting import PlotBackend
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.generalized_synthetic_control import GeneralizedSyntheticControl
 
@@ -193,12 +194,19 @@ class GeoLift:
         """
         return self.estimator.summarize(lift)
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the ASC counterfactual, pointwise and cumulative differences.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with.
+
+        Returns
+        -------
+        plotly Figure or altair VConcatChart
+            The figure, drawn with ``backend``.
         """
-        return self.estimator.plot(dark_mode=dark_mode)
+        return self.estimator.plot(dark_mode=dark_mode, backend=backend)

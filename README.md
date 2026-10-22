@@ -50,7 +50,12 @@ A Python library for measuring the causal impact of geo-level A/B experiments. G
 pip install geocausality
 ```
 
-Requires Python >= 3.13.
+Requires Python >= 3.13. Plots use Plotly by default; to draw them with Altair
+as well, install the optional extra:
+
+```bash
+pip install "geocausality[altair]"
+```
 
 ## Quick Start
 
@@ -69,8 +74,12 @@ model = synthetic_control.SyntheticControl(
     spend=500_000,
 )
 model.pre_process().generate().summarize(lift="roas")
-model.plot()
+model.plot()  # returns a Plotly figure; call .show() outside a notebook
+model.plot(backend="altair")  # the same figure as an Altair chart
 ```
+
+Every `plot()` method, including `PowerAnalysis`'s and `MarketSelection`'s, takes
+`backend="altair"` and `dark_mode=True`.
 
 Estimators that take a `treatment_variable` column instead of explicit geo lists work the same way:
 

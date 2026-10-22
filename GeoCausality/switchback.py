@@ -4,13 +4,12 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 from linearmodels.panel import PanelOLS
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import PlotBackend, SwitchbackPlotData, check_backend, get_theme, render
 
 
 class Switchback(Estimator):
@@ -762,49 +761,36 @@ class Switchback(Estimator):
             "power_ci_upper": min(1.0, power + z * se_power),
         }
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the treatment schedule and outcome time series per geo.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
 
         Returns
         -------
-        An interactive Plotly figure showing the switchback pattern.
+        plotly Figure or altair LayerChart
+            An interactive figure showing the switchback pattern. Notebooks
+            render it when it is the cell's last expression; elsewhere call
+            its ``.show()`` (Plotly) or ``.save()`` (Altair).
         """
+        check_backend(backend)
         if self.panel is None:
             raise ValueError("Call pre_process() before plot()")
 
-        import pandas as pd
-
-        panel_pd: pd.DataFrame = self.panel.to_pandas()
-        geos = sorted(panel_pd[self.geo_variable].unique())
+        panel_pd = self.panel.to_pandas()
         treat_var: str = self.treatment_variable or "is_treatment"
-
-        theme = get_theme(dark_mode)
-        fig = go.Figure()
-        for geo in geos:
-            geo_data = panel_pd.loc[panel_pd[self.geo_variable] == geo].sort_values(by=self.date_variable)
-            dates = geo_data[self.date_variable]
-            y = geo_data[self.y_variable]
-            treat = geo_data[treat_var]
-            colors = [theme.counterfactual if t == 1 else theme.actual for t in treat]
-            fig.add_trace(
-                go.Scatter(
-                    x=dates,
-                    y=y,
-                    mode="lines+markers",
-                    marker={"color": colors, "size": 4},
-                    name=str(geo),
-                )
-            )
-
-        fig.update_layout(
-            title="Switchback Design: Outcome by Geo",
-            xaxis_title=self.date_variable,
-            yaxis_title=self.y_variable,
+        frame = panel_pd[[self.geo_variable, self.date_variable, self.y_variable, treat_var]].set_axis(
+            ["geo", "date", "y", "treated"], axis=1
         )
-        apply_theme(fig, theme)
-        fig.show()
+        data = SwitchbackPlotData(
+            frame=frame.assign(treated=frame["treated"] == 1),
+            x_title=self.date_variable,
+            y_title=self.y_variable,
+        )
+        return render(data, get_theme(dark_mode), backend)

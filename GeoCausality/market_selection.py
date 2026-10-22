@@ -26,12 +26,11 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator, date_key, period_key
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import MarketRankingPlotData, PlotBackend, check_backend, get_theme, render
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 from GeoCausality.power import PowerAnalysis
 
@@ -519,7 +518,7 @@ class MarketSelection:
         }
         print(tabulate(table, headers="keys", tablefmt="grid"))
 
-    def plot(self, top: int = 10, dark_mode: bool = False) -> None:
+    def plot(self, top: int = 10, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the score of the top-ranked candidate test sets.
 
         Parameters
@@ -528,29 +527,29 @@ class MarketSelection:
             The number of top-ranked candidates to display.
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
+
+        Returns
+        -------
+        plotly Figure or altair LayerChart
+            The figure. Notebooks render it when it is the cell's last
+            expression; elsewhere call its ``.show()`` (Plotly) or ``.save()``
+            (Altair).
 
         Raises
         ------
         ValueError
             If ``search()`` has not been run yet.
         """
+        check_backend(backend)
         if self.rankings is None:
             raise ValueError("Call search() before plot()")
-        rows = self.rankings[:top][::-1]  # best at the top of a horizontal bar
-        labels = [", ".join(r["test_geos"]) for r in rows]
-        fig = go.Figure(
-            go.Bar(
-                x=[r["score"] for r in rows],
-                y=labels,
-                orientation="h",
-                text=[f"power {r['power']:.0%}" for r in rows],
-            )
+        rows = self.rankings[:top]
+        data = MarketRankingPlotData(
+            labels=[", ".join(r["test_geos"]) for r in rows],
+            scores=[r["score"] for r in rows],
+            powers=[r["power"] for r in rows],
         )
-        fig.update_layout(
-            title="Top candidate test markets",
-            xaxis_title="Score",
-            yaxis_title="Test geos",
-            xaxis_range=[0, 1],
-        )
-        apply_theme(fig, get_theme(dark_mode))
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)
