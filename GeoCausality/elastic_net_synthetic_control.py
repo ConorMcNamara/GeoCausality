@@ -268,7 +268,7 @@ class ElasticNetSyntheticControl(EconometricEstimator):
             )
             self.lambda_ = float(est.alpha_)
         else:
-            est = self._silent_fit(self._make_estimator(self.lambda_), x, y)
+            est = self._silent_fit(self._make_estimator(self.lambda_, self._use_gram(x)), x, y)
         self.intercept_ = float(est.intercept_) if self.intercept else 0.0
         return np.asarray(est.coef_, dtype=float)
 
@@ -321,7 +321,31 @@ class ElasticNetSyntheticControl(EconometricEstimator):
             alpha_max = 1.0
         return np.geomspace(alpha_max, alpha_max * ratio, n_alphas)
 
-    def _make_estimator(self, lambda_: float) -> Any:
+    @staticmethod
+    def _use_gram(x: np.ndarray) -> bool:
+        """Whether coordinate descent should run on the precomputed Gram matrix.
+
+        Gram-based coordinate descent converges to the same solution as the
+        plain solver up to floating-point rounding (coefficients agree to
+        ~1e-10 relative); sweep counts can differ on badly conditioned refits,
+        such as the large candidate effects of the interval search. Each sweep
+        costs ``O(n_donors^2)`` instead of ``O(n_dates * n_donors)`` and runs on
+        a small contiguous matrix. In practice it is 2-20x faster unless the
+        donors greatly outnumber the training dates; the measured break-even is
+        about ``n_donors = 2.7 * n_dates``.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_train, n_donors)
+            The donor matrix to be fit.
+
+        Returns
+        -------
+        True when the Gram solver is expected to be faster.
+        """
+        return x.shape[1] <= 2.5 * x.shape[0]
+
+    def _make_estimator(self, lambda_: float, precompute: bool = False) -> Any:
         """Build the (non-CV) fitter for a fixed penalty.
 
         A zero penalty is fit with ``LinearRegression`` (scikit-learn's elastic net
@@ -331,6 +355,9 @@ class ElasticNetSyntheticControl(EconometricEstimator):
         ----------
         lambda_ : float
             The elastic-net penalty strength.
+        precompute : bool, default=False
+            Whether ``ElasticNet`` runs coordinate descent on the precomputed
+            Gram matrix (see ``_use_gram``). Changes speed only, not the fit.
 
         Returns
         -------
@@ -343,6 +370,7 @@ class ElasticNetSyntheticControl(EconometricEstimator):
             l1_ratio=self.l1_ratio,
             fit_intercept=self.intercept,
             positive=self.non_negative,
+            precompute=precompute,
             max_iter=100_000,
             tol=1e-3,
         )
@@ -351,8 +379,12 @@ class ElasticNetSyntheticControl(EconometricEstimator):
         """Refit the elastic-net weights on a subset and predict.
 
         Holds ``self.lambda_`` at its full-fit value (set during ``_create_model``)
-        so the leave-one-out / bootstrap refits reflect the same penalty. Drives
-        the shared faithful jackknife+ and parametric bootstrap.
+        so the leave-one-out / bootstrap refits reflect the same penalty: the
+        penalty is never re-selected per refit. Drives the shared faithful
+        jackknife+ and parametric bootstrap, and (through
+        ``_refit_counterfactual``) the null-imposed conformal refits and the
+        cross-fitted band, which can number around a hundred fits per
+        ``generate``. These use the Gram solver when it is faster (``_use_gram``).
 
         Parameters
         ----------
@@ -369,6 +401,6 @@ class ElasticNetSyntheticControl(EconometricEstimator):
         """
         if self.lambda_ is None:
             raise ValueError("lambda_ must be set before refitting (call generate first)")
-        est = self._silent_fit(self._make_estimator(self.lambda_), x_train, y_train)
+        est = self._silent_fit(self._make_estimator(self.lambda_, self._use_gram(x_train)), x_train, y_train)
         intercept = float(est.intercept_) if self.intercept else 0.0
         return x_eval @ np.asarray(est.coef_, dtype=float) + intercept
