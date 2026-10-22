@@ -33,6 +33,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SyntheticDiffInDiff`. Previously SC returned a meaningless estimate, SDID
   returned NaN and ASC raised an unrelated `LinAlgError`.
 
+## [0.20.0] - 2026-10-22
+
+### Added
+
+- **Altair plotting backend** — every `plot()` method (and
+  `PowerAnalysis.plot_mde_sensitivity()` / `plot_power_heatmap()`) takes
+  `backend="plotly" | "altair"`. Each Altair chart draws the same series,
+  bands and reference lines as its Plotly figure, follows `dark_mode`, and
+  accepts date, datetime, ISO-string or integer date axes. Altair is optional:
+  `pip install "geocausality[altair]"`.
+- **Hollow event-study markers** — `FixedEffects.plot()` draws a period's
+  coefficient with a hollow marker when its confidence interval contains zero,
+  and a filled one when it excludes zero, in both backends. Filled pre-onset
+  markers flag a possible parallel-trends violation. The omitted reference
+  period, pinned to zero, is always hollow. The Plotly line joining the
+  markers is now drawn in the markers' colour, as in Altair, rather than the
+  colorway's first colour.
+
+### Changed
+
+- **Breaking: `plot()` returns the figure instead of showing it** — every
+  `plot()` method (and `PowerAnalysis.plot_mde_sensitivity()` /
+  `plot_power_heatmap()`) now returns its figure rather than calling
+  `fig.show()` and returning `None`. Notebooks still render the figure when it
+  is the cell's last expression; scripts should call `.show()` on the result.
+- **`GeoX.plot()` uses the shared counterfactual figure** — the same three
+  panels as the synthetic-control estimators, so its bands now draw beneath
+  the series, the cumulative band is orange like theirs, the top band has a
+  legend entry, and the middle series is labelled "Difference" rather than
+  "Residuals". The intervals shaded are unchanged. Every other Plotly figure
+  is unchanged.
+- **Plotting internals** — `GeoCausality._plotting` is now a package: each
+  `plot()` builds a backend-free figure description (`figures`) and `render`
+  draws it with a per-backend renderer (`_plotly`, `_altair`).
+
+### Fixed
+
+- **pandas input to the synthetic-control estimators** — `SyntheticControl`,
+  `SyntheticControlV`, `AugmentedSyntheticControl`, `ElasticNetSyntheticControl`,
+  `PenalizedSyntheticControl`, `RobustSyntheticControl`, `KernelSyntheticControl`,
+  `NonlinearSyntheticControl`, `GeneralizedSyntheticControl`,
+  `SyntheticDiffInDiff`, `MatrixCompletion`, `InteractiveFixedEffects`,
+  `CausalImpact` and `GeoLift` raised `TypeError: DataFrame.pivot() got an
+  unexpected keyword argument 'on'` on a pandas DataFrame. The donor matrix
+  was pivoted with polars' native signature; it now uses narwhals' `pivot`,
+  which works for both backends. Results on polars input are unchanged.
+
 ## [0.19.1] - 2026-10-16
 
 ### Changed
@@ -821,6 +868,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.20.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.20.0
 [0.19.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.1
 [0.19.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.0
 [0.18.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.18.0

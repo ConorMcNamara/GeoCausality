@@ -4,7 +4,6 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 from narwhals.typing import IntoDataFrame
 from scipy.linalg import toeplitz
@@ -12,7 +11,7 @@ from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import ParallelTrendsPlotData, PlotBackend, check_backend, get_theme, render
 
 
 class DiffinDiff(EconometricEstimator):
@@ -364,7 +363,7 @@ class DiffinDiff(EconometricEstimator):
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the parallel-trends diagnostic for our difference-in-differences.
 
         Plots the treated and control group averages over time alongside the
@@ -378,11 +377,18 @@ class DiffinDiff(EconometricEstimator):
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
 
         Returns
         -------
-        The parallel-trends plot summarizing the results.
+        plotly Figure or altair LayerChart
+            The parallel-trends plot summarizing the results. Notebooks render
+            it when it is the cell's last expression; elsewhere call its
+            ``.show()`` (Plotly) or ``.save()`` (Altair).
         """
+        check_backend(backend)
         if self.groupby_data is None:
             raise ValueError("groupby_data must not be None")
         if self.treatment_variable is None:
@@ -397,43 +403,14 @@ class DiffinDiff(EconometricEstimator):
         control_pre = control.filter(nw.col("treatment_period") == 0)[self.y_variable].to_numpy()
         offset = treated_pre.mean() - control_pre.mean()
         counterfactual = control_y + offset
-        theme = get_theme(dark_mode)
-        fig = go.Figure(
-            [
-                go.Scatter(
-                    x=treated_dates,
-                    y=treated_y,
-                    marker={"color": theme.actual},
-                    mode="lines",
-                    name="Treated",
-                ),
-                go.Scatter(
-                    x=control_dates,
-                    y=control_y,
-                    marker={"color": theme.control},
-                    mode="lines",
-                    name="Control",
-                ),
-                go.Scatter(
-                    x=control_dates,
-                    y=counterfactual,
-                    marker={"color": theme.counterfactual},
-                    mode="lines",
-                    line={"dash": "dash"},
-                    name="Counterfactual",
-                ),
-            ]
+        data = ParallelTrendsPlotData(
+            treated_dates=treated_dates,
+            treated=treated_y,
+            control_dates=control_dates,
+            control=control_y,
+            counterfactual=counterfactual,
+            post_period=self.post_period,
+            x_title=self.date_variable,
+            y_title=self.y_variable,
         )
-        fig.add_vline(
-            x=self.post_period,
-            line_width=1,
-            line_dash="dash",
-            line_color=theme.reference,
-        )
-        fig.update_layout(
-            title="Parallel Trends",
-            xaxis_title=self.date_variable,
-            yaxis_title=self.y_variable,
-        )
-        apply_theme(fig, theme)
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)

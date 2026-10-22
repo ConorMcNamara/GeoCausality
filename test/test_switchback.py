@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from GeoCausality.switchback import Switchback
@@ -246,3 +247,18 @@ class TestWrongInputs:
         )
         with pytest.raises(ValueError, match="pre_process"):
             model.generate()
+
+
+class TestPlot:
+    @staticmethod
+    def test_plotly_one_trace_per_geo(data_df: pd.DataFrame) -> None:
+        fig = _fit(data_df).plot()
+        assert isinstance(fig, go.Figure)
+        assert [t.name for t in fig.data] == sorted(data_df["geo"].unique())
+
+    @staticmethod
+    def test_altair_marks_treated_points(data_df: pd.DataFrame) -> None:
+        pytest.importorskip("altair")
+        chart = _fit(data_df).plot(backend="altair")
+        chart.to_dict()
+        assert set(pd.DataFrame(chart.data.values)["status"]) == {"Treatment", "Control"}
