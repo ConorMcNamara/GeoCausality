@@ -33,7 +33,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+altair = [
+    "altair (>=5.4.0,<7.0.0)"
+]
 dev = [
+    "altair (>=5.4.0,<7.0.0)",
     "pytest (>=9.0.3,<10.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)",
     "pytest-xdist (>=3.6.0,<4.0.0)"

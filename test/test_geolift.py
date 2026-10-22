@@ -13,6 +13,7 @@ from contextlib import redirect_stdout
 from datetime import date, timedelta
 
 import numpy as np
+import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -145,6 +146,15 @@ class TestReporting:
         out = buffer.getvalue()
         assert "p_value" in out
         assert "CI" in out
+
+
+class TestPlot:
+    @staticmethod
+    def test_plot_passes_backend_through(effect_data: pl.DataFrame) -> None:
+        alt = pytest.importorskip("altair")
+        gl = _geolift(effect_data).pre_process().generate()
+        assert isinstance(gl.plot(), go.Figure)
+        assert isinstance(gl.plot(backend="altair"), alt.VConcatChart)
 
 
 if __name__ == "__main__":
