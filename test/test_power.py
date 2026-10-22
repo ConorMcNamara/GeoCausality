@@ -13,6 +13,7 @@ tests so a synthetic control can reconstruct the test geos from the controls.
 """
 
 import io
+import warnings
 from contextlib import redirect_stdout
 from datetime import date, timedelta
 
@@ -124,6 +125,16 @@ class TestSimulate:
         # rate alpha, not blow up. Allow generous slack for a small sim count.
         pa = _power(history, alpha=0.1).simulate(effect_sizes=[0.0], durations=[10], n_sims=20)
         assert pa.power_curve[0]["power"] <= 0.35
+
+    @staticmethod
+    def test_interval_warnings_do_not_leak(history: pl.DataFrame) -> None:
+        # Only each simulated fit's p-value is used, so warnings about its
+        # confidence interval (some placebo fits here have a set with gaps) are
+        # suppressed rather than repeated for every simulation.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="The conformal confidence set is not", category=RuntimeWarning)
+            warnings.filterwarnings("error", message="The pre-period is too short", category=RuntimeWarning)
+            _power(history).simulate(effect_sizes=[0.0, 0.5], durations=[10], n_sims=10)
 
     @staticmethod
     def test_duration_too_long_raises(history: pl.DataFrame) -> None:

@@ -8,6 +8,7 @@ reporting surface. ``SyntheticControl`` is the fast, deterministic estimator.
 """
 
 import io
+import warnings
 from contextlib import redirect_stdout
 from datetime import date, timedelta
 
@@ -503,6 +504,35 @@ def test_pre_fit_normalizes_by_summed_series(history: pl.DataFrame) -> None:
     assert pre_fit == pytest.approx(band / summed_mean, rel=1e-9)
     assert pre_fit == pytest.approx((band / per_geo_mean) / len(test_geos), rel=1e-9)
     assert pre_fit != pytest.approx(band / per_geo_mean, rel=1e-3)
+
+
+class _GappedSetSyntheticControl(SyntheticControl):
+    """A SyntheticControl whose every fit warns that its confidence set has gaps."""
+
+    def generate(self) -> "_GappedSetSyntheticControl":
+        warnings.warn("The conformal confidence set is not a single interval (stub).", RuntimeWarning, stacklevel=2)
+        return super().generate()
+
+
+def test_pre_fit_suppresses_interval_warnings(history: pl.DataFrame) -> None:
+    # Only the fit's band is used to rank candidates, so warnings about its
+    # confidence interval are noise and must not reach the caller.
+    ms = _selection(history, estimator=_GappedSetSyntheticControl)
+    pa = PowerAnalysis(
+        history,
+        geo_variable="geo",
+        test_geos=["g0", "g1"],
+        control_geos=[f"g{i}" for i in range(2, N_GEOS)],
+        date_variable="date",
+        pre_period=PRE_PERIOD,
+        y_variable="y",
+        alpha=0.1,
+        estimator=_GappedSetSyntheticControl,
+        seed=0,
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="The conformal confidence set is not", category=RuntimeWarning)
+        assert ms._pre_fit(pa, 5) is not None
 
 
 if __name__ == "__main__":
