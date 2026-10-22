@@ -12,6 +12,20 @@ from GeoCausality._base import EconometricEstimator
 # convergence check never divides by zero (e.g. on an all-zero panel).
 _CONVERGENCE_NORM_EPS = 1e-12
 
+# Below this penalty (relative to the matrix's Frobenius norm) the Gram-matrix
+# soft-threshold could admit round-off-level eigenvalues, so ``_svt`` falls
+# back to a full SVD. Above it the two agree to round-off amplified by the
+# squared condition number (worst seen ~5e-11 of the top singular value, on
+# ill-conditioned inputs with the penalty just above this cutoff).
+_GRAM_MIN_LAMBDA_RATIO = 1e-6
+
+# The continuation path for the final fit: ``_CONTINUATION_STEPS`` geometric
+# steps from ``lambda_max`` down to ``lambda_max * _CONTINUATION_MIN_RATIO``.
+# Fixed (rather than ``n_lambda`` / ``lambda_ratio``) so a given penalty fits
+# the same way however the cross-validation path is configured.
+_CONTINUATION_STEPS = 50
+_CONTINUATION_MIN_RATIO = 1e-3
+
 
 class MatrixCompletion(EconometricEstimator):
     """Run matrix-completion (nuclear-norm) synthetic control for our geo-test.
@@ -30,7 +44,10 @@ class MatrixCompletion(EconometricEstimator):
     soft-threshold the singular values), following Athey, Bayati, Doudchenko,
     Imbens & Khosravi :cite:`athey2021matrix`. The nuclear-norm penalty
     ``lambda_`` is chosen by cross-validation over a decreasing path (each
-    penalty solved from scratch) unless supplied.
+    penalty warm-started from the previous one's low-rank term) unless supplied;
+    the final fit reaches it by warm-started continuation down a fixed penalty
+    path, so a given ``lambda_`` fits the same way whatever ``n_lambda`` and
+    ``lambda_ratio`` are.
 
     Inference reuses the shared conformal p-values and confidence intervals from
     ``EconometricEstimator`` (with the residual-only jackknife+ fallback for
@@ -245,7 +262,16 @@ class MatrixCompletion(EconometricEstimator):
         The fitted full panel on the original scale.
         """
         lambda_ = self.lambda_ if self.lambda_ is not None else self._cv_lambda(panel, mask)
-        return self._complete(panel, mask, lambda_)
+        # Reach the penalty by continuation: warm-start down a fixed path's
+        # larger penalties first. Soft-impute converges slowly from zero at
+        # small penalties, so a cold solve can stop (relative change below
+        # ``tol``) well short of the optimum.
+        low_rank = None
+        for step in self._lambda_path(panel, mask, _CONTINUATION_STEPS, _CONTINUATION_MIN_RATIO):
+            if step <= lambda_:
+                break
+            _, low_rank = self._complete(panel, mask, step, low_rank)
+        return self._complete(panel, mask, lambda_, low_rank)[0]
 
     def _two_way_fe(self, resid: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Fit additive row and column effects on the observed residual cells.
@@ -266,25 +292,29 @@ class MatrixCompletion(EconometricEstimator):
         -------
         A tuple of (row_effect, col_effect) as 1-D arrays.
         """
-        row_obs = mask.sum(axis=1)
-        col_obs = mask.sum(axis=0)
+        weights = mask.astype(float)
+        row_obs = weights.sum(axis=1)
+        col_obs = weights.sum(axis=0)
+        # The observed-cell sums of the residual are fixed, so each sweep only
+        # needs the masked sums of the other effect: two matrix-vector products.
+        masked = np.where(mask, resid, 0.0)
+        row_sum = masked.sum(axis=1)
+        col_sum = masked.sum(axis=0)
         gamma = np.zeros(resid.shape[0])
         delta = np.zeros(resid.shape[1])
         for _ in range(self.max_iter):
-            gamma_new = np.where(
-                row_obs > 0, ((resid - delta[None, :]) * mask).sum(axis=1) / np.maximum(row_obs, 1), 0.0
-            )
+            gamma_new = np.where(row_obs > 0, (row_sum - weights @ delta) / np.maximum(row_obs, 1), 0.0)
             if self.use_time_effect:
-                delta = np.where(
-                    col_obs > 0, ((resid - gamma_new[:, None]) * mask).sum(axis=0) / np.maximum(col_obs, 1), 0.0
-                )
+                delta = np.where(col_obs > 0, (col_sum - gamma_new @ weights) / np.maximum(col_obs, 1), 0.0)
             if np.max(np.abs(gamma_new - gamma)) < self.tol:
                 gamma = gamma_new
                 break
             gamma = gamma_new
         return gamma, delta
 
-    def _complete(self, panel: np.ndarray, mask: np.ndarray, lambda_: float) -> np.ndarray:
+    def _complete(
+        self, panel: np.ndarray, mask: np.ndarray, lambda_: float, warm: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Alternate two-way fixed effects and soft-impute at a fixed penalty.
 
         Parameters
@@ -295,13 +325,17 @@ class MatrixCompletion(EconometricEstimator):
             True where observed.
         lambda_ : float
             The nuclear-norm penalty (singular-value soft-threshold).
+        warm : numpy array, optional
+            Initial low-rank term (e.g. the solution at the previous, larger
+            penalty on the path). Zeros when ``None``.
 
         Returns
         -------
-        The completed panel (low-rank term plus the two-way fixed effects).
+        A tuple of (completed panel, low-rank term): the completed panel is the
+        low-rank term plus the two-way fixed effects.
         """
         obs = np.where(mask, panel, 0.0)
-        low_rank = np.zeros_like(panel)
+        low_rank = np.zeros_like(panel) if warm is None else warm
         prev = None
         gamma = np.zeros(panel.shape[0])
         delta = np.zeros(panel.shape[1])
@@ -315,7 +349,7 @@ class MatrixCompletion(EconometricEstimator):
                 if np.linalg.norm(fitted - prev) / denom < self.tol:
                     break
             prev = fitted
-        return low_rank + gamma[:, None] + delta[None, :]
+        return low_rank + gamma[:, None] + delta[None, :], low_rank
 
     def _soft_impute(self, target: np.ndarray, mask: np.ndarray, lambda_: float, warm: np.ndarray) -> np.ndarray:
         """One soft-impute solve: fill missing cells, SVD, soft-threshold, iterate.
@@ -339,10 +373,7 @@ class MatrixCompletion(EconometricEstimator):
         low_rank = warm
         prev = None
         for _ in range(self.max_iter):
-            filled = np.where(mask, target, low_rank)
-            u, s, vt = np.linalg.svd(filled, full_matrices=False)
-            s_thresh = np.maximum(s - lambda_, 0.0)
-            low_rank = (u * s_thresh) @ vt
+            low_rank = _svt(np.where(mask, target, low_rank), lambda_)
             if prev is not None:
                 denom = np.linalg.norm(prev) + _CONVERGENCE_NORM_EPS
                 if np.linalg.norm(low_rank - prev) / denom < self.tol:
@@ -350,20 +381,25 @@ class MatrixCompletion(EconometricEstimator):
             prev = low_rank
         return low_rank
 
-    def _lambda_path(self, panel: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def _lambda_path(
+        self, panel: np.ndarray, mask: np.ndarray, n_lambda: int | None = None, ratio: float | None = None
+    ) -> np.ndarray:
         """Geometric penalty path from ``lambda_max`` down to ``lambda_max * ratio``.
 
         ``lambda_max`` is the largest singular value of the two-way-demeaned
         observed matrix -- the smallest penalty that shrinks the low-rank term to
         zero -- so the path spans the full range from pure fixed effects to a
-        near-interpolating completion.
+        near-interpolating completion. ``n_lambda`` and ``ratio`` default to the
+        estimator's cross-validation settings.
         """
         gamma, delta = self._two_way_fe(panel, mask)
         demeaned = np.where(mask, panel - gamma[:, None] - delta[None, :], 0.0)
         lambda_max = float(np.linalg.svd(demeaned, compute_uv=False)[0])
         if lambda_max <= 0.0:
             return np.zeros(1)
-        return np.geomspace(lambda_max, lambda_max * self.lambda_ratio, self.n_lambda)
+        n_lambda = self.n_lambda if n_lambda is None else n_lambda
+        ratio = self.lambda_ratio if ratio is None else ratio
+        return np.geomspace(lambda_max, lambda_max * ratio, n_lambda)
 
     def _cv_lambda(self, panel: np.ndarray, mask: np.ndarray) -> float:
         """Pick the penalty minimizing held-out error on masked observed cells.
@@ -371,6 +407,9 @@ class MatrixCompletion(EconometricEstimator):
         Randomly holds out ``cv_fraction`` of the observed cells, fits the
         completion on the rest for each penalty on a decreasing path, and returns
         the penalty with the lowest mean-squared error on the held-out cells.
+        Each fit is warm-started from the low-rank term at the previous (larger)
+        penalty, which sits close to the next solution, so far fewer soft-impute
+        iterations are needed than when solving every penalty from zero.
 
         Parameters
         ----------
@@ -392,9 +431,52 @@ class MatrixCompletion(EconometricEstimator):
 
         held_true = panel[hold[:, 0], hold[:, 1]]
         best_lambda, best_err = 0.0, np.inf
+        low_rank = None
         for lambda_ in self._lambda_path(panel, train_mask):
-            fitted = self._complete(panel, train_mask, lambda_)
+            fitted, low_rank = self._complete(panel, train_mask, lambda_, low_rank)
             err = float(np.mean((fitted[hold[:, 0], hold[:, 1]] - held_true) ** 2))
             if err < best_err:
                 best_err, best_lambda = err, lambda_
         return best_lambda
+
+
+def _svt(x: np.ndarray, lambda_: float) -> np.ndarray:
+    """Singular-value soft-threshold: ``U diag(max(s - lambda_, 0)) V^T``.
+
+    Only the singular values above ``lambda_`` contribute, so rather than a
+    full SVD this eigendecomposes the smaller Gram matrix and keeps the
+    eigenpairs whose eigenvalues exceed ``lambda_**2``. With ``A`` the tall
+    orientation of ``x`` and ``V`` the kept eigenvectors, the result is
+    ``A V diag(1 - lambda_ / s) V^T`` since ``A v_i = s_i u_i``. This is two
+    to four times faster than a full SVD. Forming the Gram matrix squares the
+    condition number, so the two agree to round-off only up to that
+    amplification: typically ~1e-15 of the top singular value, but up to
+    ~5e-11 of it (~1e-9 relative to the result) on ill-conditioned inputs
+    with ``lambda_`` just above the full-SVD fallback cutoff. For a penalty that is tiny relative to ``x`` (including
+    ``lambda_ = 0``), where squaring would let round-off-level eigenvalues
+    through, it falls back to the full SVD.
+
+    Parameters
+    ----------
+    x : numpy array, shape (m, n)
+        The matrix to shrink.
+    lambda_ : float
+        The soft-threshold applied to the singular values.
+
+    Returns
+    -------
+    The soft-thresholded matrix, shape (m, n).
+    """
+    if lambda_ <= _GRAM_MIN_LAMBDA_RATIO * np.linalg.norm(x):
+        u, s, vt = np.linalg.svd(x, full_matrices=False)
+        return (u * np.maximum(s - lambda_, 0.0)) @ vt
+    wide = x.shape[0] < x.shape[1]
+    tall = x.T if wide else x
+    eigvals, eigvecs = np.linalg.eigh(tall.T @ tall)
+    keep = eigvals > lambda_ * lambda_
+    if not keep.any():
+        return np.zeros_like(x)
+    eigvals, eigvecs = eigvals[keep], eigvecs[:, keep]
+    shrink = 1.0 - lambda_ / np.sqrt(eigvals)
+    out = ((tall @ eigvecs) * shrink) @ eigvecs.T
+    return out.T if wide else out

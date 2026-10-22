@@ -223,11 +223,8 @@ class TestNonlinearVsKernel:
 class TestPlot:
     @staticmethod
     @pytest.mark.parametrize("builder", [_nsc, _kernel])
-    def test_plot_builds_figure(builder, effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        builder(effect_data).pre_process().generate().plot()
-        assert shown.get("ok") is True
+    def test_plot_builds_figure(builder, effect_data: pl.DataFrame) -> None:
+        assert isinstance(builder(effect_data).pre_process().generate().plot(), go.Figure)
 
 
 if __name__ == "__main__":

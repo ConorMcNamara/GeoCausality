@@ -7,15 +7,13 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 import statsmodels.api as sm
 from narwhals.typing import IntoDataFrame
-from plotly.subplots import make_subplots
 from scipy.stats import t as t_dist
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import MLEstimator, date_key, period_key
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import Band, CounterfactualPlotData, PlotBackend, check_backend, get_theme, render
 
 
 class GeoX(MLEstimator):
@@ -689,18 +687,25 @@ class GeoX(MLEstimator):
             return float(np.sum(incr))
         raise ValueError(f"Unknown statistic: {statistic!r}")
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot our actual results, our counterfactual, the pointwise difference and cumulative difference.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
 
         Returns
         -------
-        Our three plots determining the results
+        plotly Figure or altair VConcatChart
+            Our three plots determining the results. Notebooks render it when
+            it is the cell's last expression; elsewhere call its ``.show()``
+            (Plotly) or ``.save()`` (Altair).
         """
+        check_backend(backend)
         if self.pre_control is None:
             raise ValueError("pre_control must not be None")
         if self.pre_test is None:
@@ -718,134 +723,30 @@ class GeoX(MLEstimator):
         marketing_start = [d for d in self.dates if period_key(d, self.data, self.date_variable) >= post_key]
         control_data = nw.concat([self.pre_control, self.post_control])
         counterfactual = self.model.predict(sm.add_constant(control_data[self.y_variable].to_numpy()))
-        theme = get_theme(dark_mode)
-        total_fig = make_subplots(
-            rows=3,
-            cols=1,
-            subplot_titles=(
-                "Expected vs Counterfactual",
-                "Pointwise Difference",
-                "Cumulative Difference",
+        actual = np.concatenate([self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()])
+        # GeoX reports per-period intervals over the post-period only.
+        data = CounterfactualPlotData(
+            dates=self.dates,
+            actual=actual,
+            prediction=np.asarray(counterfactual, dtype=float),
+            post_dates=marketing_start,
+            cumulative=np.asarray(self.results["cumulative_incrementality"], dtype=float),
+            post_period=self.post_period,
+            ci_label=f"{self._get_ci_print()} CI",
+            prediction_band=Band(
+                marketing_start,
+                np.asarray(self.results["counterfactual_ci_lower"], dtype=float),
+                np.asarray(self.results["counterfactual_ci_upper"], dtype=float),
+            ),
+            difference_band=Band(
+                marketing_start,
+                np.asarray(self.results["incrementality_ci_lower"], dtype=float),
+                np.asarray(self.results["incrementality_ci_upper"], dtype=float),
+            ),
+            cumulative_band=Band(
+                marketing_start,
+                np.asarray(self.results["cumulative_incrementality_ci_lower"], dtype=float),
+                np.asarray(self.results["cumulative_incrementality_ci_upper"], dtype=float),
             ),
         )
-        top_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=self.dates,
-                    y=np.concatenate(
-                        [self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()]
-                    ),
-                    marker={"color": theme.actual},
-                    mode="lines",
-                    name="Actual",
-                ),
-                go.Scatter(
-                    x=self.dates,
-                    y=counterfactual,
-                    marker={"color": theme.counterfactual},
-                    mode="lines",
-                    name="Counterfactual",
-                ),
-                go.Scatter(
-                    name="Counterfactual Upper Bound",
-                    x=marketing_start,
-                    y=self.results["counterfactual_ci_upper"],
-                    mode="lines",
-                    marker=dict(color=theme.counterfactual),
-                    line=dict(width=0),
-                    showlegend=False,
-                ),
-                go.Scatter(
-                    name="Counterfactual Lower Bound",
-                    x=marketing_start,
-                    y=self.results["counterfactual_ci_lower"],
-                    marker=dict(color=theme.counterfactual),
-                    line=dict(width=0),
-                    mode="lines",
-                    fillcolor=theme.band(0.3),
-                    fill="tonexty",
-                    showlegend=False,
-                ),
-            ]
-        )
-        residuals = (
-            np.concatenate([self.pre_test[self.y_variable].to_numpy(), self.post_test[self.y_variable].to_numpy()])
-            - counterfactual
-        )
-        middle_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=self.dates,
-                    y=residuals,
-                    marker={"color": theme.difference},
-                    mode="lines",
-                    name="Residuals",
-                ),
-                go.Scatter(
-                    name="Pointwise Difference Upper Bound",
-                    x=marketing_start,
-                    y=self.results["incrementality_ci_upper"],
-                    mode="lines",
-                    marker=dict(color=theme.difference),
-                    line=dict(width=0),
-                    showlegend=False,
-                ),
-                go.Scatter(
-                    name="Pointwise Difference Lower Bound",
-                    x=marketing_start,
-                    y=self.results["incrementality_ci_lower"],
-                    marker=dict(color=theme.difference),
-                    line=dict(width=0),
-                    mode="lines",
-                    fillcolor=theme.band(0.3),
-                    fill="tonexty",
-                    showlegend=False,
-                ),
-            ]
-        )
-        cum_resids = self.results["cumulative_incrementality"]
-        bottom_fig = go.Figure(
-            [
-                go.Scatter(
-                    x=marketing_start,
-                    y=cum_resids,
-                    marker={"color": theme.cumulative},
-                    mode="lines",
-                    name="Cumulative Incrementality",
-                ),
-                go.Scatter(
-                    name="Cumulative Difference Upper Bound",
-                    x=marketing_start,
-                    y=self.results["cumulative_incrementality_ci_upper"],
-                    mode="lines",
-                    marker=dict(color=theme.cumulative),
-                    line=dict(width=0),
-                    showlegend=False,
-                ),
-                go.Scatter(
-                    name="Cumulative Difference Lower Bound",
-                    x=marketing_start,
-                    y=self.results["cumulative_incrementality_ci_lower"],
-                    marker=dict(color=theme.cumulative),
-                    line=dict(width=0),
-                    mode="lines",
-                    fillcolor=theme.band(0.3),
-                    fill="tonexty",
-                    showlegend=False,
-                ),
-            ]
-        )
-        figures = [top_fig, middle_fig, bottom_fig]
-        for i, figure in enumerate(figures):
-            for trace_data in figure.data:
-                total_fig.add_trace(trace_data, row=i + 1, col=1)
-            total_fig.add_vline(
-                x=self.post_period,
-                line_width=1,
-                line_dash="dash",
-                line_color=theme.reference,
-                row=i + 1,
-                col=1,
-            )
-        apply_theme(total_fig, theme)
-        total_fig.show()
+        return render(data, get_theme(dark_mode), backend)

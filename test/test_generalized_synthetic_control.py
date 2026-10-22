@@ -197,11 +197,8 @@ class TestParallelTrendsReduction:
 
 class TestPlot:
     @staticmethod
-    def test_plot_builds_figure(effect_data: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown = {}
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.setdefault("ok", True))
-        _model(effect_data).pre_process().generate().plot()
-        assert shown.get("ok") is True
+    def test_plot_builds_figure(effect_data: pl.DataFrame) -> None:
+        assert isinstance(_model(effect_data).pre_process().generate().plot(), go.Figure)
 
 
 if __name__ == "__main__":
