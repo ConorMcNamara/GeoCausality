@@ -381,13 +381,14 @@ class Switchback(Estimator):
         if self.panel is None:
             raise ValueError("Panel data not available")
 
+        import pandas as pd
+
         rng = np.random.default_rng(seed)
         observed = self.results["lift"]
         # Permute the full (pre-washout) schedule, then rebuild lags and re-apply
         # the washout, so each permuted panel is processed exactly like the real
         # one (no lag values wrapped around from the end of the series).
         full_pd = self.data.sort([self.geo_variable, self.date_variable]).to_pandas()
-        geos = full_pd[self.geo_variable].unique()
         treat_var: str = self.treatment_variable or "is_treatment"
 
         exog_terms: list[str] = [treat_var]
@@ -396,25 +397,42 @@ class Switchback(Estimator):
         exog_formula = " + ".join(exog_terms)
         formula = f"{self.y_variable} ~ {exog_formula} + EntityEffects + TimeEffects"
 
+        # Rows are sorted by geo, so each geo is a contiguous block, in the
+        # order of ``unique()``.
+        geo_codes = pd.factorize(full_pd[self.geo_variable], use_na_sentinel=False)[0]
+        lengths = np.bincount(geo_codes)
+        block_start = np.repeat(np.cumsum(lengths) - lengths, lengths)
+        position = np.arange(len(full_pd)) - block_start
+        treat_vals = full_pd[treat_var].to_numpy()
+        fast_inputs = self._fast_refit_inputs(full_pd, treat_var)
+
         perm_effects: list[float] = []
         for _ in range(n_permutations):
-            perm_df = full_pd.copy()
-            for geo in geos:
-                mask = perm_df[self.geo_variable] == geo
-                treat_vals = perm_df.loc[mask, treat_var].values
-                shift = rng.integers(1, len(treat_vals))
-                perm_df.loc[mask, treat_var] = np.roll(treat_vals, shift)
-            perm_panel = self._apply_washout(self._add_lags(nw.from_native(perm_df, eager_only=True)))
-            perm_indexed = perm_panel.to_pandas().set_index([self.geo_variable, self.date_variable])
-            try:
-                perm_model = PanelOLS.from_formula(formula, data=perm_indexed)
-                perm_fit = perm_model.fit(cov_type="clustered", cluster_entity=True)
-                perm_effects.append(float(perm_fit.params[treat_var]))
-            except Exception:
-                continue
+            # One shift per geo, drawn in the same order as rolling each geo in
+            # turn; row i of a geo of length n takes row (i - shift) mod n.
+            shifts = rng.integers(1, lengths)
+            source = block_start + (position - shifts[geo_codes]) % lengths[geo_codes]
+            perm_treat = treat_vals[source]
+            effect = None
+            if fast_inputs is not None:
+                y, entity, time = fast_inputs
+                x, keep = self._schedule_design(perm_treat.astype(float), position)
+                effect = self._twfe_treatment_coefficient(y[keep], x[keep], entity[keep], time[keep])
+            if effect is None:
+                perm_df = full_pd.copy()
+                perm_df[treat_var] = perm_treat
+                try:
+                    effect = self._panelols_permutation_effect(perm_df, formula)
+                except Exception:
+                    continue
+            perm_effects.append(effect)
 
         perm_arr = np.asarray(perm_effects, dtype=float)
-        n_extreme = np.sum(np.abs(perm_arr) >= abs(observed))
+        # Periodic schedules make some shifts reproduce (or flip) the observed
+        # one, so ties are genuine. The closed-form refit differs from PanelOLS
+        # by ~1e-13 relative, so compare with a relative tolerance to count
+        # every tie as extreme.
+        n_extreme = np.sum(np.abs(perm_arr) >= abs(observed) * (1 - 1e-9))
         empirical_p = float((n_extreme + 1) / (len(perm_arr) + 1))
 
         result = {
@@ -425,6 +443,178 @@ class Switchback(Estimator):
         }
         self.results["permutation_test"] = result
         return result
+
+    def _panelols_permutation_effect(self, perm_df: Any, formula: str) -> float:
+        """Refit the two-way FE model with ``PanelOLS`` on a permuted schedule.
+
+        This is the reference path for ``permutation_test``: it is used whenever
+        the closed-form refit in ``_twfe_treatment_coefficient`` declines a
+        permutation, and it raises if ``PanelOLS`` cannot fit the panel.
+
+        Parameters
+        ----------
+        perm_df : pandas DataFrame
+            The full panel, sorted by geo and date, with the permuted schedule.
+        formula : str
+            The ``PanelOLS`` formula used by ``generate()``.
+
+        Returns
+        -------
+        The treatment coefficient.
+        """
+        treat_var: str = self.treatment_variable or "is_treatment"
+        perm_panel = self._apply_washout(self._add_lags(nw.from_native(perm_df, eager_only=True)))
+        perm_indexed = perm_panel.to_pandas().set_index([self.geo_variable, self.date_variable])
+        perm_fit = PanelOLS.from_formula(formula, data=perm_indexed).fit(cov_type="clustered", cluster_entity=True)
+        return float(perm_fit.params[treat_var])
+
+    def _fast_refit_inputs(self, full_pd: Any, treat_var: str) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Outcome and integer geo/date codes for the closed-form permutation refit.
+
+        Parameters
+        ----------
+        full_pd : pandas DataFrame
+            The full panel, sorted by geo and date.
+        treat_var : str
+            The treatment column.
+
+        Returns
+        -------
+        ``(y, geo_codes, date_codes)``, or ``None`` when the panel has missing,
+        non-finite or non-numeric values or duplicate geo-date rows, which
+        ``PanelOLS`` handles itself (by dropping rows or failing).
+        """
+        import pandas as pd
+
+        keys = [self.geo_variable, self.date_variable]
+        y_col, treat_col = full_pd[self.y_variable], full_pd[treat_var]
+        for col in (y_col, treat_col):
+            if not pd.api.types.is_numeric_dtype(col) or pd.api.types.is_bool_dtype(col):
+                return None
+        y = y_col.to_numpy(dtype=float)
+        if not (np.isfinite(y).all() and np.isfinite(treat_col.to_numpy(dtype=float)).all()):
+            return None
+        if full_pd[keys].isna().any().any() or full_pd.duplicated(keys).any():
+            return None
+        geo_codes = pd.factorize(full_pd[self.geo_variable])[0]
+        date_codes = pd.factorize(full_pd[self.date_variable])[0]
+        return y, geo_codes, date_codes
+
+    def _schedule_design(self, treat: np.ndarray, position: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Treatment and lag regressors plus the washout keep-mask, in NumPy.
+
+        Mirrors ``_add_lags`` followed by ``_apply_washout`` on a panel sorted by
+        geo and date.
+
+        Parameters
+        ----------
+        treat : numpy array
+            The treatment schedule, one value per row.
+        position : numpy array of int
+            Each row's period index within its geo (0 for a geo's first row).
+
+        Returns
+        -------
+        ``(x, keep)``: the ``(n_rows, 1 + carryover_lags)`` regressors
+        ``[treatment, treatment_lag_1, ...]`` and the rows kept after washout.
+        """
+
+        def shifted(values: np.ndarray, lag: int, fill: Any) -> np.ndarray:
+            out = np.full_like(values, fill)
+            out[lag:] = values[: max(len(values) - lag, 0)]
+            out[position < lag] = fill
+            return out
+
+        x = np.column_stack([treat] + [shifted(treat, lag, 0.0) for lag in range(1, self.carryover_lags + 1)])
+        keep = np.ones(len(treat), dtype=bool)
+        if self.washout > 0:
+            switch = treat != shifted(treat, 1, np.nan)
+            switch[position == 0] = False
+            for lag in range(self.washout):
+                keep &= ~shifted(switch, lag, False)
+        return x, keep
+
+    @staticmethod
+    def _twfe_treatment_coefficient(
+        y: np.ndarray,
+        x: np.ndarray,
+        entity: np.ndarray,
+        time: np.ndarray,
+    ) -> float | None:
+        """First coefficient of ``y ~ x + EntityEffects + TimeEffects``, without ``PanelOLS``.
+
+        By Frisch-Waugh-Lovell the slope coefficients are those of the OLS of
+        ``y`` on ``x`` once both are residualised on the two sets of fixed
+        effects. As in ``PanelOLS``, the effect with more levels is swept out
+        exactly by group demeaning; the other enters as dummies (first level
+        dropped), partialled out through their small normal equations. This is
+        exact on unbalanced panels and costs one ``(levels x levels)``
+        Cholesky factorisation per call.
+
+        Parameters
+        ----------
+        y : numpy array
+            Outcome, one value per row.
+        x : numpy array
+            ``(n_rows, k)`` regressors; the coefficient on column 0 is returned.
+        entity, time : numpy array of int
+            Non-negative integer codes of each row's geo and date.
+
+        Returns
+        -------
+        The coefficient, or ``None`` when ``PanelOLS`` should decide instead: a
+        regressor (nearly) absorbed by the effects or collinear with the others,
+        disconnected effects, too few observations, or more than 2,000 levels
+        in both effects.
+        """
+        n_obs, n_x = x.shape
+        codes: list[np.ndarray] = []
+        counts: list[np.ndarray] = []
+        for c in (entity, time):
+            count = np.bincount(c)
+            present = count > 0
+            codes.append((np.cumsum(present) - 1)[c])
+            counts.append(count[present].astype(float))
+        n_entity, n_time = len(counts[0]), len(counts[1])
+        if min(n_entity, n_time) < 2 or n_obs - n_entity - n_time + 1 - n_x <= 0:
+            return None
+        # Demean by the larger effect (as ``PanelOLS`` does); dummies for the smaller.
+        absorb, dummy = (0, 1) if n_entity > n_time else (1, 0)
+        ca, cb = codes[absorb], codes[dummy]
+        na, nb = counts[absorb], counts[dummy]
+        if len(nb) > 2000 or len(na) * len(nb) > 5e7:
+            return None
+
+        z = np.column_stack([y, x])
+        for j in range(z.shape[1]):
+            z[:, j] -= (np.bincount(ca, weights=z[:, j]) / na)[ca]
+        # Dummies for levels 1.. of the smaller effect, demeaned within the
+        # larger: their cross-products with z are per-level sums of z, and their
+        # Gram matrix is diag(nb) - B' diag(1 / na) B for the incidence matrix B.
+        cross = np.column_stack([np.bincount(cb, weights=z[:, j], minlength=len(nb)) for j in range(z.shape[1])])[1:]
+        incidence = np.bincount(ca * len(nb) + cb, minlength=len(na) * len(nb)).reshape(len(na), len(nb))
+        incidence = incidence.astype(float)
+        gram = np.diag(nb) - incidence.T @ (incidence / na[:, None])
+        gram = gram[1:, 1:]
+        try:
+            chol = np.linalg.cholesky(gram)
+        except np.linalg.LinAlgError:
+            return None
+        # A pivot near zero means the effects are not connected (not identified).
+        if np.any(np.diag(chol) ** 2 <= 1e-10 * np.diag(gram)):
+            return None
+        half = np.linalg.solve(chol, cross)
+        moments = z.T @ z - half.T @ half
+
+        resid_gram, resid_cross = moments[1:, 1:], moments[1:, 0]
+        raw_ss = np.einsum("ij,ij->j", x, x)
+        resid_ss = np.diag(resid_gram)
+        if np.any(resid_ss <= 1e-8 * raw_ss):
+            return None
+        corr = resid_gram / np.sqrt(np.outer(resid_ss, resid_ss))
+        if np.linalg.eigvalsh(corr)[0] <= 1e-8:
+            return None
+        return float(np.linalg.solve(resid_gram, resid_cross)[0])
 
     # ------------------------------------------------------------------
     # Power analysis
@@ -694,6 +884,8 @@ class Switchback(Estimator):
 
         if sigma is None:
             sigma = float(np.sqrt(self.model.resids.var()))
+        if sigma < 0:
+            raise ValueError(f"sigma must be non-negative, got {sigma}")
         if rho is None:
             resids = self.model.resids
             residuals_by_geo: list[np.ndarray] = []
@@ -711,22 +903,26 @@ class Switchback(Estimator):
         # phases can give every geo the same schedule, which is collinear with
         # ``TimeEffects`` and makes the fit fail.
         schedule = self._schedule(n_periods, treatment_fraction, switching_freq, np.arange(n_geos) % 2)
+        treat_int = schedule.astype(int)
+        # Scalar ``np.sin`` per period: an array call may differ in the last bit.
+        time_fe = np.array([2.0 * np.sin(2 * np.pi * t / 30) for t in range(n_periods)])
+        geo_labels = np.repeat(np.array([f"g{g}" for g in range(n_geos)], dtype=object), n_periods)
+        dates = np.tile(np.arange(n_periods), n_geos)
+        innovation_sd = sigma * np.sqrt(1 - rho**2)
 
         def _run_sim(sim_seed: int) -> bool:
             sim_rng = np.random.default_rng(sim_seed)
-            rows = []
-            for g in range(n_geos):
-                geo_fe = sim_rng.normal(0, 10)
-                noise = np.zeros(n_periods)
-                noise[0] = sim_rng.normal(0, sigma)
-                for t in range(1, n_periods):
-                    noise[t] = rho * noise[t - 1] + sim_rng.normal(0, sigma * np.sqrt(1 - rho**2))
-                for t in range(n_periods):
-                    time_fe = 2.0 * np.sin(2 * np.pi * t / 30)
-                    treat = int(schedule[g, t])
-                    y = geo_fe + time_fe + mde * treat + noise[t]
-                    rows.append({"geo": f"g{g}", "date": t, treat_var: treat, "y": y})
-            sim_df = pd.DataFrame(rows)
+            # Per geo: its effect, the first noise term, then the innovations,
+            # drawn in that order. ``normal(0, s)`` is ``s`` times the next
+            # standard normal, so one array of draws reproduces the scalar calls.
+            draws = sim_rng.standard_normal((n_geos, n_periods + 1))
+            geo_fe = 10 * draws[:, 0]
+            noise = np.zeros((n_geos, n_periods))
+            noise[:, 0] = sigma * draws[:, 1]
+            for t in range(1, n_periods):
+                noise[:, t] = rho * noise[:, t - 1] + innovation_sd * draws[:, t + 1]
+            y = geo_fe[:, None] + time_fe[None, :] + mde * treat_int + noise
+            sim_df = pd.DataFrame({"geo": geo_labels, "date": dates, treat_var: treat_int.ravel(), "y": y.ravel()})
             sim_indexed = sim_df.set_index(["geo", "date"])
             formula = f"y ~ {treat_var} + EntityEffects + TimeEffects"
             try:
