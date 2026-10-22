@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-22
+
 ### Added
 
 - **Altair plotting backend** — every `plot()` method (and
@@ -828,6 +830,7 @@ Initial set of estimators sharing the chainable
 `PenalizedSyntheticControl`, `RobustSyntheticControl`, and
 `AugmentedSyntheticControl`, with distribution-free conformal inference.
 
+[0.20.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.20.0
 [0.19.1]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.1
 [0.19.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.19.0
 [0.18.0]: https://github.com/ConorMcNamara/GeoCausality/releases/tag/v0.18.0
