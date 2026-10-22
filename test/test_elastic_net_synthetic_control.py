@@ -150,26 +150,20 @@ class TestRefitSolver:
     def test_gram_solver_matches_plain_end_to_end(n_pre: int, n_post: int, n_geos: int) -> None:
         # More donors than training dates, so the Gram matrix is singular. The
         # (12, 3) panel is too short for the test to reject, so the interval
-        # search doubles out to huge candidate effects; the reported results
-        # must not depend on which solver ran those refits.
+        # search runs out to its cap on both sides, refitting at the largest
+        # candidate effects it tries; the reported results must not depend on
+        # which solver ran those refits.
         df, pre, post = _panel(n_pre, n_post, effect=40.0, n_geos=n_geos)
-        silent_fit = ElasticNetSyntheticControl._silent_fit
         runs = []
         for use_gram in (False, True):
-            max_y = [0.0]
-
-            def recording_fit(estimator: object, x: np.ndarray, y: np.ndarray) -> object:
-                max_y[0] = max(max_y[0], float(np.max(np.abs(y))))
-                return silent_fit(estimator, x, y)
-
             with pytest.MonkeyPatch.context() as mp, warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
                 mp.setattr(ElasticNetSyntheticControl, "_use_gram", staticmethod(lambda x, flag=use_gram: flag))
-                mp.setattr(ElasticNetSyntheticControl, "_silent_fit", staticmethod(recording_fit))
-                runs.append((_build(df, pre, post).pre_process().generate().results, max_y[0]))
-        (plain, plain_max_y), (gram, _) = runs
+                runs.append(_build(df, pre, post).pre_process().generate().results)
+        plain, gram = runs
         if n_pre == 12:
-            assert plain_max_y > 1e10
+            assert plain["incrementality_ci_lower"] == -np.inf
+            assert plain["incrementality_ci_upper"] == np.inf
         for key in ("incrementality", "p_value", "incrementality_ci_lower", "incrementality_ci_upper"):
             assert gram[key] == pytest.approx(plain[key], rel=1e-9), key
 
