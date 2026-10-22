@@ -91,6 +91,15 @@ class EventStudyPlotData:
     upper: np.ndarray
     y_title: str
 
+    @property
+    def filled(self) -> np.ndarray:
+        """Whether each period's marker is drawn filled: hollow when its interval contains zero.
+
+        The omitted reference period is pinned to a zero-width interval at zero,
+        so it is always hollow.
+        """
+        return (self.lower > 0) | (self.upper < 0)
+
 
 @dataclass(frozen=True)
 class SwitchbackPlotData:

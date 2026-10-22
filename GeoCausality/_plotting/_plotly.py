@@ -158,7 +158,12 @@ def _(data: EventStudyPlotData, theme: PlotTheme) -> go.Figure:
                 "array": data.upper - data.estimates,
                 "arrayminus": data.estimates - data.lower,
             },
-            marker={"color": theme.difference},
+            # Hollow when the interval contains zero.
+            marker={
+                "color": theme.difference,
+                "symbol": np.where(data.filled, "circle", "circle-open").tolist(),
+                "line": {"width": 2},
+            },
             mode="markers+lines",
             name="Effect",
         )

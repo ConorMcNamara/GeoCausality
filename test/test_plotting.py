@@ -147,6 +147,24 @@ class TestPlotlyRenderer:
         assert [t.name for t in fig.data] == ["7 periods", "14 periods"]
         assert list(fig.data[0].x) == [0.0, 0.2, 0.4]
 
+    @staticmethod
+    def test_event_study_markers_are_hollow_when_the_interval_contains_zero() -> None:
+        # Pre-onset intervals straddle zero; post-onset ones exclude it.
+        (trace,) = render(_event_study(), LIGHT_THEME, "plotly").data
+        assert list(trace.marker.symbol) == ["circle-open"] * 3 + ["circle"] * 4
+
+    @staticmethod
+    def test_event_study_interval_touching_zero_counts_as_containing_it() -> None:
+        # The reference period's zero-width interval at zero is hollow too.
+        data = EventStudyPlotData(
+            periods=np.arange(4),
+            estimates=np.array([0.0, 1.0, -1.0, 1.0]),
+            lower=np.array([0.0, 0.0, -2.0, 0.5]),
+            upper=np.array([0.0, 2.0, 0.0, 1.5]),
+            y_title="y",
+        )
+        assert data.filled.tolist() == [False, False, False, True]
+
 
 class TestAltairRenderer:
     alt = pytest.importorskip("altair")
@@ -157,6 +175,18 @@ class TestAltairRenderer:
         chart = render(build(), theme, "altair")
         assert isinstance(chart, self.alt.TopLevelMixin)
         chart.to_dict()  # validates against the Vega-Lite schema
+
+    @staticmethod
+    def test_event_study_draws_filled_and_hollow_marker_layers() -> None:
+        spec = render(_event_study(), LIGHT_THEME, "altair").to_dict()
+        *_, solid, hollow = spec["layer"]
+        assert (solid["mark"]["filled"], hollow["mark"]["filled"]) == (True, False)
+        assert [layer["transform"] for layer in (solid, hollow)] == [
+            [{"filter": "datum.filled"}],
+            [{"filter": "!datum.filled"}],
+        ]
+        rows = spec["datasets"][solid["data"]["name"]]
+        assert [row["filled"] for row in rows] == [False] * 3 + [True] * 4
 
     @staticmethod
     def test_counterfactual_builds_three_panels() -> None:
