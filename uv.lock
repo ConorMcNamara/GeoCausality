@@ -145,7 +145,7 @@ wheels = [
 
 [[package]]
 name = "geocausality"
-version = "0.19.1"
+version = "0.20.0"
 source = { editable = "." }
 dependencies = [
     { name = "linearmodels" },
@@ -172,8 +172,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "altair", marker = "extra == 'altair'", specifier = ">=5.4,<7" },
-    { name = "altair", marker = "extra == 'dev'", specifier = ">=5.4,<7" },
+    { name = "altair", marker = "extra == 'altair'", specifier = ">=5.4.0,<7.0.0" },
+    { name = "altair", marker = "extra == 'dev'", specifier = ">=5.4.0,<7.0.0" },
     { name = "linearmodels", specifier = ">=6.1,<7.0" },
     { name = "numpy", specifier = ">=2.2.3,<3.0.0" },
     { name = "pandas", specifier = ">=2.2.3,<3.0.0" },
@@ -187,7 +187,7 @@ requires-dist = [
     { name = "statsmodels", specifier = ">=0.14.4,<0.15.0" },
     { name = "tabulate", specifier = ">=0.9.0,<0.10.0" },
 ]
-provides-extras = ["dev", "altair"]
+provides-extras = ["altair", "dev"]
 
 [[package]]
 name = "iniconfig"
