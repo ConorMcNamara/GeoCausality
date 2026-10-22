@@ -13,6 +13,7 @@ from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -515,3 +516,25 @@ def test_candidate_sets_leave_a_control_geo(history: pl.DataFrame) -> None:
     # Excluded geos are still controls, so every non-excluded geo may be tested.
     cands = ms._candidate_sets(n_test_geos=[len(ms.all_geos) - 1], include=[], exclude=["g0"])
     assert cands == [tuple(g for g in ms.all_geos if g != "g0")]
+
+
+class TestPlot:
+    @staticmethod
+    def test_plotly_shows_top_candidates_best_on_top(searched_size2: MarketSelection) -> None:
+        fig = searched_size2.plot(top=3)
+        assert isinstance(fig, go.Figure)
+        best = ", ".join(searched_size2.rankings[0]["test_geos"])
+        assert len(fig.data[0].y) == 3
+        assert fig.data[0].y[-1] == best
+
+    @staticmethod
+    def test_altair_shows_top_candidates_best_first(searched_size2: MarketSelection) -> None:
+        pytest.importorskip("altair")
+        spec = searched_size2.plot(top=3, backend="altair").to_dict()
+        best = ", ".join(searched_size2.rankings[0]["test_geos"])
+        assert spec["layer"][0]["encoding"]["y"]["sort"][0] == best
+
+    @staticmethod
+    def test_requires_search(history: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match="search"):
+            _selection(history).plot()

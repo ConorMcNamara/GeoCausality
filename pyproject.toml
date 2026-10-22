@@ -1,6 +1,6 @@
 [project]
 name = "geocausality"
-version = "0.19.1"
+version = "0.20.0"
 description = "Package for analyzing the causal impact of geo-experiments"
 authors = [
     {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
@@ -33,7 +33,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+altair = [
+    "altair (>=5.4.0,<7.0.0)"
+]
 dev = [
+    "altair (>=5.4.0,<7.0.0)",
     "pytest (>=9.0.3,<10.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)",
     "pytest-xdist (>=3.6.0,<4.0.0)"
