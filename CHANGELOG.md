@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bands and reference lines as its Plotly figure, follows `dark_mode`, and
   accepts date, datetime, ISO-string or integer date axes. Altair is optional:
   `pip install "geocausality[altair]"`.
+- **Hollow event-study markers** — `FixedEffects.plot()` draws a period's
+  coefficient with a hollow marker when its confidence interval contains zero,
+  and a filled one when it excludes zero, in both backends. Filled pre-onset
+  markers flag a possible parallel-trends violation. The omitted reference
+  period, pinned to zero, is always hollow. The Plotly line joining the
+  markers is now drawn in the markers' colour, as in Altair, rather than the
+  colorway's first colour.
 
 ### Changed
 

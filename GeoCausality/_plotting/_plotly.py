@@ -158,7 +158,14 @@ def _(data: EventStudyPlotData, theme: PlotTheme) -> go.Figure:
                 "array": data.upper - data.estimates,
                 "arrayminus": data.estimates - data.lower,
             },
-            marker={"color": theme.difference},
+            # Hollow when the interval contains zero.
+            marker={
+                "color": theme.difference,
+                "symbol": np.where(data.filled, "circle", "circle-open").tolist(),
+                # Unset, the outline takes the trace line's colour, which would ring filled markers.
+                "line": {"width": 2, "color": theme.difference},
+            },
+            line={"color": theme.difference},
             mode="markers+lines",
             name="Effect",
         )

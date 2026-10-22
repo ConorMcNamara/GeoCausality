@@ -294,7 +294,9 @@ class FixedEffects(EconometricEstimator):
         before onset is the omitted reference), then plots the estimated
         coefficient path with confidence intervals. Pre-onset coefficients near
         zero support the parallel-trends assumption, while post-onset coefficients
-        trace the dynamic treatment effect. This is fit independently of
+        trace the dynamic treatment effect. A coefficient whose interval
+        contains zero is drawn with a hollow marker, as is the reference period,
+        which is pinned to zero. This is fit independently of
         ``generate()`` and does not alter the headline single-coefficient results.
 
         Parameters

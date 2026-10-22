@@ -222,7 +222,15 @@ def _(data: ParallelTrendsPlotData, theme: PlotTheme) -> Any:
 
 @_draw.register
 def _(data: EventStudyPlotData, theme: PlotTheme) -> Any:
-    frame = pd.DataFrame({"period": data.periods, "estimate": data.estimates, "lower": data.lower, "upper": data.upper})
+    frame = pd.DataFrame(
+        {
+            "period": data.periods,
+            "estimate": data.estimates,
+            "lower": data.lower,
+            "upper": data.upper,
+            "filled": data.filled,
+        }
+    )
     x = alt.X("period:Q", title="Periods relative to treatment onset")
     base = _chart(frame).encode(x=x)
     tooltip = [
@@ -231,9 +239,16 @@ def _(data: EventStudyPlotData, theme: PlotTheme) -> Any:
         alt.Tooltip("lower:Q", format=",.2f"),
         alt.Tooltip("upper:Q", format=",.2f"),
     ]
-    effect = base.mark_line(color=theme.difference, point=alt.OverlayMarkDef(color=theme.difference)).encode(
-        y=alt.Y("estimate:Q", title=data.y_title), tooltip=tooltip
-    )
+    y = alt.Y("estimate:Q", title=data.y_title)
+    line = base.mark_line(color=theme.difference).encode(y=y)
+    # Vega-Lite can't set ``filled`` per row, so filled and hollow markers are separate layers;
+    # a marker is hollow when its interval contains zero.
+    markers = [
+        base.mark_point(color=theme.difference, filled=filled, opacity=1.0, strokeWidth=2)
+        .encode(y=y, tooltip=tooltip)
+        .transform_filter("datum.filled" if filled else "!datum.filled")
+        for filled in (True, False)
+    ]
     intervals = base.mark_rule(color=theme.difference).encode(y="lower:Q", y2="upper:Q")
     zero = alt.Chart(pd.DataFrame({"y": [0.0]})).mark_rule(color=theme.zero, strokeDash=[2, 2]).encode(y="y:Q")
     onset = (
@@ -241,7 +256,7 @@ def _(data: EventStudyPlotData, theme: PlotTheme) -> Any:
         .mark_rule(color=theme.reference, strokeDash=[4, 4])
         .encode(x="period:Q")
     )
-    return alt.layer(zero, onset, intervals, effect).properties(
+    return alt.layer(zero, onset, intervals, line, *markers).properties(
         title="Event Study (Two-Way Fixed Effects)", width=_WIDTH, height=_HEIGHT
     )
 
