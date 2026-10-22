@@ -107,22 +107,35 @@ class TestGeoX:
         assert buffer.getvalue().strip()
 
     @staticmethod
-    def test_plot_runs(data_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_plot_runs(data_df: pd.DataFrame) -> None:
         # Regression: the post-period date filter must handle a datetime/Timestamp
         # date column (data_df parses dates), not only ISO strings.
         geo_x = _fit(data_df)
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
-        geo_x.plot()
+        assert isinstance(geo_x.plot(), go.Figure)
 
     @staticmethod
-    def test_plot_dark_mode(data_df: pd.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        captured = {}
-        geo_x = _fit(data_df)
-        monkeypatch.setattr(go.Figure, "show", lambda self: captured.update(fig=self))
-        geo_x.plot(dark_mode=True)
-        fig = captured["fig"]
+    def test_plot_dark_mode(data_df: pd.DataFrame) -> None:
+        fig = _fit(data_df).plot(dark_mode=True)
         assert fig.layout.template.layout.paper_bgcolor == pio.templates["plotly_dark"].layout.paper_bgcolor
         assert all(shape.line.color == DARK_THEME.reference for shape in fig.layout.shapes)
+
+    @staticmethod
+    def test_plot_shades_post_period_bands(data_df: pd.DataFrame) -> None:
+        model = _fit(data_df)
+        fig = model.plot()
+        bands = [t for t in fig.data if t.fill == "tonexty"]
+        assert len(bands) == 3
+        # The cumulative band is GeoX's own reported interval.
+        np.testing.assert_allclose(bands[-1].y, model.results["cumulative_incrementality_ci_lower"])
+
+    @staticmethod
+    def test_plot_altair(data_df: pd.DataFrame) -> None:
+        pytest.importorskip("altair")
+        model = _fit(data_df)
+        chart = model.plot(backend="altair")
+        assert len(chart.to_dict()["vconcat"]) == 3
+        cumulative_band = pd.DataFrame(chart.vconcat[2].layer[0].data.values)
+        np.testing.assert_allclose(cumulative_band["upper"], model.results["cumulative_incrementality_ci_upper"])
 
 
 def _make_negative_slope_data() -> pd.DataFrame:

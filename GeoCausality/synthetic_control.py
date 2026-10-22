@@ -6,7 +6,7 @@ import narwhals as nw
 import numpy as np
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from scipy.optimize import Bounds, LinearConstraint, minimize
+from scipy.optimize import minimize
 
 from GeoCausality._base import EconometricEstimator
 
@@ -198,9 +198,8 @@ class SyntheticControl(EconometricEstimator):
         to the per-geo average treated series.
         """
         x, y, n_treated = self._per_geo_problem(x, y)
-        # The squared and root losses share their argmin, so solve the
-        # (well-conditioned, analytic-gradient) squared problem.
-        weights = self._solve_simplex_qp(x.T @ x, x.T @ y, float(y @ y), "SyntheticControl")
+        # The squared and root losses share their argmin, so solve the squared one.
+        weights = self._solve_simplex_lsq(x, y, "SyntheticControl")
         return weights * n_treated
 
     def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
@@ -419,40 +418,10 @@ class SyntheticControlV(EconometricEstimator):
         -------
         The weights for our model
         """
-        _, n_c = x.shape
-        bounds = Bounds(lb=np.full(n_c, 0.0), ub=np.full(n_c, 1.0))
-        constraints = LinearConstraint(A=np.full(n_c, 1.0), lb=1.0, ub=1.0)
-        x0 = np.full(n_c, 1 / n_c)
-        p = x.T @ v @ x
-        q = y.T @ v @ x
-        res = minimize(
-            fun=lambda a: self._quadratic_loss_w(a, p, q),
-            x0=x0,
-            bounds=bounds,
-            constraints=constraints,
-            method="SLSQP",
-        )
-        weights = res["x"]
-        return weights
-
-    @staticmethod
-    def _quadratic_loss_w(w: np.ndarray, p: np.ndarray, q: np.ndarray) -> float:
-        """Calculate the V-weighted quadratic loss for a candidate donor-weight vector.
-
-        Parameters
-        ----------
-        w : numpy array
-            The donor-weight vector being optimised.
-        p : numpy array
-            x.T * v * x
-        q : numpy array
-            y.T * v * x
-
-        Returns
-        -------
-        The V-weighted least-squares loss at ``w``.
-        """
-        return float(0.5 * w.T @ p @ w - q.T @ w)
+        # V is diagonal, so the V-weighted loss (y - x w)' V (y - x w) is ordinary
+        # least squares on rows scaled by sqrt(V).
+        root_v = np.sqrt(np.clip(np.diag(v), 0.0, None))
+        return self._solve_simplex_lsq(root_v[:, None] * x, root_v * y, "SyntheticControlV")
 
     def _create_v(self, daily_x: np.ndarray, daily_y: np.ndarray) -> "SyntheticControlV":
         """Scale the pre-period predictors and fit the V matrix and donor weights.
