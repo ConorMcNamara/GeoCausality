@@ -11,14 +11,19 @@ from typing import Any, Self
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from plotly.subplots import make_subplots
-from scipy.optimize import Bounds, LinearConstraint, minimize
+from scipy.optimize import Bounds, LinearConstraint, minimize, nnls
 from tabulate import tabulate  # type: ignore
 
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import (
+    Band,
+    CounterfactualPlotData,
+    PlotBackend,
+    check_backend,
+    get_theme,
+    render,
+)
 
 # The lift types every ``summarize`` accepts. ``FixedEffects`` allows a subset.
 _LIFT_TYPES: tuple[str, ...] = ("absolute", "relative", "incremental", "cost-per", "revenue", "roas")
@@ -613,10 +618,7 @@ class EconometricEstimator(Estimator, ABC):
         # estimators that fit on one _control_matrix pivot and predict on another
         # would map the weight vector onto mis-ordered donor columns.
         frame = frame.sort([self.date_variable, self.geo_variable])
-        pivot = nw.from_native(
-            frame.to_native().pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable),
-            eager_only=True,
-        )
+        pivot = frame.pivot(on=self.geo_variable, index=self.date_variable, values=self.y_variable)
         if sort_pivot:
             pivot = pivot.sort(self.date_variable)
         return pivot
@@ -1825,8 +1827,71 @@ class EconometricEstimator(Estimator, ABC):
         The donor weights, summing to the number of treated geos.
         """
         xs, ys, n_treated = self._per_geo_problem(x, y)
-        weights = self._solve_simplex_qp(xs.T @ xs, xs.T @ ys, float(ys @ ys), name)
+        weights = self._solve_simplex_lsq(xs, ys, name)
         return weights * n_treated
+
+    # Weight on the extra NNLS row that enforces ``sum(w) = 1``, relative to the
+    # largest entry of ``x``. The row is a penalty, not a hard constraint: before
+    # renormalising, the sum misses 1 by roughly ``n_rows * |residual| / (1e8 *
+    # max|x|)``, up to ~1e-3 when ``y`` is 1e3-1e4x the donor scale.
+    # Renormalising restores the sum; the weights are then exact when the
+    # optimum is a vertex of the simplex and otherwise drift slightly from the
+    # constrained optimum. SC and ASC go through ``_per_geo_problem``,
+    # which puts ``y`` on the donor scale, and there the fit matches a tightly
+    # converged SLSQP to ~1e-14 in relative loss. A larger weight would tighten
+    # this but ill-condition the augmented matrix.
+    _SIMPLEX_SUM_WEIGHT = 1e4
+
+    def _solve_simplex_lsq(self, x: np.ndarray, y: np.ndarray, name: str, ridge: float = 0.0) -> np.ndarray:
+        """Least-squares weights on the probability simplex.
+
+        Solves ``min_w ||y - x w||^2 + ridge * ||w||^2`` subject to ``w >= 0,
+        sum(w) = 1`` as a non-negative least-squares problem: the ridge becomes
+        ``sqrt(ridge) * I`` rows with zero targets, and the sum constraint a
+        heavily weighted row of ones with target one. NNLS works on ``x`` itself,
+        so it never squares the conditioning of (often highly collinear) donor
+        series the way the Gram-matrix form does, and its active-set solve is
+        orders of magnitude faster than SLSQP on large donor pools. If NNLS hits
+        its iteration limit the problem falls back to ``_solve_simplex_qp``.
+        Non-finite inputs raise a ``ValueError`` rather than returning
+        meaningless weights.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_rows, n)
+            The design matrix (e.g. donor outcomes, one column per donor).
+        y : numpy array, shape (n_rows,)
+            The target series.
+        name : str
+            The estimator name for the fallback's convergence warning.
+        ridge : float, default=0.0
+            The L2 penalty on the weights.
+
+        Returns
+        -------
+        The simplex weights.
+        """
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        if not (np.isfinite(x).all() and np.isfinite(y).all()):
+            raise ValueError(
+                f"{name}: the panel has missing or non-finite outcome values (e.g. a geo with no row "
+                "for some date, which pivots to NaN). Fill or drop those geo-date cells so every geo "
+                "has a finite value on every date."
+            )
+        n_c = x.shape[1]
+        if ridge > 0.0:
+            x = np.vstack([x, np.sqrt(ridge) * np.identity(n_c)])
+            y = np.concatenate([y, np.zeros(n_c)])
+        level = float(np.max(np.abs(x))) if x.size else 0.0
+        weight = self._SIMPLEX_SUM_WEIGHT * (level if np.isfinite(level) and level > 0.0 else 1.0)
+        try:
+            weights, _ = nnls(np.vstack([x, np.full(n_c, weight)]), np.append(y, weight), maxiter=50 * n_c)
+        except RuntimeError:
+            gram = x.T @ x
+            return self._solve_simplex_qp(gram, x.T @ y, float(y @ y), name)
+        total = weights.sum()
+        return weights / total if total > 0 else np.full(n_c, 1.0 / n_c)
 
     def _solve_simplex_qp(
         self,
@@ -1983,8 +2048,9 @@ class EconometricEstimator(Estimator, ABC):
         prediction_pre: np.ndarray,
         prediction_post: np.ndarray,
         dark_mode: bool = False,
-    ) -> None:
-        """Build and show the three-panel counterfactual figure with confidence bands.
+        backend: PlotBackend = "plotly",
+    ) -> Any:
+        """Build the three-panel counterfactual figure with confidence bands.
 
         The top panel shows the actual and counterfactual series with the pointwise
         prediction band (``results["conformal_band"]``) shaded around the
@@ -2004,7 +2070,15 @@ class EconometricEstimator(Estimator, ABC):
             Counterfactual outcome over the pre- and post-period.
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with.
+
+        Returns
+        -------
+        plotly Figure or altair VConcatChart
+            The figure, drawn with ``backend``.
         """
+        check_backend(backend)
         if self.results is None:
             raise ValueError("results must not be None")
         actual_pre = np.asarray(actual_pre, dtype=float).ravel()
@@ -2013,139 +2087,47 @@ class EconometricEstimator(Estimator, ABC):
         prediction_post = np.asarray(prediction_post, dtype=float).ravel()
         actual = np.concatenate([actual_pre, actual_post])
         prediction = np.concatenate([prediction_pre, prediction_post])
-        residuals = actual - prediction
         t1 = actual_post.shape[0]
 
+        # The pointwise conformal band is shaded around the counterfactual and,
+        # on the difference panel, around zero (the no-effect region).
+        prediction_band: Band | None = None
+        difference_band: Band | None = None
         band_value = self.results.get("conformal_band")
         band = float(band_value) if band_value is not None else 0.0
-        has_band = bool(np.isfinite(band)) and band > 0
-        theme = get_theme(dark_mode)
-        band_fill = theme.band(0.2)
-        ci_label = f"{self._get_ci_print()} CI"
+        if np.isfinite(band) and band > 0:
+            prediction_band = Band(dates, prediction - band, prediction + band)
+            difference_band = Band(dates, np.full(len(dates), -band), np.full(len(dates), band))
 
-        total_fig = make_subplots(
-            rows=3,
-            cols=1,
-            subplot_titles=(
-                "Expected vs Counterfactual",
-                "Pointwise Difference",
-                "Cumulative Difference",
-            ),
-        )
-
-        # Top panel: band around the counterfactual, then the two series on top.
-        if has_band:
-            total_fig.add_trace(
-                go.Scatter(x=dates, y=prediction + band, mode="lines", line={"width": 0}, showlegend=False),
-                row=1,
-                col=1,
-            )
-            total_fig.add_trace(
-                go.Scatter(
-                    x=dates,
-                    y=prediction - band,
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=band_fill,
-                    name=ci_label,
-                ),
-                row=1,
-                col=1,
-            )
-        total_fig.add_trace(
-            go.Scatter(x=dates, y=actual, marker={"color": theme.actual}, mode="lines", name="Actual"),
-            row=1,
-            col=1,
-        )
-        total_fig.add_trace(
-            go.Scatter(
-                x=dates, y=prediction, marker={"color": theme.counterfactual}, mode="lines", name="Counterfactual"
-            ),
-            row=1,
-            col=1,
-        )
-
-        # Middle panel: the pointwise band around zero (the no-effect region).
-        if has_band:
-            total_fig.add_trace(
-                go.Scatter(x=dates, y=np.full(len(dates), band), mode="lines", line={"width": 0}, showlegend=False),
-                row=2,
-                col=1,
-            )
-            total_fig.add_trace(
-                go.Scatter(
-                    x=dates,
-                    y=np.full(len(dates), -band),
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=band_fill,
-                    showlegend=False,
-                ),
-                row=2,
-                col=1,
-            )
-        total_fig.add_trace(
-            go.Scatter(x=dates, y=residuals, marker={"color": theme.difference}, mode="lines", name="Difference"),
-            row=2,
-            col=1,
-        )
-
-        # Bottom panel: cumulative post-period difference with a band that grows
-        # linearly to the reported incrementality interval.
+        # The cumulative band grows linearly to the reported incrementality interval.
         post_key = period_key(self.post_period, self.data, self.date_variable)
-        marketing_start = [d for d in dates if period_key(d, self.data, self.date_variable) >= post_key]
+        post_dates = [d for d in dates if period_key(d, self.data, self.date_variable) >= post_key]
         cum_resids = np.cumsum(actual_post - prediction_post)
+        cumulative_band: Band | None = None
         incr = self.results.get("incrementality")
         incr_lo = self.results.get("incrementality_ci_lower")
         incr_hi = self.results.get("incrementality_ci_upper")
         if incr is not None and incr_lo is not None and incr_hi is not None and t1 > 0:
             frac = np.arange(1, t1 + 1, dtype=float) / t1
-            cum_upper = cum_resids + frac * (float(incr_hi) - float(incr))
-            cum_lower = cum_resids + frac * (float(incr_lo) - float(incr))
-            total_fig.add_trace(
-                go.Scatter(x=marketing_start, y=cum_upper, mode="lines", line={"width": 0}, showlegend=False),
-                row=3,
-                col=1,
+            cumulative_band = Band(
+                post_dates,
+                cum_resids + frac * (float(incr_lo) - float(incr)),
+                cum_resids + frac * (float(incr_hi) - float(incr)),
             )
-            total_fig.add_trace(
-                go.Scatter(
-                    x=marketing_start,
-                    y=cum_lower,
-                    mode="lines",
-                    line={"width": 0},
-                    fill="tonexty",
-                    fillcolor=theme.cumulative_band(0.2),
-                    name=ci_label,
-                    showlegend=False,
-                ),
-                row=3,
-                col=1,
-            )
-        total_fig.add_trace(
-            go.Scatter(
-                x=marketing_start,
-                y=cum_resids,
-                marker={"color": theme.cumulative},
-                mode="lines",
-                name="Cumulative Incrementality",
-            ),
-            row=3,
-            col=1,
-        )
 
-        for row in (1, 2, 3):
-            total_fig.add_vline(
-                x=self.post_period,
-                line_width=1,
-                line_dash="dash",
-                line_color=theme.reference,
-                row=row,
-                col=1,
-            )
-        apply_theme(total_fig, theme)
-        total_fig.show()
+        data = CounterfactualPlotData(
+            dates=dates,
+            actual=actual,
+            prediction=prediction,
+            post_dates=post_dates,
+            cumulative=cum_resids,
+            post_period=self.post_period,
+            ci_label=f"{self._get_ci_print()} CI",
+            prediction_band=prediction_band,
+            difference_band=difference_band,
+            cumulative_band=cumulative_band,
+        )
+        return render(data, get_theme(dark_mode), backend)
 
     def _counterfactual_series(self, series: Any) -> np.ndarray:
         """Coerce a cached actual/counterfactual series to a flat numpy array.
@@ -2478,7 +2460,7 @@ class EconometricEstimator(Estimator, ABC):
         except Exception:
             return None
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the actual series, counterfactual, and pointwise and cumulative differences.
 
         Draws the shared three-panel counterfactual figure (see
@@ -2489,6 +2471,16 @@ class EconometricEstimator(Estimator, ABC):
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
+
+        Returns
+        -------
+        plotly Figure or altair VConcatChart
+            The figure. Notebooks render it when it is the cell's last
+            expression; elsewhere call its ``.show()`` (Plotly) or
+            ``.save()`` (Altair).
         """
         # Read via getattr: these series are declared and cached on the concrete
         # synthetic-control subclasses, not on this base.
@@ -2507,13 +2499,14 @@ class EconometricEstimator(Estimator, ABC):
             raise ValueError("prediction_post must not be None")
         if dates is None:
             raise ValueError("dates must not be None")
-        self._plot_counterfactual(
+        return self._plot_counterfactual(
             dates,
             self._counterfactual_series(actual_pre),
             self._counterfactual_series(actual_post),
             self._counterfactual_series(prediction_pre),
             self._counterfactual_series(prediction_post),
             dark_mode=dark_mode,
+            backend=backend,
         )
 
 

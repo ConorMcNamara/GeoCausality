@@ -1,14 +1,15 @@
 """Fixed-effects panel model for geo-experiment causal inference."""
 
+from typing import Any
+
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
 from linearmodels.panel import PanelOLS
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import EconometricEstimator
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import EventStudyPlotData, PlotBackend, check_backend, get_theme, render
 
 
 class FixedEffects(EconometricEstimator):
@@ -287,7 +288,7 @@ class FixedEffects(EconometricEstimator):
         table_dict["p_value"] = [self.results["p_value"]]
         print(tabulate(table_dict, headers="keys", tablefmt="grid"))
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the event-study dynamic treatment effects for our fixed-effects model.
 
         Fits an auxiliary two-way fixed-effects model that interacts the treated
@@ -295,18 +296,27 @@ class FixedEffects(EconometricEstimator):
         before onset is the omitted reference), then plots the estimated
         coefficient path with confidence intervals. Pre-onset coefficients near
         zero support the parallel-trends assumption, while post-onset coefficients
-        trace the dynamic treatment effect. This is fit independently of
+        trace the dynamic treatment effect. A coefficient whose interval
+        contains zero is drawn with a hollow marker, as is the reference period,
+        which is pinned to zero. This is fit independently of
         ``generate()`` and does not alter the headline single-coefficient results.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
 
         Returns
         -------
-        The event-study plot summarizing the dynamic treatment effect.
+        plotly Figure or altair LayerChart
+            The event-study plot summarizing the dynamic treatment effect.
+            Notebooks render it when it is the cell's last expression;
+            elsewhere call its ``.show()`` (Plotly) or ``.save()`` (Altair).
         """
+        check_backend(backend)
         if self.data is None:
             raise ValueError("data must not be None")
         if self.treatment_variable is None:
@@ -349,28 +359,11 @@ class FixedEffects(EconometricEstimator):
         estimates = np.asarray(estimates)[order]
         lowers = np.asarray(lowers)[order]
         uppers = np.asarray(uppers)[order]
-        theme = get_theme(dark_mode)
-        fig = go.Figure(
-            go.Scatter(
-                x=periods,
-                y=estimates,
-                error_y={
-                    "type": "data",
-                    "symmetric": False,
-                    "array": uppers - estimates,
-                    "arrayminus": estimates - lowers,
-                },
-                marker={"color": theme.difference},
-                mode="markers+lines",
-                name="Effect",
-            )
+        data = EventStudyPlotData(
+            periods=periods,
+            estimates=estimates,
+            lower=lowers,
+            upper=uppers,
+            y_title=f"Effect on {self.y_variable}",
         )
-        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color=theme.zero)
-        fig.add_vline(x=-0.5, line_width=1, line_dash="dash", line_color=theme.reference)
-        fig.update_layout(
-            title="Event Study (Two-Way Fixed Effects)",
-            xaxis_title="Periods relative to treatment onset",
-            yaxis_title=f"Effect on {self.y_variable}",
-        )
-        apply_theme(fig, theme)
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)

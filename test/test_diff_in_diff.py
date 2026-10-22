@@ -9,6 +9,7 @@ recovered ``lift`` is expected to be roughly ``n_test * effect``.
 import io
 from contextlib import redirect_stdout
 
+import plotly.graph_objects as go
 import pytest
 
 from GeoCausality.diff_in_diff import DiffinDiff
@@ -124,3 +125,19 @@ def test_test_and_control_are_group_post_outcomes(effect_panel) -> None:
     control = post[post[model.treatment_variable] == 0][model.y_variable].mean()
     assert model.results["test"] == pytest.approx(treated)
     assert model.results["control"] == pytest.approx(control)
+
+
+class TestPlot:
+    @staticmethod
+    def test_plotly_draws_parallel_trends(effect_panel) -> None:
+        fig = _fit(effect_panel).plot()
+        assert isinstance(fig, go.Figure)
+        assert [t.name for t in fig.data] == ["Treated", "Control", "Counterfactual"]
+        assert fig.data[2].line.dash == "dash"
+
+    @staticmethod
+    def test_altair_draws_parallel_trends(effect_panel) -> None:
+        pytest.importorskip("altair")
+        spec = _fit(effect_panel).plot(backend="altair", dark_mode=True).to_dict()
+        assert spec["title"] == "Parallel Trends"
+        assert spec["layer"][0]["encoding"]["color"]["scale"]["domain"] == ["Treated", "Control", "Counterfactual"]

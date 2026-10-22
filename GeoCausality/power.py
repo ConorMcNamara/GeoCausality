@@ -29,12 +29,20 @@ from typing import Any
 
 import narwhals as nw
 import numpy as np
-import plotly.graph_objects as go
+import pandas as pd
 from narwhals.typing import IntoDataFrame
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._base import Estimator, date_key, period_key
-from GeoCausality._plotting import apply_theme, get_theme
+from GeoCausality._plotting import (
+    MdeSensitivityPlotData,
+    PlotBackend,
+    PowerCurvePlotData,
+    PowerHeatmapPlotData,
+    check_backend,
+    get_theme,
+    render,
+)
 from GeoCausality.augmented_synthetic_control import AugmentedSyntheticControl
 
 # Conventional target power for the minimum-detectable-effect search.
@@ -412,118 +420,115 @@ class PowerAnalysis:
             }
             print(tabulate(mde_table, headers="keys", tablefmt="grid"))
 
-    def plot(self, dark_mode: bool = False) -> None:
+    def plot(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot power as a function of effect size, one line per duration.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
+
+        Returns
+        -------
+        plotly Figure or altair Chart
+            The figure. Notebooks render it when it is the cell's last
+            expression; elsewhere call its ``.show()`` (Plotly) or ``.save()``
+            (Altair).
 
         Raises
         ------
         ValueError
             If ``simulate()`` has not been run yet.
         """
+        check_backend(backend)
         if self.power_curve is None:
             raise ValueError("Call simulate() before plot()")
-        fig = go.Figure()
-        durations = sorted({r["duration"] for r in self.power_curve})
-        for duration in durations:
-            points = sorted(
-                ((r["effect"], r["power"]) for r in self.power_curve if r["duration"] == duration),
-                key=lambda p: p[0],
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=[p[0] for p in points],
-                    y=[p[1] for p in points],
-                    mode="lines+markers",
-                    name=f"{duration} periods",
-                )
-            )
         target = self.results.get("target_power", DEFAULT_TARGET_POWER) if self.results else DEFAULT_TARGET_POWER
-        fig.add_hline(y=target, line_dash="dash", annotation_text=f"target {target:.0%}")
-        unit = "multiplicative" if self.injection == "multiplicative" else "additive"
-        fig.update_layout(
-            title="Power curve",
-            xaxis_title=f"Effect size ({unit})",
-            yaxis_title="Power",
-            yaxis_range=[0, 1],
+        data = PowerCurvePlotData(
+            frame=pd.DataFrame(self.power_curve).loc[:, ["duration", "effect", "power"]],
+            target=target,
+            x_title=f"Effect size ({self._effect_unit()})",
         )
-        apply_theme(fig, get_theme(dark_mode))
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)
 
-    def plot_mde_sensitivity(self, dark_mode: bool = False) -> None:
+    def plot_mde_sensitivity(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot the Minimum Detectable Effect as a function of experiment duration.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
+
+        Returns
+        -------
+        plotly Figure or altair Chart
+            The figure. Notebooks render it when it is the cell's last
+            expression; elsewhere call its ``.show()`` (Plotly) or ``.save()``
+            (Altair).
 
         Raises
         ------
         ValueError
             If ``mde()`` has not been run yet.
         """
+        check_backend(backend)
         if self.mde_table is None:
             raise ValueError("Call mde() before plot_mde_sensitivity()")
         rows = [r for r in self.mde_table if r["mde"] is not None]
         if not rows:
             raise ValueError("No durations achieved the target power — cannot plot MDE sensitivity")
-        durations = [r["duration"] for r in rows]
-        mdes = [r["mde"] for r in rows]
         target = self.results.get("target_power", DEFAULT_TARGET_POWER) if self.results else DEFAULT_TARGET_POWER
-        unit = "multiplicative" if self.injection == "multiplicative" else "additive"
-        fig = go.Figure(
-            go.Scatter(x=durations, y=mdes, mode="lines+markers"),
+        data = MdeSensitivityPlotData(
+            durations=[r["duration"] for r in rows],
+            mdes=[r["mde"] for r in rows],
+            target=target,
+            y_title=f"Minimum Detectable Effect ({self._effect_unit()})",
         )
-        fig.update_layout(
-            title=f"MDE sensitivity (target power {target:.0%})",
-            xaxis_title="Experiment duration (periods)",
-            yaxis_title=f"Minimum Detectable Effect ({unit})",
-        )
-        apply_theme(fig, get_theme(dark_mode))
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)
 
-    def plot_power_heatmap(self, dark_mode: bool = False) -> None:
+    def plot_power_heatmap(self, dark_mode: bool = False, backend: PlotBackend = "plotly") -> Any:
         """Plot a heatmap of power over the (effect size x duration) grid.
 
         Parameters
         ----------
         dark_mode : bool, default=False
             Render with a dark background and lighter series colours.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw the figure with. ``"altair"`` needs the optional
+            dependency (``pip install geocausality[altair]``).
+
+        Returns
+        -------
+        plotly Figure or altair Chart
+            The figure. Notebooks render it when it is the cell's last
+            expression; elsewhere call its ``.show()`` (Plotly) or ``.save()``
+            (Altair).
 
         Raises
         ------
         ValueError
             If ``simulate()`` has not been run yet.
         """
+        check_backend(backend)
         if self.power_curve is None:
             raise ValueError("Call simulate() before plot_power_heatmap()")
         durations = sorted({r["duration"] for r in self.power_curve})
         effects = sorted({r["effect"] for r in self.power_curve})
         lookup = {(r["effect"], r["duration"]): r["power"] for r in self.power_curve}
-        z = [[lookup.get((e, d), float("nan")) for e in effects] for d in durations]
-        unit = "multiplicative" if self.injection == "multiplicative" else "additive"
-        fig = go.Figure(
-            go.Heatmap(
-                x=effects,
-                y=durations,
-                z=z,
-                zmin=0,
-                zmax=1,
-                colorscale="RdYlGn",
-                colorbar_title="Power",
-                text=[[f"{v:.0%}" for v in row] for row in z],
-                texttemplate="%{text}",
-            ),
+        data = PowerHeatmapPlotData(
+            effects=effects,
+            durations=durations,
+            power=np.array([[lookup.get((e, d), np.nan) for e in effects] for d in durations], dtype=float),
+            x_title=f"Effect size ({self._effect_unit()})",
         )
-        fig.update_layout(
-            title="Power heatmap",
-            xaxis_title=f"Effect size ({unit})",
-            yaxis_title="Experiment duration (periods)",
-        )
-        apply_theme(fig, get_theme(dark_mode))
-        fig.show()
+        return render(data, get_theme(dark_mode), backend)
+
+    def _effect_unit(self) -> str:
+        """Label for the effect-size axis: how effects are injected."""
+        return "multiplicative" if self.injection == "multiplicative" else "additive"

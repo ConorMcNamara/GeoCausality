@@ -9,6 +9,8 @@ Diff-in-Diff, FixedEffects does not support a ``"relative"`` lift.
 import io
 from contextlib import redirect_stdout
 
+import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from GeoCausality.fixed_effects import FixedEffects
@@ -107,6 +109,24 @@ class TestFixedEffects:
     def test_rejects_unknown_inference(effect_panel) -> None:
         with pytest.raises(ValueError, match="inference must be one of"):
             FixedEffects(effect_panel.df, **effect_panel.kwargs(), inference="bogus")
+
+
+class TestPlot:
+    @staticmethod
+    def test_plotly_event_study_pins_reference_period(effect_panel) -> None:
+        fig = _fit(effect_panel).plot()
+        assert isinstance(fig, go.Figure)
+        trace = fig.data[0]
+        # Period -1 is the omitted reference, fixed at zero.
+        assert trace.y[list(trace.x).index(-1)] == 0.0
+
+    @staticmethod
+    def test_altair_event_study(effect_panel) -> None:
+        pytest.importorskip("altair")
+        chart = _fit(effect_panel).plot(backend="altair")
+        chart.to_dict()
+        effect = pd.DataFrame(chart.layer[-1].data.values)
+        assert effect.loc[effect["period"] == -1, "estimate"].item() == 0.0
 
 
 if __name__ == "__main__":

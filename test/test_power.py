@@ -19,7 +19,6 @@ from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import polars as pl
 import pytest
 
@@ -199,14 +198,10 @@ class TestPlotMdeSensitivity:
             pa.plot_mde_sensitivity()
 
     @staticmethod
-    def test_creates_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown: list[go.Figure] = []
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.append(self))
+    def test_creates_figure(history: pl.DataFrame) -> None:
         effects = [0.0, 0.2, 0.4, 0.6, 0.8]
         pa = _power(history).simulate(effect_sizes=effects, durations=[10, 14], n_sims=15).mde()
-        pa.plot_mde_sensitivity()
-        assert len(shown) == 1
-        fig = shown[0]
+        fig = pa.plot_mde_sensitivity()
         assert len(fig.data) == 1
         assert fig.layout.xaxis.title.text == "Experiment duration (periods)"
 
@@ -218,13 +213,9 @@ class TestPlotPowerHeatmap:
             _power(history).plot_power_heatmap()
 
     @staticmethod
-    def test_creates_figure(history: pl.DataFrame, monkeypatch: pytest.MonkeyPatch) -> None:
-        shown: list[go.Figure] = []
-        monkeypatch.setattr(go.Figure, "show", lambda self: shown.append(self))
+    def test_creates_figure(history: pl.DataFrame) -> None:
         pa = _power(history).simulate(effect_sizes=[0.0, 0.3, 0.6], durations=[10, 14], n_sims=10)
-        pa.plot_power_heatmap()
-        assert len(shown) == 1
-        fig = shown[0]
+        fig = pa.plot_power_heatmap()
         heatmap = fig.data[0]
         assert heatmap.type == "heatmap"
         assert list(heatmap.x) == [0.0, 0.3, 0.6]
@@ -242,3 +233,28 @@ def test_geox_estimator_supported(history: pl.DataFrame) -> None:
 
     pa = _power(pd.DataFrame(history.to_dicts()), estimator=GeoX).simulate([0.1], [5], n_sims=2)
     assert 0.0 <= pa.power_curve[0]["power"] <= 1.0
+
+
+class TestPlot:
+    @staticmethod
+    def test_plotly_power_curve(history: pl.DataFrame) -> None:
+        pa = _power(history).simulate(effect_sizes=[0.0, 0.3], durations=[10, 14], n_sims=5)
+        fig = pa.plot()
+        assert [t.name for t in fig.data] == ["10 periods", "14 periods"]
+        assert fig.layout.shapes[0].y0 == pytest.approx(0.8)
+
+    @staticmethod
+    def test_requires_simulate(history: pl.DataFrame) -> None:
+        with pytest.raises(ValueError, match="simulate"):
+            _power(history).plot()
+
+    @staticmethod
+    def test_altair_renders_every_power_plot(history: pl.DataFrame) -> None:
+        pytest.importorskip("altair")
+        pa = _power(history).simulate(effect_sizes=[0.0, 0.4, 0.8], durations=[10, 14], n_sims=10).mde()
+        for chart in (
+            pa.plot(backend="altair"),
+            pa.plot_mde_sensitivity(backend="altair"),
+            pa.plot_power_heatmap(backend="altair"),
+        ):
+            chart.to_dict()
