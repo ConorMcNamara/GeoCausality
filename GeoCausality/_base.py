@@ -13,7 +13,7 @@ import narwhals as nw
 import numpy as np
 import polars as pl
 from narwhals.typing import IntoDataFrame
-from scipy.optimize import Bounds, LinearConstraint, minimize
+from scipy.optimize import Bounds, LinearConstraint, minimize, nnls
 from tabulate import tabulate  # type: ignore
 
 from GeoCausality._plotting import (
@@ -1686,8 +1686,71 @@ class EconometricEstimator(Estimator, ABC):
         The donor weights, summing to the number of treated geos.
         """
         xs, ys, n_treated = self._per_geo_problem(x, y)
-        weights = self._solve_simplex_qp(xs.T @ xs, xs.T @ ys, float(ys @ ys), name)
+        weights = self._solve_simplex_lsq(xs, ys, name)
         return weights * n_treated
+
+    # Weight on the extra NNLS row that enforces ``sum(w) = 1``, relative to the
+    # largest entry of ``x``. The row is a penalty, not a hard constraint: before
+    # renormalising, the sum misses 1 by roughly ``n_rows * |residual| / (1e8 *
+    # max|x|)``, up to ~1e-3 when ``y`` is 1e3-1e4x the donor scale.
+    # Renormalising restores the sum; the weights are then exact when the
+    # optimum is a vertex of the simplex and otherwise drift slightly from the
+    # constrained optimum. SC and ASC go through ``_per_geo_problem``,
+    # which puts ``y`` on the donor scale, and there the fit matches a tightly
+    # converged SLSQP to ~1e-14 in relative loss. A larger weight would tighten
+    # this but ill-condition the augmented matrix.
+    _SIMPLEX_SUM_WEIGHT = 1e4
+
+    def _solve_simplex_lsq(self, x: np.ndarray, y: np.ndarray, name: str, ridge: float = 0.0) -> np.ndarray:
+        """Least-squares weights on the probability simplex.
+
+        Solves ``min_w ||y - x w||^2 + ridge * ||w||^2`` subject to ``w >= 0,
+        sum(w) = 1`` as a non-negative least-squares problem: the ridge becomes
+        ``sqrt(ridge) * I`` rows with zero targets, and the sum constraint a
+        heavily weighted row of ones with target one. NNLS works on ``x`` itself,
+        so it never squares the conditioning of (often highly collinear) donor
+        series the way the Gram-matrix form does, and its active-set solve is
+        orders of magnitude faster than SLSQP on large donor pools. If NNLS hits
+        its iteration limit the problem falls back to ``_solve_simplex_qp``.
+        Non-finite inputs raise a ``ValueError`` rather than returning
+        meaningless weights.
+
+        Parameters
+        ----------
+        x : numpy array, shape (n_rows, n)
+            The design matrix (e.g. donor outcomes, one column per donor).
+        y : numpy array, shape (n_rows,)
+            The target series.
+        name : str
+            The estimator name for the fallback's convergence warning.
+        ridge : float, default=0.0
+            The L2 penalty on the weights.
+
+        Returns
+        -------
+        The simplex weights.
+        """
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        if not (np.isfinite(x).all() and np.isfinite(y).all()):
+            raise ValueError(
+                f"{name}: the panel has missing or non-finite outcome values (e.g. a geo with no row "
+                "for some date, which pivots to NaN). Fill or drop those geo-date cells so every geo "
+                "has a finite value on every date."
+            )
+        n_c = x.shape[1]
+        if ridge > 0.0:
+            x = np.vstack([x, np.sqrt(ridge) * np.identity(n_c)])
+            y = np.concatenate([y, np.zeros(n_c)])
+        level = float(np.max(np.abs(x))) if x.size else 0.0
+        weight = self._SIMPLEX_SUM_WEIGHT * (level if np.isfinite(level) and level > 0.0 else 1.0)
+        try:
+            weights, _ = nnls(np.vstack([x, np.full(n_c, weight)]), np.append(y, weight), maxiter=50 * n_c)
+        except RuntimeError:
+            gram = x.T @ x
+            return self._solve_simplex_qp(gram, x.T @ y, float(y @ y), name)
+        total = weights.sum()
+        return weights / total if total > 0 else np.full(n_c, 1.0 / n_c)
 
     def _solve_simplex_qp(
         self,
