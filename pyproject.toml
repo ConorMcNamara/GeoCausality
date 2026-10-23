@@ -18,13 +18,13 @@ dependencies = [
     "plotly (>=6.0.0,<7.0.0)",
     "scipy (>=1.15.0,<2.0.0)"
 ]
-license = {text = "MIT"}
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 keywords = ["causal inference", "geo-experiments", "geocausality"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

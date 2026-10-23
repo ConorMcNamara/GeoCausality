@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **License: Apache-2.0** — GeoCausality is now licensed under the Apache
+  License 2.0 instead of MIT. A new `NOTICE` file carries the copyright
+  notice and keeps the MIT notice of pysyncon, on which parts of
+  `SyntheticControl`, `AugmentedSyntheticControl` and
+  `RobustSyntheticControl` are based. Both files ship in the sdist and wheel.
+
 ## [0.21.0] - 2026-10-22
 
 ### Added
