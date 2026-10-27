@@ -125,7 +125,8 @@ class TestPlotlyRenderer:
         fig = render(_counterfactual(), LIGHT_THEME, "plotly")
         bands = [t for t in fig.data if t.fill == "tonexty"]
         assert len(bands) == 3
-        assert len(fig.layout.shapes) == 3
+        # A treatment-start line per panel, plus a zero line on the two difference panels.
+        assert len(fig.layout.shapes) == 5
         # Only the top band gets a legend entry.
         assert [t.name for t in bands if t.showlegend is not False] == ["90% CI"]
 
@@ -167,6 +168,62 @@ class TestPlotlyRenderer:
         )
         assert data.filled.tolist() == [False, False, False, True]
 
+    @staticmethod
+    def test_counterfactual_draws_zero_lines_on_the_difference_panels() -> None:
+        fig = render(_counterfactual(), LIGHT_THEME, "plotly")
+        zeros = [s for s in fig.layout.shapes if s.type == "line" and s.y0 == s.y1 == 0]
+        assert sorted(s.yref for s in zeros) == ["y2", "y3"]
+
+    @staticmethod
+    def test_counterfactual_shades_only_bands_that_exclude_zero() -> None:
+        # The difference band straddles zero throughout; the cumulative band clears it.
+        fig = render(_counterfactual(), LIGHT_THEME, "plotly")
+        (shaded,) = [t for t in fig.data if t.fill == "toself"]
+        assert shaded.yaxis == "y3"
+        assert shaded.fillcolor == LIGHT_THEME.cumulative_band(0.3)
+
+    @staticmethod
+    def test_counterfactual_shades_each_run_as_its_own_polygon() -> None:
+        dates = DAILY[:5]
+        band = Band(dates, np.array([1.0, 1.0, -1.0, 1.0, 1.0]), np.array([2.0, 2.0, 1.0, 2.0, 2.0]))
+        fig = render(replace(_counterfactual(), difference_band=band), LIGHT_THEME, "plotly")
+        shaded = next(t for t in fig.data if t.fill == "toself" and t.yaxis == "y2")
+        first, second = [dates[0], dates[1], dates[1], dates[0]], [dates[3], dates[4], dates[4], dates[3]]
+        assert list(shaded.x) == [*first, None, *second, None]
+
+    @staticmethod
+    @pytest.mark.parametrize(("shift", "symbol"), [(0.0, "circle"), (-7.5, "circle-open")])
+    def test_counterfactual_final_interval_is_hollow_when_it_contains_zero(shift: float, symbol: str) -> None:
+        data = _counterfactual()
+        band = data.cumulative_band
+        assert band is not None
+        data = replace(data, cumulative_band=Band(band.dates, band.lower + shift, band.upper))
+        (final,) = [t for t in render(data, LIGHT_THEME, "plotly").data if t.name == "Final cumulative"]
+        assert final.marker.symbol == symbol
+        assert (final.x[0], final.y[0]) == (DAILY[-1], 8.0)
+        assert (final.error_y.arrayminus[0], final.error_y.array[0]) == (1.0 - shift, 1.0)
+
+    @staticmethod
+    def test_counterfactual_without_bands_has_no_final_interval() -> None:
+        fig = render(_counterfactual(bands=False), LIGHT_THEME, "plotly")
+        assert not [t for t in fig.data if t.name == "Final cumulative" or t.fill == "toself"]
+
+
+class TestBand:
+    @staticmethod
+    def test_zero_free_runs_split_where_the_interval_touches_or_crosses_zero() -> None:
+        band = Band(
+            list(range(7)),
+            lower=np.array([-1.0, 1.0, 1.0, 0.0, -3.0, -1.0, 2.0]),
+            upper=np.array([1.0, 2.0, 2.0, 1.0, -1.0, 1.0, 3.0]),
+        )
+        assert band.excludes_zero.tolist() == [False, True, True, False, True, False, True]
+        assert band.zero_free_runs() == [slice(1, 3), slice(4, 5), slice(6, 7)]
+
+    @staticmethod
+    def test_zero_free_runs_is_empty_when_every_interval_contains_zero() -> None:
+        assert Band([0, 1], np.array([-1.0, -1.0]), np.array([1.0, 1.0])).zero_free_runs() == []
+
 
 class TestAltairRenderer:
     alt = pytest.importorskip("altair")
@@ -198,8 +255,22 @@ class TestAltairRenderer:
             "Pointwise Difference",
             "Cumulative Difference",
         ]
-        # Each panel: band, line(s), treatment-start rule.
-        assert [len(panel["layer"]) for panel in spec["vconcat"]] == [3, 3, 3]
+        # Each panel: band, line(s), treatment-start rule. The difference panels add a zero rule; the
+        # cumulative one also shades where its band excludes zero and ends with the final interval.
+        assert [len(panel["layer"]) for panel in spec["vconcat"]] == [3, 4, 7]
+
+    @staticmethod
+    def test_counterfactual_marks_where_the_cumulative_band_excludes_zero() -> None:
+        spec = render(_counterfactual(), LIGHT_THEME, "altair").to_dict()
+        middle, bottom = spec["vconcat"][1]["layer"], spec["vconcat"][2]["layer"]
+        # The difference band straddles zero, so it gets no shading; the zero rule follows the band.
+        assert middle[1]["encoding"]["y"]["field"] == "y"
+        shaded, zero, _, whisker, point = bottom[1:6]
+        assert shaded["mark"] == {"type": "area", "opacity": 0.3, "color": LIGHT_THEME.cumulative_band(1.0)}
+        assert shaded["encoding"]["detail"]["field"] == "run"
+        assert zero["encoding"]["y"]["field"] == "y"
+        assert (whisker["encoding"]["y"]["field"], whisker["encoding"]["y2"]["field"]) == ("lower", "upper")
+        assert point["mark"]["filled"] is True
 
     @staticmethod
     def test_counterfactual_single_legend_lists_series_and_band() -> None:
@@ -211,7 +282,8 @@ class TestAltairRenderer:
     @staticmethod
     def test_counterfactual_omits_missing_bands() -> None:
         spec = render(_counterfactual(bands=False), LIGHT_THEME, "altair").to_dict()
-        assert [len(panel["layer"]) for panel in spec["vconcat"]] == [2, 2, 2]
+        # Only the zero rules remain beyond the lines and treatment-start rules.
+        assert [len(panel["layer"]) for panel in spec["vconcat"]] == [2, 3, 3]
         assert "90% CI" not in spec["vconcat"][0]["layer"][0]["encoding"]["color"]["scale"]["domain"]
 
     @staticmethod

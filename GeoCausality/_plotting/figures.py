@@ -19,6 +19,14 @@ PlotBackend = Literal["plotly", "altair"]
 _BACKENDS: tuple[str, ...] = ("plotly", "altair")
 
 
+def excludes_zero(lower: Any, upper: Any) -> np.ndarray:
+    """Whether each interval lies wholly above or below zero.
+
+    An interval that ends exactly at zero counts as containing it.
+    """
+    return (np.asarray(lower) > 0) | (np.asarray(upper) < 0)
+
+
 @dataclass(frozen=True)
 class Band:
     """A shaded interval drawn between ``lower`` and ``upper`` over ``dates``."""
@@ -26,6 +34,36 @@ class Band:
     dates: list[Any]
     lower: np.ndarray
     upper: np.ndarray
+
+    @property
+    def excludes_zero(self) -> np.ndarray:
+        """Whether the interval at each date lies wholly above or below zero."""
+        return excludes_zero(self.lower, self.upper)
+
+    def zero_free_runs(self) -> list[slice]:
+        """Return the contiguous runs of dates where the interval excludes zero.
+
+        Renderers shade these runs more strongly than the rest of the band. A
+        run of one date has no width, so it shows only through the band's edge.
+        """
+        mask = np.r_[False, self.excludes_zero, False].astype(int)
+        edges = np.flatnonzero(np.diff(mask))
+        return [slice(int(start), int(stop)) for start, stop in zip(edges[::2], edges[1::2], strict=True)]
+
+
+@dataclass(frozen=True)
+class FinalInterval:
+    """The last cumulative estimate and its interval, drawn as a forest-style point."""
+
+    date: Any
+    estimate: float
+    lower: float
+    upper: float
+
+    @property
+    def filled(self) -> bool:
+        """Whether the marker is drawn filled: hollow when the interval contains zero."""
+        return bool(excludes_zero(self.lower, self.upper))
 
 
 @dataclass(frozen=True)
@@ -66,6 +104,19 @@ class CounterfactualPlotData:
         """Pointwise actual minus counterfactual."""
         return self.actual - self.prediction
 
+    @property
+    def final_interval(self) -> FinalInterval | None:
+        """The last cumulative estimate with its interval, or ``None`` without a cumulative band."""
+        band = self.cumulative_band
+        if band is None or len(self.cumulative) == 0:
+            return None
+        return FinalInterval(
+            date=self.post_dates[-1],
+            estimate=float(self.cumulative[-1]),
+            lower=float(band.lower[-1]),
+            upper=float(band.upper[-1]),
+        )
+
 
 @dataclass(frozen=True)
 class ParallelTrendsPlotData:
@@ -98,7 +149,7 @@ class EventStudyPlotData:
         The omitted reference period is pinned to a zero-width interval at zero,
         so it is always hollow.
         """
-        return (self.lower > 0) | (self.upper < 0)
+        return excludes_zero(self.lower, self.upper)
 
 
 @dataclass(frozen=True)
