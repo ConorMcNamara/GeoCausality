@@ -178,7 +178,45 @@ class SyntheticDiffInDiff(EconometricEstimator):
             "incrementality": self.att * t1,
         }
         self.results.update(self._placebo_inference(x_pre, x_post, t1))
+        # The placebo standard error is for the average effect, so it is too narrow
+        # a per-period band. Calibrate a pointwise one on cross-fitted pre-period
+        # residuals instead, as the conformal estimators do.
+        calibration = self._cross_fit_residuals(self.actual_pre, t1)
+        if calibration is not None:
+            self.results["conformal_band"] = self._split_conformal_band(calibration)
         return self
+
+    def _fit_predict_weights(self, x_train: np.ndarray, y_train: np.ndarray, x_eval: np.ndarray) -> np.ndarray | None:
+        """Refit the SDID counterfactual on a subset of pre-period rows and predict ``x_eval``.
+
+        Mirrors ``generate``: fits the unit weights and intercept on the per-geo
+        average of ``y_train``, fits time weights of ``x_train`` against the
+        cached post-period donors, and shifts the donor-weighted trajectory by the
+        time-weighted pre-period gap. Drives the cross-fitted conformal band.
+
+        Parameters
+        ----------
+        x_train : numpy array, shape (n_train, n_donors)
+            Pre-period donor rows used to refit the weights.
+        y_train : numpy array, shape (n_train,)
+            Treated (summed) pre-period series on the same rows.
+        x_eval : numpy array, shape (n_eval, n_donors)
+            Donor rows to predict the counterfactual for.
+
+        Returns
+        -------
+        The counterfactual for each ``x_eval`` row, or None without cached post-period donors.
+        """
+        if self._jk_x_post is None:
+            return None
+        x_post = np.asarray(self._jk_x_post, dtype=float)
+        n_treated = self._n_treated
+        zeta = self.zeta if self.zeta is not None else self._default_zeta_for(x_train, x_post.shape[0], n_treated)
+        _, unit_w = self._solve_weights(x_train, y_train / n_treated, zeta)
+        time_w = self._solve_time_weights(x_train, x_post)
+        scaled_weights = unit_w * n_treated
+        alpha = float(time_w @ (y_train - x_train @ scaled_weights))
+        return x_eval @ scaled_weights + alpha
 
     def _default_zeta(self, x_pre: np.ndarray) -> float:
         """Arkhangelsky et al. (2021) default for the unit-weight L2 penalty.
@@ -344,7 +382,8 @@ class SyntheticDiffInDiff(EconometricEstimator):
         Returns
         -------
         A dict of p-value, per-period ``lift`` CIs, total ``incrementality`` CIs,
-        the placebo band half-width, and the ``method``.
+        the placebo band half-width, and the ``method``. ``generate`` replaces the
+        band with a cross-fitted pointwise one whenever it can refit.
         """
         att = float(self.att) if self.att is not None else 0.0
         n_donors = x_pre.shape[1]

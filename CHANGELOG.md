@@ -36,9 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leave the zero-centred band, so the significant periods are unchanged; the
   band now reads against the zero line and darkens where it clears it, as
   GeoX's already did. Darker pre-period stretches flag counterfactual misfit.
-  `SyntheticDiffInDiff`'s band is `z × SE` of the average effect rather than a
-  pointwise band, so its per-period intervals are too narrow and its
-  pre-period darkens often.
+
+- **`SyntheticDiffInDiff` pointwise band** — `results["conformal_band"]` is
+  now a split-conformal band calibrated on cross-fitted pre-period residuals,
+  as for the conformal estimators, instead of `z × SE` of the placebo average
+  effect. The placebo SE is for the average effect, so as a per-period band it
+  was far too narrow: on simulated no-effect panels 55% of post-period points
+  fell outside a 90% band, against 8% now. This widens the shaded bands in
+  `plot()` and changes how `MarketSelection` ranks candidates for
+  `SyntheticDiffInDiff`, which now scores the pre-period fit as its docstring
+  describes. The ATT, its CIs, the p-value and `standard_error` are unchanged.
+  As for the conformal estimators, a pre-period too short for a finite band
+  gives an infinite one; the placebo band is kept only when there are fewer
+  than two pre-period dates to cross-fit.
 
 - **License: Apache-2.0** — GeoCausality is now licensed under the Apache
   License 2.0 instead of MIT. A new `NOTICE` file carries the copyright
