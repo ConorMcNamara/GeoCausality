@@ -117,7 +117,8 @@ class TestGeoX:
     def test_plot_dark_mode(data_df: pd.DataFrame) -> None:
         fig = _fit(data_df).plot(dark_mode=True)
         assert fig.layout.template.layout.paper_bgcolor == pio.templates["plotly_dark"].layout.paper_bgcolor
-        assert all(shape.line.color == DARK_THEME.reference for shape in fig.layout.shapes)
+        # Treatment-start lines in the reference colour, zero lines in the zero colour.
+        assert {shape.line.color for shape in fig.layout.shapes} == {DARK_THEME.reference, DARK_THEME.zero}
 
     @staticmethod
     def test_plot_shades_post_period_bands(data_df: pd.DataFrame) -> None:

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Zero cues on the counterfactual figure** — the pointwise- and
+  cumulative-difference panels show at a glance where their interval excludes
+  zero, in both backends:
+  - A dotted zero line, which also keeps zero on the y-axis. The Altair panels
+    previously fit the axis to the data, so zero could fall off-screen.
+  - The band is shaded more strongly over each run of dates where it lies
+    wholly above or below zero. As with the event-study markers, an interval
+    that ends exactly at zero counts as containing it. On the pointwise panel
+    the synthetic-control estimators shade their conformal band around zero
+    (the no-effect region) rather than around the difference, so that band
+    never darkens; GeoX's per-period intervals do.
+  - The cumulative panel ends with a forest-style point and interval for the
+    final cumulative effect: filled when the interval excludes zero, hollow
+    when it contains it.
+
+  These are pointwise intervals, so a darker stretch is not a simultaneous
+  test across those dates.
+
 ### Changed
 
 - **License: Apache-2.0** — GeoCausality is now licensed under the Apache

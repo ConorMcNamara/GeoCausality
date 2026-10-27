@@ -16,6 +16,7 @@ from GeoCausality._plotting.figures import (
     Band,
     CounterfactualPlotData,
     EventStudyPlotData,
+    FinalInterval,
     MarketRankingPlotData,
     MdeSensitivityPlotData,
     ParallelTrendsPlotData,
@@ -166,18 +167,66 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> Any:
         # A labelled band is coloured through the shared scale so it gets a legend entry.
         return chart.encode(color=colour) if legend is not None else chart
 
+    def zero_free_area(band: Band, color: str) -> list[Any]:
+        """Shade the runs of ``band`` that exclude zero, over the band itself; nothing when none do."""
+        runs = band.zero_free_runs()
+        if not runs:
+            return []
+        frame = pd.concat(
+            pd.DataFrame(
+                {"date": axis.column(band.dates[run]), "lower": band.lower[run], "upper": band.upper[run], "run": i}
+            )
+            for i, run in enumerate(runs)
+        )
+        band_y = alt.Y("lower:Q", title=None, scale=alt.Scale(zero=False))
+        # ``detail`` draws each run as its own area rather than bridging the gaps between them.
+        chart = _chart(frame).mark_area(opacity=0.3, color=color)
+        return [chart.encode(x=x, y=band_y, y2="upper:Q", detail="run:N")]
+
+    def final_interval(final: FinalInterval) -> list[Any]:
+        """Draw the last cumulative estimate with its interval, hollow when the interval contains zero."""
+        frame = pd.DataFrame(
+            {
+                "date": axis.column([final.date]),
+                "estimate": [final.estimate],
+                "lower": [final.lower],
+                "upper": [final.upper],
+            }
+        )
+        base = _chart(frame).encode(x=x)
+        tooltip = [
+            axis.tooltip(),
+            alt.Tooltip("estimate:Q", format=",.2f"),
+            alt.Tooltip("lower:Q", format=",.2f"),
+            alt.Tooltip("upper:Q", format=",.2f"),
+        ]
+        whisker = base.mark_rule(color=theme.cumulative, strokeWidth=2).encode(
+            y=alt.Y("lower:Q", title=None), y2="upper:Q"
+        )
+        point = base.mark_point(color=theme.cumulative, filled=final.filled, opacity=1.0, size=80, strokeWidth=2)
+        return [whisker, point.encode(y=alt.Y("estimate:Q", title=None), tooltip=tooltip)]
+
+    # The difference panels read against zero, the no-effect line; drawing it also keeps zero in view.
+    zero = alt.Chart(pd.DataFrame({"y": [0.0]})).mark_rule(color=theme.zero, strokeDash=[2, 2])
+    zero = zero.encode(y=alt.Y("y:Q", title=None))
+
     top: list[Any] = []
     middle: list[Any] = []
     bottom: list[Any] = []
+    # Where a band excludes zero it is shaded more strongly.
     if data.prediction_band is not None:
         top.append(area(data.prediction_band, legend=data.ci_label))
     if data.difference_band is not None:
         middle.append(area(data.difference_band, color=theme.band(1.0)))
+        middle += zero_free_area(data.difference_band, theme.band(1.0))
     if data.cumulative_band is not None:
         bottom.append(area(data.cumulative_band, color=theme.cumulative_band(1.0)))
+        bottom += zero_free_area(data.cumulative_band, theme.cumulative_band(1.0))
     top.append(lines(data.dates, Actual=data.actual, Counterfactual=data.prediction))
-    middle.append(lines(data.dates, Difference=data.difference))
-    bottom.append(lines(data.post_dates, **{"Cumulative Incrementality": data.cumulative}))
+    middle += [zero, lines(data.dates, Difference=data.difference)]
+    bottom += [zero, lines(data.post_dates, **{"Cumulative Incrementality": data.cumulative})]
+    if (final := data.final_interval) is not None:
+        bottom += final_interval(final)
 
     start = _start_rule(data.post_period, axis, theme)
     titles = ("Expected vs Counterfactual", "Pointwise Difference", "Cumulative Difference")

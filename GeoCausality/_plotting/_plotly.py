@@ -11,6 +11,7 @@ from GeoCausality._plotting.figures import (
     Band,
     CounterfactualPlotData,
     EventStudyPlotData,
+    FinalInterval,
     MarketRankingPlotData,
     MdeSensitivityPlotData,
     ParallelTrendsPlotData,
@@ -59,6 +60,50 @@ def _band_traces(band: Band, fill: str, name: str | None = None, in_legend: bool
     ]
 
 
+def _zero_free_trace(band: Band, fill: str) -> go.Scatter | None:
+    """Shade the runs of ``band`` that exclude zero, over the band itself; ``None`` when none do.
+
+    Each run is a closed polygon, separated from the next by a gap, so one trace draws them all.
+    """
+    x: list[Any] = []
+    y: list[Any] = []
+    for run in band.zero_free_runs():
+        dates = band.dates[run]
+        x += [*dates, *dates[::-1], None]
+        y += [*band.upper[run], *band.lower[run][::-1], None]
+    if not x:
+        return None
+    return go.Scatter(
+        x=x, y=y, mode="lines", line={"width": 0}, fill="toself", fillcolor=fill, hoverinfo="skip", showlegend=False
+    )
+
+
+def _final_interval_trace(final: FinalInterval, colour: str) -> go.Scatter:
+    """Draw the last cumulative estimate with its interval, hollow when the interval contains zero."""
+    return go.Scatter(
+        x=[final.date],
+        y=[final.estimate],
+        mode="markers",
+        marker={
+            "symbol": "circle" if final.filled else "circle-open",
+            "size": 10,
+            "color": colour,
+            "line": {"width": 2, "color": colour},
+        },
+        error_y={
+            "type": "data",
+            "symmetric": False,
+            "array": [final.upper - final.estimate],
+            "arrayminus": [final.estimate - final.lower],
+            "color": colour,
+            "thickness": 2,
+            "width": 6,
+        },
+        name="Final cumulative",
+        showlegend=False,
+    )
+
+
 @render.register
 def _(data: CounterfactualPlotData, theme: PlotTheme) -> go.Figure:
     fig = make_subplots(
@@ -72,10 +117,15 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> go.Figure:
     # Bands first so each panel's series draw on top of them.
     if data.prediction_band is not None:
         panels[0] += _band_traces(data.prediction_band, band_fill, name=data.ci_label, in_legend=True)
+    # Where a band excludes zero it is shaded more strongly.
     if data.difference_band is not None:
         panels[1] += _band_traces(data.difference_band, band_fill)
+        if (trace := _zero_free_trace(data.difference_band, theme.band(0.3))) is not None:
+            panels[1].append(trace)
     if data.cumulative_band is not None:
         panels[2] += _band_traces(data.cumulative_band, theme.cumulative_band(0.2), name=data.ci_label)
+        if (trace := _zero_free_trace(data.cumulative_band, theme.cumulative_band(0.3))) is not None:
+            panels[2].append(trace)
     panels[0] += [
         go.Scatter(x=data.dates, y=data.actual, marker={"color": theme.actual}, mode="lines", name="Actual"),
         go.Scatter(
@@ -98,6 +148,8 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> go.Figure:
             name="Cumulative Incrementality",
         )
     )
+    if (final := data.final_interval) is not None:
+        panels[2].append(_final_interval_trace(final, theme.cumulative))
 
     for row, traces in enumerate(panels, start=1):
         for trace in traces:
@@ -110,6 +162,9 @@ def _(data: CounterfactualPlotData, theme: PlotTheme) -> go.Figure:
             row=row,
             col=1,
         )
+    # The difference panels read against zero, the no-effect line.
+    for row in (2, 3):
+        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color=theme.zero, row=row, col=1)
     return apply_theme(fig, theme)
 
 

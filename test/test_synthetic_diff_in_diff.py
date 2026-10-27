@@ -211,7 +211,8 @@ class TestPlot:
         assert fig.layout.template == pio.templates[theme.template or pio.templates.default]
         actual = next(t for t in fig.data if t.name == "Actual")
         assert actual.marker.color == theme.actual
-        assert all(shape.line.color == theme.reference for shape in fig.layout.shapes)
+        # Treatment-start lines in the reference colour, zero lines in the zero colour.
+        assert {shape.line.color for shape in fig.layout.shapes} == {theme.reference, theme.zero}
 
     @staticmethod
     def test_altair_backend_matches_plotly_bands(effect_data: pl.DataFrame) -> None:
