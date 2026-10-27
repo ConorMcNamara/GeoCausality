@@ -69,6 +69,13 @@ sampling variance of the real ATT. This is deterministic (no resampling); the
 standard error is exposed as ``results["standard_error"]`` and
 ``results["method"]`` is ``"placebo"``.
 
+The placebo variance is for the *average* effect, so it is too narrow to judge
+individual periods. The per-period band shaded by ``plot()``
+(``results["conformal_band"]``) is instead a split-conformal band: the pre-period
+is split into blocks, SDID is refit without each block and predicts it, and the
+band is the conformal quantile of those out-of-sample residuals, as for the
+conformal estimators.
+
 Advantages
 ----------
 

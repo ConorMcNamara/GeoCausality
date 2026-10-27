@@ -123,6 +123,36 @@ class TestPlaceboInference:
         assert float(np.sum(results["lift"])) == pytest.approx(results["incrementality"])
         assert results["att"] * N_POST == pytest.approx(results["incrementality"])
 
+
+class TestPointwiseBand:
+    @staticmethod
+    def test_refit_on_the_full_pre_period_reproduces_the_fit(effect_data: pl.DataFrame) -> None:
+        model = _model(effect_data).pre_process().generate()
+        x_pre, x_post, y_pre = model._jk_x_pre, model._jk_x_post, model.actual_pre
+        assert x_pre is not None and x_post is not None and y_pre is not None
+        refit = model._fit_predict_weights(x_pre, y_pre, np.vstack([x_pre, x_post]))
+        assert refit is not None
+        np.testing.assert_allclose(refit, np.r_[model.prediction_pre, model.prediction_post])
+
+    @staticmethod
+    def test_band_is_split_conformal_on_cross_fitted_residuals(effect_data: pl.DataFrame) -> None:
+        model = _model(effect_data).pre_process().generate()
+        assert model.results is not None
+        calibration = model._cross_fit_residuals(model.actual_pre, N_POST)
+        assert calibration is not None
+        assert model.results["conformal_band"] == model._split_conformal_band(calibration)
+
+    @staticmethod
+    def test_band_covers_no_effect_periods_at_the_nominal_rate() -> None:
+        # The placebo standard error is for the average effect: as a per-period
+        # band it left over half of no-effect periods outside a 90% band.
+        outside = []
+        for seed in range(40):
+            model = _model(_single_treated(effect=0.0, seed=seed)).pre_process().generate()
+            assert model.results is not None
+            outside.append(np.abs(model.results["lift"]) > model.results["conformal_band"])
+        assert np.mean(outside) <= model.alpha
+
     @staticmethod
     def test_effect_significant_and_beats_null(effect_data: pl.DataFrame, null_data: pl.DataFrame) -> None:
         # Strong effect is significant (p<=0.1, CI>0) and at least as significant as the null panel.
