@@ -127,6 +127,10 @@ class CausalImpact(EconometricEstimator):
         self.prediction_pre: np.ndarray | None = None
         self.prediction_post: np.ndarray | None = None
         self.dates: list[Any] | None = None
+        # Per-period plot intervals from the structural inference: the untreated
+        # outcome over every date, and the cumulative effect over the post-period.
+        self._counterfactual_bounds: tuple[np.ndarray, np.ndarray] | None = None
+        self._cumulative_bounds: tuple[np.ndarray, np.ndarray] | None = None
 
     def pre_process(self) -> "CausalImpact":
         """Aggregate the pre-/post-period treated series and donor matrices.
@@ -188,6 +192,8 @@ class CausalImpact(EconometricEstimator):
             "lift": self.actual_post - self.prediction_post,
         }
         self.results["incrementality"] = float(np.sum(self.results["lift"]))
+        self._counterfactual_bounds = None
+        self._cumulative_bounds = None
         if self.inference_method in ("auto", "structural"):
             self.results.update(
                 self._structural_inference(self.actual_post, self.prediction_post, np.asarray(test_x, dtype=float))
@@ -225,6 +231,12 @@ class CausalImpact(EconometricEstimator):
         The point ``incrementality`` (set in ``generate``) stays the deterministic
         ``sum(actual - forecast mean)``; the draws provide only its uncertainty.
 
+        It also caches the per-period intervals the plot draws: percentile
+        intervals of the draws for the post-period counterfactual and for the
+        cumulative effect at every post-period (the last of which is the reported
+        incrementality interval), and the model's one-step-ahead prediction
+        intervals over the pre-period, less its diffuse-initialisation periods.
+
         Parameters
         ----------
         actual_post : numpy array
@@ -250,9 +262,23 @@ class CausalImpact(EconometricEstimator):
         # Two-sided posterior tail-area probability of a zero cumulative effect.
         p_one = float(np.mean(effect_draws <= 0))
         p_value = 2.0 * min(p_one, 1.0 - p_one)
-        # Representative pointwise half-width for the shared three-panel plot, from
-        # the per-period spread of the simulated counterfactual paths.
+        # A representative pointwise half-width, from the per-period spread of the
+        # simulated paths, for callers wanting one number (``MarketSelection``);
+        # the plot draws the per-period intervals below instead.
         band = float(z * np.mean(sims.std(axis=0)))
+
+        tails = [100 * self.alpha / 2, 100 * (1 - self.alpha / 2)]
+        post_lower, post_upper = np.percentile(sims, tails, axis=0)
+        pre_interval = np.asarray(self.model.get_prediction().conf_int(alpha=self.alpha), dtype=float)
+        # The first periods' intervals reflect the diffuse initial state, not the fit.
+        pre_interval[: self.model.loglikelihood_burn] = np.nan
+        self._counterfactual_bounds = (
+            np.r_[pre_interval[:, 0], post_lower],
+            np.r_[pre_interval[:, 1], post_upper],
+        )
+        cumulative_draws = np.cumsum(actual_post) - np.cumsum(sims, axis=1)
+        cum_lower, cum_upper = np.percentile(cumulative_draws, tails, axis=0)
+        self._cumulative_bounds = (cum_lower, cum_upper)
         return {
             "incrementality_ci_lower": lower,
             "incrementality_ci_upper": upper,
@@ -262,6 +288,14 @@ class CausalImpact(EconometricEstimator):
             "p_value": p_value,
             "method": "structural-ts",
         }
+
+    def _counterfactual_interval(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Per-period interval for the untreated outcome, from the structural inference."""
+        return self._counterfactual_bounds
+
+    def _cumulative_effect_interval(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Per-period interval for the cumulative effect, from the structural inference."""
+        return self._cumulative_bounds
 
     def _draw_parameters(self, rng: np.random.Generator) -> np.ndarray | None:
         """Draw model parameters from their asymptotic sampling distribution.

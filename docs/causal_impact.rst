@@ -54,6 +54,13 @@ p-value is the two-sided posterior tail-area probability of a zero effect. Setti
 pre-/post-period residuals through the shared conformal machinery, for parity with
 the synthetic-control family (see :doc:`inference`).
 
+With the native inference, ``plot()`` shades a separate interval for each period,
+as Brodersen et al.'s CausalImpact does: percentile intervals of the simulated
+paths over the post-period (widening with the forecast horizon), the model's
+one-step-ahead prediction intervals over the pre-period (omitting the first
+periods, which reflect only the diffuse initial state), and percentile intervals
+of the cumulative-effect draws on the cumulative panel.
+
 Advantages
 ----------
 
