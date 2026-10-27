@@ -16,10 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     previously fit the axis to the data, so zero could fall off-screen.
   - The band is shaded more strongly over each run of dates where it lies
     wholly above or below zero. As with the event-study markers, an interval
-    that ends exactly at zero counts as containing it. On the pointwise panel
-    the synthetic-control estimators shade their conformal band around zero
-    (the no-effect region) rather than around the difference, so that band
-    never darkens; GeoX's per-period intervals do.
+    that ends exactly at zero counts as containing it.
   - The cumulative panel ends with a forest-style point and interval for the
     final cumulative effect: filled when the interval excludes zero, hollow
     when it contains it.
@@ -28,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test across those dates.
 
 ### Changed
+
+- **Pointwise-difference band centred on the difference** — the shared
+  counterfactual figure (the synthetic-control family, `CausalImpact`,
+  `SyntheticDiffInDiff`, `GeoLift`) now shades
+  `difference ± conformal_band` on its middle panel instead of
+  `± conformal_band` around zero. Since `counterfactual ± conformal_band` is
+  a pointwise prediction interval for the untreated outcome, this is the
+  per-period effect interval. It excludes zero exactly where the line used to
+  leave the zero-centred band, so the significant periods are unchanged; the
+  band now reads against the zero line and darkens where it clears it, as
+  GeoX's already did. Darker pre-period stretches flag counterfactual misfit.
+  `SyntheticDiffInDiff`'s band is `z × SE` of the average effect rather than a
+  pointwise band, so its per-period intervals are too narrow and its
+  pre-period darkens often.
 
 - **License: Apache-2.0** — GeoCausality is now licensed under the Apache
   License 2.0 instead of MIT. A new `NOTICE` file carries the copyright
