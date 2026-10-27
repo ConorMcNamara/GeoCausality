@@ -50,6 +50,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gives an infinite one; the placebo band is kept only when there are fewer
   than two pre-period dates to cross-fit.
 
+- **`CausalImpact` per-period plot intervals** — with the structural
+  inference, `plot()` now draws a separate interval for each period instead
+  of one representative half-width (`z × mean` per-period SD of the draws)
+  everywhere:
+  - Post-period: percentile intervals of the simulated counterfactual paths,
+    so the band widens with the forecast horizon and follows seasonality.
+  - Pre-period: the model's one-step-ahead prediction intervals. The first
+    periods, whose intervals reflect only the diffuse initial state, get no
+    band.
+  - Cumulative panel: percentile intervals of the cumulative-effect draws at
+    each post-period, replacing the band that grew linearly to the reported
+    interval. Its endpoint is still the reported incrementality interval.
+
+  The difference band is `actual` minus the counterfactual interval. Results,
+  including the scalar `conformal_band` (which `MarketSelection` still reads),
+  are unchanged, and the conformal route keeps the scalar band. Shared
+  estimators can supply per-period intervals through the new
+  `_counterfactual_interval` / `_cumulative_effect_interval` hooks.
+
 - **License: Apache-2.0** — GeoCausality is now licensed under the Apache
   License 2.0 instead of MIT. A new `NOTICE` file carries the copyright
   notice and keeps the MIT notice of pysyncon, on which parts of

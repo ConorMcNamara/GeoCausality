@@ -2040,6 +2040,32 @@ class EconometricEstimator(Estimator, ABC):
     # confidence bands -- is built once here and each estimator's ``plot()``
     # just supplies its series as arrays.
     # ------------------------------------------------------------------
+    def _counterfactual_interval(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Per-period interval for the untreated outcome, drawn in place of the scalar band.
+
+        Default ``None``: the plot shades ``counterfactual +/- results["conformal_band"]``.
+        An estimator whose inference yields a separate interval for each period
+        overrides this.
+
+        Returns
+        -------
+        ``(lower, upper)`` over every plotted date, NaN where unavailable, or None.
+        """
+        return None
+
+    def _cumulative_effect_interval(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Per-period interval for the cumulative effect, drawn in place of the interpolated band.
+
+        Default ``None``: the plot grows a band linearly to the reported
+        incrementality interval. An estimator whose inference yields the
+        cumulative effect's interval at every post-period overrides this.
+
+        Returns
+        -------
+        ``(lower, upper)`` over the post-period, or None.
+        """
+        return None
+
     def _plot_counterfactual(
         self,
         dates: list[Any],
@@ -2060,7 +2086,9 @@ class EconometricEstimator(Estimator, ABC):
         the significant per-period effects, or pre-period misfit); the bottom
         panel shows the cumulative post-period
         difference with a band that grows linearly to the reported incrementality
-        interval, so its endpoint matches ``summarize()``.
+        interval, so its endpoint matches ``summarize()``. An estimator with
+        per-period intervals supplies them through ``_counterfactual_interval``
+        and ``_cumulative_effect_interval`` instead.
 
         Parameters
         ----------
@@ -2096,16 +2124,26 @@ class EconometricEstimator(Estimator, ABC):
         # is a prediction interval for the untreated outcome, ``difference +/- band``
         # is one for the per-period effect, and it excludes zero exactly where the
         # actual leaves the prediction band.
+        # A per-period interval, where the estimator has one, replaces the scalar band;
+        # the effect is ``actual - untreated``, so its interval flips the counterfactual's.
         prediction_band: Band | None = None
         difference_band: Band | None = None
         band_value = self.results.get("conformal_band")
         band = float(band_value) if band_value is not None else 0.0
-        if np.isfinite(band) and band > 0:
+        interval = self._counterfactual_interval()
+        if interval is not None:
+            cf_lower, cf_upper = (np.asarray(bound, dtype=float).ravel() for bound in interval)
+            keep = np.isfinite(cf_lower) & np.isfinite(cf_upper)
+            kept_dates = [d for d, k in zip(dates, keep, strict=True) if k]
+            prediction_band = Band(kept_dates, cf_lower[keep], cf_upper[keep])
+            difference_band = Band(kept_dates, actual[keep] - cf_upper[keep], actual[keep] - cf_lower[keep])
+        elif np.isfinite(band) and band > 0:
             difference = actual - prediction
             prediction_band = Band(dates, prediction - band, prediction + band)
             difference_band = Band(dates, difference - band, difference + band)
 
-        # The cumulative band grows linearly to the reported incrementality interval.
+        # The cumulative band is the estimator's own per-period interval, or else
+        # grows linearly to the reported incrementality interval.
         post_key = period_key(self.post_period, self.data, self.date_variable)
         post_dates = [d for d in dates if period_key(d, self.data, self.date_variable) >= post_key]
         cum_resids = np.cumsum(actual_post - prediction_post)
@@ -2113,7 +2151,11 @@ class EconometricEstimator(Estimator, ABC):
         incr = self.results.get("incrementality")
         incr_lo = self.results.get("incrementality_ci_lower")
         incr_hi = self.results.get("incrementality_ci_upper")
-        if incr is not None and incr_lo is not None and incr_hi is not None and t1 > 0:
+        cumulative_interval = self._cumulative_effect_interval()
+        if cumulative_interval is not None:
+            cum_lower, cum_upper = (np.asarray(bound, dtype=float).ravel() for bound in cumulative_interval)
+            cumulative_band = Band(post_dates, cum_lower, cum_upper)
+        elif incr is not None and incr_lo is not None and incr_hi is not None and t1 > 0:
             frac = np.arange(1, t1 + 1, dtype=float) / t1
             cumulative_band = Band(
                 post_dates,

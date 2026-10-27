@@ -146,5 +146,62 @@ class TestInferenceRouting:
         assert results["incrementality_ci_lower"] <= results["incrementality"] <= results["incrementality_ci_upper"]
 
 
+def _band_edges(fig, yaxis: str) -> tuple:
+    """Return the (upper, lower) edge traces of the band on one panel."""
+    upper, lower = [t for t in fig.data if t.yaxis == yaxis and t.mode == "lines" and t.line.width == 0][:2]
+    return upper, lower
+
+
+@pytest.fixture(scope="module")
+def model() -> CausalImpact:
+    return _build(_make_data(TRUE_EFFECT), seasonal=7).pre_process().generate()
+
+
+class TestPlotIntervals:
+    """The plot draws the structural inference's per-period intervals, not one representative band."""
+
+    @staticmethod
+    def test_counterfactual_band_follows_the_per_period_interval(model: CausalImpact) -> None:
+        upper, lower = _band_edges(model.plot(), "y")
+        assert model._counterfactual_bounds is not None
+        cf_lower, cf_upper = model._counterfactual_bounds
+        # The diffuse-initialisation periods have no meaningful interval, so no band.
+        burn = model.model.loglikelihood_burn
+        assert burn > 0
+        assert np.isnan(cf_lower[:burn]).all()
+        assert model.dates is not None
+        assert list(upper.x) == model.dates[burn:]
+        np.testing.assert_allclose(lower.y, cf_lower[burn:])
+        np.testing.assert_allclose(upper.y, cf_upper[burn:])
+        # The band is not a constant width.
+        assert np.ptp(cf_upper[burn:] - cf_lower[burn:]) > 0
+
+    @staticmethod
+    def test_difference_band_flips_the_counterfactual_interval(model: CausalImpact) -> None:
+        upper, lower = _band_edges(model.plot(), "y2")
+        assert model._counterfactual_bounds is not None
+        cf_lower, cf_upper = model._counterfactual_bounds
+        burn = model.model.loglikelihood_burn
+        actual = np.r_[model.actual_pre, model.actual_post][burn:]
+        np.testing.assert_allclose(lower.y, actual - cf_upper[burn:])
+        np.testing.assert_allclose(upper.y, actual - cf_lower[burn:])
+
+    @staticmethod
+    def test_cumulative_band_ends_at_the_reported_interval(model: CausalImpact) -> None:
+        upper, lower = _band_edges(model.plot(), "y3")
+        assert model.results is not None
+        assert lower.y[-1] == pytest.approx(model.results["incrementality_ci_lower"])
+        assert upper.y[-1] == pytest.approx(model.results["incrementality_ci_upper"])
+
+    @staticmethod
+    def test_conformal_route_keeps_the_scalar_band() -> None:
+        model = _build(_make_data(TRUE_EFFECT), inference_method="conformal").pre_process().generate()
+        assert model._counterfactual_interval() is None
+        assert model._cumulative_effect_interval() is None
+        assert model.results is not None
+        upper, lower = _band_edges(model.plot(), "y")
+        np.testing.assert_allclose(np.asarray(upper.y) - np.asarray(lower.y), 2 * model.results["conformal_band"])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
