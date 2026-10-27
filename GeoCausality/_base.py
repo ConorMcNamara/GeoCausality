@@ -2055,8 +2055,10 @@ class EconometricEstimator(Estimator, ABC):
         The top panel shows the actual and counterfactual series with the pointwise
         prediction band (``results["conformal_band"]``) shaded around the
         counterfactual; the middle panel shows the pointwise difference with the
-        same band shaded around zero (points outside it are the significant
-        per-period effects); the bottom panel shows the cumulative post-period
+        same band shaded around it, the per-period effect interval (it excludes
+        zero exactly where the actual leaves the prediction band, so those are
+        the significant per-period effects, or pre-period misfit); the bottom
+        panel shows the cumulative post-period
         difference with a band that grows linearly to the reported incrementality
         interval, so its endpoint matches ``summarize()``.
 
@@ -2090,14 +2092,18 @@ class EconometricEstimator(Estimator, ABC):
         t1 = actual_post.shape[0]
 
         # The pointwise conformal band is shaded around the counterfactual and,
-        # on the difference panel, around zero (the no-effect region).
+        # on the difference panel, around the difference: since ``prediction +/- band``
+        # is a prediction interval for the untreated outcome, ``difference +/- band``
+        # is one for the per-period effect, and it excludes zero exactly where the
+        # actual leaves the prediction band.
         prediction_band: Band | None = None
         difference_band: Band | None = None
         band_value = self.results.get("conformal_band")
         band = float(band_value) if band_value is not None else 0.0
         if np.isfinite(band) and band > 0:
+            difference = actual - prediction
             prediction_band = Band(dates, prediction - band, prediction + band)
-            difference_band = Band(dates, np.full(len(dates), -band), np.full(len(dates), band))
+            difference_band = Band(dates, difference - band, difference + band)
 
         # The cumulative band grows linearly to the reported incrementality interval.
         post_key = period_key(self.post_period, self.data, self.date_variable)

@@ -205,6 +205,23 @@ class TestPlot:
         assert float(cumulative_lower.y[-1]) == pytest.approx(model.results["incrementality_ci_lower"], rel=1e-6)
 
     @staticmethod
+    def test_plot_centres_the_difference_band_on_the_difference(effect_data: pl.DataFrame) -> None:
+        model = _model(effect_data).pre_process().generate()
+        fig = model.plot()
+        assert model.results is not None
+        band = model.results["conformal_band"]
+        difference = np.asarray(next(t for t in fig.data if t.name == "Difference").y)
+        # The middle panel's band is drawn as an invisible upper edge, then a lower edge filled up to it.
+        upper, lower = [t for t in fig.data if t.yaxis == "y2" and t.fill != "toself" and t.name != "Difference"]
+        np.testing.assert_allclose(upper.y, difference + band)
+        np.testing.assert_allclose(lower.y, difference - band)
+        # It excludes zero exactly where the actual leaves the prediction band.
+        (shaded,) = [t for t in fig.data if t.yaxis == "y2" and t.fill == "toself"]
+        outside = np.r_[0, (np.abs(difference) > band).astype(int), 0]
+        n_runs = int(np.sum(np.diff(outside) == 1))
+        assert list(shaded.x).count(None) == n_runs > 0
+
+    @staticmethod
     @pytest.mark.parametrize(("dark_mode", "theme"), [(False, LIGHT_THEME), (True, DARK_THEME)], ids=["light", "dark"])
     def test_plot_applies_theme(effect_data: pl.DataFrame, dark_mode: bool, theme: PlotTheme) -> None:
         fig = _model(effect_data).pre_process().generate().plot(dark_mode=dark_mode)
