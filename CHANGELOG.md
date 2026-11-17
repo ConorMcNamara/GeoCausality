@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Why `DiffinDiff` and a plain `statsmodels` regression disagree** — the
+  Difference-in-Differences docs page now explains why `smf.ols` on the
+  geo-by-date panel returns the same estimate but a much smaller p-value, and
+  what to check when the two differ.
+
 ### Changed
 
 - **Newer dependency majors are allowed** — statsmodels 0.15, linearmodels 7,

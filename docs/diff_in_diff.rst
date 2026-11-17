@@ -55,6 +55,48 @@ Where:
 * \(\beta_3\) is the DiD estimate (the treatment effect).
 * \(\epsilon_{it}\) is the error term.
 
+Standard Errors and Comparing with ``statsmodels``
+--------------------------------------------------
+
+Fitting the regression above directly on the geo-by-date panel, e.g.
+
+.. code-block:: python
+
+    smf.ols("y ~ is_treatment * treatment_period", data=df).fit()
+
+returns the same \(\hat{\beta}_3\) as ``DiffinDiff`` on a balanced panel, but usually a much smaller p-value. The
+difference is in the standard error, not the estimate.
+
+``DiffinDiff`` does two things the plain regression does not:
+
+1. **It collapses each group to its per-geo mean on each date** before fitting. On a balanced panel this leaves
+   \(\hat{\beta}_3\) unchanged; ``results["att"]`` is that per-geo coefficient and ``results["lift"]`` scales it by
+   the number of treated geos.
+2. **It allows the errors to be autocorrelated.** The default ``inference="ols"`` keeps the OLS estimate but uses a
+   sandwich covariance in which each group's daily series follows an AR(1) process.
+
+The plain regression treats every geo-date row as an independent observation. In geo data that is rarely true: geos
+in the same group share regional and seasonal shocks, and those shocks persist from one day to the next. Treating the
+rows as independent overstates how much information the panel holds, so the standard error shrinks towards zero and
+the p-value with it. This is the problem described in :cite:t:`bertrand2004`.
+
+As an illustration, consider 20 geos observed for 120 days, with an AR(1) shock (\(\rho = 0.8\)) shared within each
+group and **no true treatment effect**. Across 200 simulated panels, the plain regression rejected the null at the 5%
+level 61% of the time; ``DiffinDiff`` rejected it 9% of the time. The point estimates agreed to within \(10^{-12}\)
+in every run.
+
+When the two disagree:
+
+* Check that the point estimates match. If ``results["att"]`` differs from the plain regression's interaction
+  coefficient, ``pre_period`` and ``post_period`` most likely do not line up with your own post-period indicator.
+  Dates strictly between them are dropped, and both default to 2021 dates.
+* Clustering the plain regression's standard errors by geo,
+  ``.fit(cov_type="cluster", cov_kwds={"groups": df["geo"]})``, accounts for each geo's own serial correlation but
+  not for shocks shared across geos in a group, so it can still be too small.
+* With only two group series, very persistent shocks are hard to tell apart from a treatment effect, and the AR(1)
+  correction can still under-cover, as the 9% above shows. ``inference="conformal"`` does not rely on an error model
+  and is the safer choice for such series.
+
 Advantages
 ----------
 
@@ -85,5 +127,6 @@ References
 ----------
 
 * Angrist, J. D., & Pischke, J. S. (2008). *Mostly harmless econometrics: An empiricist's companion*. Princeton university press.
+* Bertrand, M., Duflo, E., & Mullainathan, S. (2004). How much should we trust differences-in-differences estimates? *The Quarterly Journal of Economics*, 119(1), 249-275. :cite:`bertrand2004`
 * Callaway, B., & Sant'Anna, P. H. C. (2021). Difference-in-differences with multiple time periods. *Journal of Econometrics*, 225(1), 68-95.
 * Lechner, M. (2011). The estimation of causal effects by difference-in-differences methods. *Foundations and Trends® in Econometrics*, 4(3), 165-224.
