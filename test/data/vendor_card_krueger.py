@@ -22,7 +22,8 @@ The outcome is full-time-equivalent employment,
 part-timers), the exact definition used in the paper.
 
 Reshaped layout (one row per store-wave with a non-missing FTE):
-    geo   -- store id (``s<SHEET>``)
+    geo   -- store id (``s<SHEET>``, or ``s<SHEET>_<STATE>`` for the one sheet
+             number reused across states)
     date  -- 1992-02-01 (wave 1) or 1992-11-01 (wave 2)
     y     -- FTE employment
     state -- "NJ" (treated, min-wage rise) or "PA" (control)
@@ -106,9 +107,13 @@ def build_long_frame(lines: list[str]) -> pd.DataFrame:
     df["fte2"] = df["empft2"] + df["nmgrs2"] + 0.5 * df["emppt2"]
     df["state_name"] = np.where(df["state"] == 1, "NJ", "PA")
 
+    # Sheet numbers are not unique: sheet 407 is two different restaurants, one
+    # in each state. Suffix the state on any reused sheet so every geo is a
+    # single store (linearmodels >= 7 rejects repeated entity/time rows).
+    reused = set(df.loc[df["sheet"].duplicated(), "sheet"])
     records = []
     for row in df.itertuples(index=False):
-        geo = f"s{int(row.sheet)}"
+        geo = f"s{int(row.sheet)}" + (f"_{row.state_name}" if row.sheet in reused else "")
         if not np.isnan(row.fte):
             records.append({"geo": geo, "date": WAVE1_DATE, "y": row.fte, "state": row.state_name})
         if not np.isnan(row.fte2):

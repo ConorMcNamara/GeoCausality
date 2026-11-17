@@ -1,5 +1,6 @@
 """CausalImpact-style estimator: a Bayesian structural time-series counterfactual."""
 
+import inspect
 from typing import Any
 
 import narwhals as nw
@@ -168,8 +169,16 @@ class CausalImpact(EconometricEstimator):
             raise ValueError("synthetic_control_df must not be None")
         if self.synthetic_test_df is None:
             raise ValueError("synthetic_test_df must not be None")
-        train_x = self.synthetic_control_df.drop([self.date_variable, self.y_variable]).to_numpy()
-        test_x = self.synthetic_test_df.drop([self.date_variable, self.y_variable]).to_numpy()
+        # Pin the donor matrices to column-major order: pandas 3 hands back
+        # row-major arrays where polars (and pandas 2) give column-major, and the
+        # state-space filter's round-off depends on the layout, so the same data
+        # would otherwise fit slightly differently depending on the input backend.
+        train_x = np.asfortranarray(
+            self.synthetic_control_df.drop([self.date_variable, self.y_variable]).to_numpy(), dtype=float
+        )
+        test_x = np.asfortranarray(
+            self.synthetic_test_df.drop([self.date_variable, self.y_variable]).to_numpy(), dtype=float
+        )
         self.actual_pre = self.synthetic_control_df[self.y_variable].to_numpy()
         self.actual_post = self.synthetic_test_df[self.y_variable].to_numpy()
 
@@ -178,12 +187,12 @@ class CausalImpact(EconometricEstimator):
         # donors' observed post-period values -- that forecast is the counterfactual.
         self.model = sm.tsa.UnobservedComponents(
             endog=np.asarray(self.actual_pre, dtype=float),
-            exog=np.asarray(train_x, dtype=float),
+            exog=train_x,
             level=self.level,
             seasonal=self.seasonal,
         ).fit(disp=False)
         self.prediction_pre = np.asarray(self.model.get_prediction().predicted_mean, dtype=float)
-        forecast = self.model.get_forecast(steps=len(self.actual_post), exog=np.asarray(test_x, dtype=float))
+        forecast = self.model.get_forecast(steps=len(self.actual_post), exog=test_x)
         self.prediction_post = np.asarray(forecast.predicted_mean, dtype=float)
 
         self.results = {
@@ -195,9 +204,7 @@ class CausalImpact(EconometricEstimator):
         self._counterfactual_bounds = None
         self._cumulative_bounds = None
         if self.inference_method in ("auto", "structural"):
-            self.results.update(
-                self._structural_inference(self.actual_post, self.prediction_post, np.asarray(test_x, dtype=float))
-            )
+            self.results.update(self._structural_inference(self.actual_post, self.prediction_post, test_x))
         else:
             self.results.update(
                 self._conformal_inference(
@@ -357,6 +364,10 @@ class CausalImpact(EconometricEstimator):
         param_draws = self._draw_parameters(np.random.default_rng(param_seq))
         init_rng = np.random.default_rng(init_seq)
         sim_seeds = sim_seq.generate_state(self.n_sim)
+        # statsmodels 0.15 renamed simulate()'s random_state to rng; passing the
+        # old name there collides with rng inside the call. Both turn an int seed
+        # into np.random.default_rng(seed), so the draws match across versions.
+        seed_kwarg = "rng" if "rng" in inspect.signature(res.simulate).parameters else "random_state"
         sims = np.empty((self.n_sim, steps))
         for m in range(self.n_sim):
             draw = res
@@ -375,7 +386,7 @@ class CausalImpact(EconometricEstimator):
                     anchor="end",
                     exog=exog_post,
                     initial_state=init_state,
-                    random_state=int(sim_seeds[m]),
+                    **{seed_kwarg: int(sim_seeds[m])},
                 ),
                 dtype=float,
             ).ravel()

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Newer dependency majors are allowed** — statsmodels 0.15, linearmodels 7,
+  pandas 3, polars 2, plotly 7 and tabulate 0.10 are now within range. The old
+  caps made pip downgrade these in notebooks (Colab, Jupyter) that already ship
+  them. If the kernel had already imported the newer statsmodels, the
+  half-replaced package then failed with `ImportError: cannot import name
+  'lstsq' from 'statsmodels.compat.numpy'`.
+- `narwhals` is now a declared dependency; it was imported directly but only
+  installed through plotly.
+- The `altair` extra needs altair 5.5.0 or later; 5.4.x fails to import on
+  Python 3.13.
+
+### Fixed
+
+- **`CausalImpact` on statsmodels 0.15** — structural inference raised
+  `TypeError: Can only specify 'random_state' or 'rng', not both`, because
+  statsmodels renamed `simulate()`'s seed argument. Seeded draws are unchanged.
+- **`CausalImpact` gives the same result for pandas and polars input on
+  pandas 3** — pandas 3 returns row-major donor matrices, which shifted the fit
+  in about the seventh significant figure.
+- **Card & Krueger fixture** — sheet number 407 is two different restaurants,
+  one in each state, but both were vendored as geo `s407`. The PA store was
+  therefore counted as treated, and linearmodels 7 rejects the repeated
+  geo/date rows. They are now `s407_PA` and `s407_NJ`.
+
 ## [0.21.1] - 2026-10-28
 
 ### Added
