@@ -20,7 +20,9 @@ What is vendored
 `public.dat` was reshaped into one row per store-wave with a non-missing
 full-time-equivalent employment value. Columns:
 
-    geo    store id ("s<SHEET>" from the codebook)
+    geo    store id ("s<SHEET>" from the codebook; sheet 407 is two
+           different restaurants, one per state, so those rows are
+           "s407_PA" and "s407_NJ")
     date   1992-02-01 (wave 1, Feb/Mar 1992, before the NJ wage rise) or
            1992-11-01 (wave 2, Nov/Dec 1992, after)
     y      FTE employment = EMPFT + NMGRS + 0.5 * EMPPT

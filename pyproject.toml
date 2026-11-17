@@ -9,14 +9,15 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy (>=2.2.3,<3.0.0)",
-    "pandas (>=2.2.3,<3.0.0)",
-    "polars (>=1.23.0,<2.0.0)",
-    "tabulate (>=0.9.0,<0.10.0)",
-    "statsmodels (>=0.14.4,<0.15.0)",
-    "linearmodels (>=6.1,<7.0)",
+    "pandas (>=2.2.3,<4.0.0)",
+    "polars (>=1.23.0,<3.0.0)",
+    "tabulate (>=0.9.0,<0.11.0)",
+    "statsmodels (>=0.14.4,<0.16.0)",
+    "linearmodels (>=6.1,<8.0)",
     "scikit-learn (>=1.6.1,<2.0.0)",
-    "plotly (>=6.0.0,<7.0.0)",
-    "scipy (>=1.15.0,<2.0.0)"
+    "plotly (>=6.0.0,<8.0.0)",
+    "scipy (>=1.15.0,<2.0.0)",
+    "narwhals (>=2.0.0,<3.0.0)"
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -34,10 +35,11 @@ classifiers = [
 
 [project.optional-dependencies]
 altair = [
-    "altair (>=5.4.0,<7.0.0)"
+    "altair (>=5.5.0,<7.0.0)"
 ]
 dev = [
-    "altair (>=5.4.0,<7.0.0)",
+    "altair (>=5.5.0,<7.0.0)",
+    "pyarrow (>=18.0.0,<27.0.0)",
     "pytest (>=9.0.3,<10.0.0)",
     "pytest-cov (>=6.0.0,<7.0.0)",
     "pytest-xdist (>=3.6.0,<4.0.0)"
