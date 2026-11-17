@@ -9,7 +9,9 @@ on:
 jobs:
   # Classifies the diff so doc-only changes (docs/, top-level *.md) skip the
   # lint/test/build jobs, while code-only changes still rebuild the docs
-  # (autodoc imports the package). Skipped jobs report as successful.
+  # (autodoc imports the package). Branch protection requires only the
+  # "CI passed" gate below, since a skipped matrix job never reports its
+  # per-version check names.
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
@@ -192,3 +194,16 @@ jobs:
         with:
           name: dist
           path: dist/
+
+  # Single required status check for branch protection. Runs even when upstream
+  # jobs are skipped (doc-only PRs) and fails only if one of them failed or was
+  # cancelled, so the required check set doesn't depend on the Python matrix.
+  ci-passed:
+    name: CI passed
+    needs: [changes, python-versions, lint, test, docs, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
